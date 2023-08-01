@@ -21,14 +21,16 @@ from gauopen import QCUtil as qcu
 
 
 
-AlphaDensity = "Alpha SCF Density Matrix"
-BetaDensity = "Beta SCF Density Matrix"
-AlphaFock = "Alpha Fock Matrix"
-BetaFock = "Beta Fock Matrix"
-AlphaMOs = "Alpha MO Coefficients"
-BetaMOs = "Beta MO Coefficients"
-AlphaEnergies = "Alpha Orbital Energies"
-BetaEnergies = "Beta Orbital Energies"
+AlphaDen = "ALPHA DENSITY MATRIX"
+BetaDen = "BETA DENSITY MATRIX"
+AlphaSCFDen = "ALPHA SCF DENSITY MATRIX"
+BetaSCFDen = "BETA SCF DENSITY MATRIX"
+AlphaFock = "ALPHA FOCK MATRIX"
+BetaFock = "BETA FOCK MATRIX"
+AlphaMOs = "ALPHA MO COEFFICIENTS"
+BetaMOs = "BETA MO COEFFICIENTS"
+AlphaEnergies = "ALPHA ORBITAL ENERGIES"
+BetaEnergies = "BETA ORBITAL ENERGIES"
 har_to_eV = 27.211386
 e = 1.60216*(1e-19)
 h = 6.582*(1e-16)
@@ -40,7 +42,7 @@ h = 6.582*(1e-16)
 ###############################################################################
 
 def density(V, D, Gam, Emin, mu):
-    Nd = len(Fock)
+    Nd = len(V)
     repdum = np.asmatrix(np.ones(Nd))
     DD = D*repdum
 
@@ -109,7 +111,33 @@ def getEnergies(bar, spin):
         levels = bar.matlist[AlphaEnergies].expand()
     else:
         raise ValueError("Spin treatment not recognized!")
-    return levels*har_to_eV
+    return np.sort(levels)*har_to_eV
+
+def storeDen(bar, P, spin):
+    nsto = len(bar.ibfatm)
+    if spin=="r":
+        P = np.real(np.array(P))
+        PaO = qco.OpMat(AlphaSCFDen,P/2,dimens=(nsto,nsto))
+        PaO.compress()
+        bar.addobj(PaO)
+    elif spin=="ro" or spin=="u":
+        P = np.real(np.array(P))
+        Pa = P[0:nsto, 0:nsto]
+        Pb = P[nsto:, nsto:]
+        PaO = qco.OpMat(AlphaSCFDen,Pa,dimens=(nsto,nsto))
+        PbO = qco.OpMat(BetaSCFDen,Pb,dimens=(nsto,nsto))
+        PaO.compress()
+        PbO.compress()
+        bar.addobj(PaO)
+        bar.addobj(PbO)
+    elif spin=="g":
+        P = np.complex128(np.array(P))
+        PaO = qco.OpMat(AlphaSCFDen,P,dimens=(nsto*2,nsto*2))
+        PaO.compress()
+        bar.addobj(PaO)
+    else:
+        raise ValueError("Spin treatment not recognized!")
+        
 
 
 ###############################################################################
@@ -131,7 +159,9 @@ sig = -0.1j
 
 Emin = -15
 Eminf = -1e5
-damping =  1
+
+damping =  0.5
+conv = 1e-5
 
 PP=[]
 SS=[]
@@ -140,7 +170,7 @@ count=[]
 TotalE=[]
 
 
-basis="lanl2dz"     #e.g. 6-31g(d,p), lanl2dz, sto-3g
+basis="sto-3g"     #e.g. 6-31g(d,p), lanl2dz, sto-3g
 
 spin = "g"          #"r" = restricted, "ro" = restricted open,
                     #"u" = unrestricted", "g" = generalized
@@ -168,13 +198,10 @@ print("Running Initial SCF...")
 bar.update(model=method, basis=basis, toutput=outfile, dofock="scf", miscroute=otherRoute)
 
 print("Done!")
-print("IBFATM:")
-print(bar.ibfatm)
 
 Fock, locs = getFock(bar, spin)
 
-print("FOCK:")
-print(np.diag(Fock))
+print("ORBS:")
 print(locs)
 natoms=bar.natoms
 icharg=bar.icharg
@@ -202,8 +229,7 @@ lInd = np.where(abs(locs)==lContact)[0]
 rInd = np.where(abs(locs)==rContact)[0]
 sigma1 = sigmat(lInd, sig)
 sigma2 = sigmat(rInd, sig)
-print(np.diag(sigma1))
-print(np.diag(sigma2))
+print(sigma1.shape)
 sigma12 = sigma1 + sigma2
 
 Gam1 = (sigma1 - sigma1.getH())*1j
@@ -237,7 +263,7 @@ while Loop :
     Total_E =  bar.scalar("escf")
 
 
-    Fock = np.asmatrix(bar.matlist["ALPHA FOCK MATRIX"].expand())
+    Fock,locs = getFock(bar, spin)
 
     if Niter == 0:
         Fback = Fock
@@ -253,7 +279,7 @@ while Loop :
 
     D,V = LA.eig(np.asmatrix(Fbar))
     D = np.asmatrix(D).T
-
+       
     #error check
     err =  np.float_(sum(np.imag(D)))
     if  err > 0:
@@ -276,9 +302,15 @@ while Loop :
     ################################################
 
     P=P1 + P2 + Pw
-
     nelec = 2*np.trace(np.real(P))
+    
+    pshift = V.getH() * P * V
+    occList = np.diag(np.real(pshift)) 
+    EList = np.asarray(np.real(D)).flatten()
+    inds = np.argsort(EList)
 
+#    for pair in zip(occList[inds], EList[inds]):
+#        print("Energy =", str(pair[1]), ", Occ =", str(pair[0]))
 
 
     count.append(Niter)
@@ -300,14 +332,17 @@ while Loop :
         Total_E_Old = Total_E
         
         Dense_diff = abs(np.diagonal(P) - Dense_old)
+        MaxDP = max(Dense_diff)
+        RMSDP = np.sqrt(np.mean(Dense_diff**2))
         
-        print('convergence: ',max(Dense_diff))
+        print(f'MaxDP: {MaxDP:.2E} | RMSDP: {RMSDP:.2E}')
+
 
 
         PP.append(max(Dense_diff))
         SS.append(Niter)
 
-        if all(ii<= 1e-5 for ii in Dense_diff):
+        if RMSDP<conv and MaxDP<conv:
             print('loop done')
             Loop = False
         
@@ -317,20 +352,24 @@ while Loop :
  
 
         
-    P = np.real(X * P *X)
-    P = np.array(P)/2
+    P = np.real(X * P * X)
     
     
-    PaO = qco.OpMat('Alpha SCF Density Matrix',P,dimens=(nsto,nsto))
-    PaO.compress()
-    bar.addobj(PaO)
     
+    #DEBUG:
+#    print("BEFORE")
+#    print(np.diag(bar.matlist['ALPHA DENSITY MATRIX'].expand()))
+#    print("AFTER")
+#    print(np.diag(P))
+
+
+    storeDen(bar, P, spin)    
 
     
    
     bar.update(model= method, basis=basis, toutput=outfile, dofock="density")
     
-    
+#    print(getEnergies(bar,spin))
     print('Total electron from Gaussian is: ', bar.ne)
 
 
@@ -339,6 +378,11 @@ while Loop :
     Niter += 1
 
 print('The calculation ends at: ',str(time.asctime()))
+
+print('ENERGY LEVEL OCCUPATION:')
+for pair in zip(occList[inds], EList[inds]):
+    print(f"Energy = {pair[1]:9.3f} eV | Occ = {pair[0]:5.3f}")
+
 
 ############################ End of the Analytical Integral ###################
 Count = 1
