@@ -71,7 +71,7 @@ def density(V, D, Gam, Emin, mu):
     return den
 
 
-def sigmat(inds, value):
+def formSigma(inds, value, nsto):
     sigma = np.asmatrix(np.zeros((nsto,nsto)),dtype=complex)
 
     for i in inds:
@@ -145,24 +145,24 @@ def storeDen(bar, P, spin):
 #
 ###############################################################################
 
-fn = "AuNanowire"
-lContact = [5]
-rContact = [6]
+fn = "PDT"
+lContact = [11]
+rContact = [12]
 infile = fn + ".gjf"
 outfile = fn + ".log"
 
 fermi = -5.1
-V = 1.0
-sig = -5.1j
-mu1 =  fermi + (V/2)
-mu2 =  fermi - (V/2)
+qV = 5.0
+sig = -0.1j
+mu1 =  fermi + (qV/2)
+mu2 =  fermi - (qV/2)
 
 Emin = -15
 Eminf = -1e5
 
 damping =  0.1
 conv = 1e-5
-maxcycles=30
+maxcycles=100
 
 PP=[]
 SS=[]
@@ -204,23 +204,19 @@ Fock, locs = getFock(bar, spin)
 
 print("ORBS:")
 print(locs)
-natoms=bar.natoms
 icharg=bar.icharg
 multip=bar.multip
-nelec_i=bar.ne
-iopcl=bar.iopcl
-#iopcl =-1
-c=bar.c
-ian=bar.ian
 print('Charge is: ', icharg)
 print('Multiplicity is: ', multip)
 
 # Calculate electric field
 lAtom = bar.c[(lContact[0]-1)*3:lContact[0]*3]
 rAtom = bar.c[(rContact[0]-1)*3:rContact[0]*3]
-vec  = (rAtom-lAtom) #TODO: rotate coordinate system to make this the x-direction
+print(lAtom)
+vec  = (rAtom-lAtom) 
+#TODO: rotate coordinate system (bar.c) to make vec the x-direction
 dist = LA.norm(vec)*np.sign(vec[0])
-field = int(V*V_to_au/(dist*0.0001));
+field = int(qV*V_to_au/(dist*0.0001));
 print("E-field set to "+str(field)+" au")
 if field>=0:
     otherRoute += " field=x+" +str(field)
@@ -243,16 +239,16 @@ I = np.asmatrix(np.identity(nsto))
 # Prepare Sigma matrices
 lInd = np.where(abs(locs)==lContact)[0]
 rInd = np.where(abs(locs)==rContact)[0]
-sigma1 = sigmat(lInd, sig)
-sigma2 = sigmat(rInd, sig)
+sigma1 = formSigma(lInd, sig, nsto)
+sigma2 = formSigma(rInd, sig, nsto)
 sigma12 = sigma1 + sigma2
 
 Gam1 = (sigma1 - sigma1.getH())*1j
 Gam2 = (sigma2 - sigma2.getH())*1j
 
 
-sigmaW1 = sigmat(lInd, -0.00001j)
-sigmaW2 = sigmat(rInd, -0.00001j)
+sigmaW1 = formSigma(lInd, -0.00001j, nsto)
+sigmaW2 = formSigma(rInd, -0.00001j, nsto)
 sigmaW12 = sigmaW1+sigmaW2
 
 GamW1 = (sigmaW1 - sigmaW1.getH())*1j
@@ -268,7 +264,6 @@ print('###################################')
 
 Loop = True
 Niter = 0
-#while Niter < 1:
 while Loop :
 
     print(Niter)
@@ -378,17 +373,18 @@ while Loop :
    
     bar.update(model= method, basis=basis, toutput=outfile, dofock="density", miscroute=otherRoute)
     
-#    print(getEnergies(bar,spin))
     print('Total number of electrons: ', nelec)
 
 
-#    os.system('The calculation end at os system' + time.asctime() + ' >> Log.log')
-
     Niter += 1
 
-print('The calculation ends at: ',str(time.asctime()))
+print('##########################################')
+print("--- %s seconds ---" % (time.time() - start_time))
+print('')
+print('SCF Loop existed at', time.asctime())
 
 print('ENERGY LEVEL OCCUPATION:')
+print('=========================')
 for pair in zip(occList[inds], EList[inds]):
     print(f"Energy = {pair[1]:9.3f} eV | Occ = {pair[0]:5.3f}")
 
@@ -429,7 +425,7 @@ savetxt('DOS.txt', DOS, delimiter=',')
 
 
 plt.subplot(221)
-plt.title('Fermi level is: '+ str(mu1) + 'eV   sigma is: ' +str(sig) + "eV\n")
+plt.title('Fermi level is: '+ str(fermi) + 'eV   sigma is: ' +str(sig) + "eV\n")
 plt.ylabel(r'Max Change in $\rho$')
 plt.plot(SS, PP, color='g', linestyle='solid' ,linewidth = 1, marker='x')
 
@@ -440,7 +436,7 @@ plt.plot(count, TotalE, color='black', linestyle='solid' ,linewidth = 1, marker=
 
 
 plt.subplot(222)
-plt.title(' Method: '+ method + '/' + basis + "\n")
+plt.title(str(qV)+'Volts applied,  Method: '+ method + '/' + basis + "\n")
 plt.ylabel('Transmission')
 plt.semilogy(Elist, Tr, color='b', linestyle='solid' ,linewidth = 1, marker='')
 
