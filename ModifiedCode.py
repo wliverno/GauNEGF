@@ -9,7 +9,7 @@ from scipy import linalg
 import sys
 import time
 #import os
-#import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 #import math
 #from goto import goto, label
 from numpy import savetxt
@@ -31,9 +31,12 @@ AlphaMOs = "ALPHA MO COEFFICIENTS"
 BetaMOs = "BETA MO COEFFICIENTS"
 AlphaEnergies = "ALPHA ORBITAL ENERGIES"
 BetaEnergies = "BETA ORBITAL ENERGIES"
-har_to_eV = 27.211386
-e = 1.60216*(1e-19)
-h = 6.582*(1e-16)
+
+#Constants
+har_to_eV = 27.211386   # eV/Hartree
+eoverh = 3.874e-5       # A/eV
+kT = 0.025              # eV @ 20degC
+V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 
 ###############################################################################
 #
@@ -67,10 +70,6 @@ def density(V, D, Gam, Emin, mu):
 
     return den
 
-def export(key, mat):
-    L = mat[np.triu_indices(nsto)].T
-    L = np.array(L).reshape((len(L),))
-    bar.addobj(qco.OpMat(key, L))
 
 def sigmat(inds, value):
     sigma = np.asmatrix(np.zeros((nsto,nsto)),dtype=complex)
@@ -146,22 +145,24 @@ def storeDen(bar, P, spin):
 #
 ###############################################################################
 
-fn = "ethane"
-lContact = [1]
-rContact = [5]
+fn = "AuNanowire"
+lContact = [5]
+rContact = [6]
 infile = fn + ".gjf"
 outfile = fn + ".log"
 
-
-mu1 =  -5.1
-mu2 =  -5.1
-sig = -0.1j
+fermi = -5.1
+V = 1.0
+sig = -5.1j
+mu1 =  fermi + (V/2)
+mu2 =  fermi - (V/2)
 
 Emin = -15
 Eminf = -1e5
 
-damping =  0.5
+damping =  0.1
 conv = 1e-5
+maxcycles=30
 
 PP=[]
 SS=[]
@@ -170,16 +171,16 @@ count=[]
 TotalE=[]
 
 
-basis="sto-3g"     #e.g. 6-31g(d,p), lanl2dz, sto-3g
+basis="lanl2dz"     #e.g. 6-31g(d,p), lanl2dz, sto-3g
 
-spin = "g"          #"r" = restricted, "ro" = restricted open,
+spin = "r"          #"r" = restricted, "ro" = restricted open,
                     #"u" = unrestricted", "g" = generalized
 
-func = "b3lyp"      # DFT functional or "hf" for hartree fock
+func = "b3pw91"      # DFT functional or "hf" for hartree fock
 
 method = spin + func
 
-otherRoute = " 6d 10f "
+otherRoute = " 6d 10f"
 
 
 ##############################################################################
@@ -188,7 +189,7 @@ otherRoute = " 6d 10f "
 #
 ###############################################################################
 
-print('The calculation starts at'+str(time.asctime()))
+print('Calculation started at '+str(time.asctime()))
 start_time = time.time()
 
 bar = qcb.BinAr(debug=False,lenint=8,inputfile=infile)
@@ -211,6 +212,21 @@ iopcl=bar.iopcl
 #iopcl =-1
 c=bar.c
 ian=bar.ian
+print('Charge is: ', icharg)
+print('Multiplicity is: ', multip)
+
+# Calculate electric field
+lAtom = bar.c[(lContact[0]-1)*3:lContact[0]*3]
+rAtom = bar.c[(rContact[0]-1)*3:rContact[0]*3]
+vec  = (rAtom-lAtom) #TODO: rotate coordinate system to make this the x-direction
+dist = LA.norm(vec)*np.sign(vec[0])
+field = int(V*V_to_au/(dist*0.0001));
+print("E-field set to "+str(field)+" au")
+if field>=0:
+    otherRoute += " field=x+" +str(field)
+else:
+    otherRoute += " field=x" +str(field)
+
 
 # Prepare Overlap, Identity, and Lowdin TF matricies
 nsto = len(locs)
@@ -229,7 +245,6 @@ lInd = np.where(abs(locs)==lContact)[0]
 rInd = np.where(abs(locs)==rContact)[0]
 sigma1 = sigmat(lInd, sig)
 sigma2 = sigmat(rInd, sig)
-print(sigma1.shape)
 sigma12 = sigma1 + sigma2
 
 Gam1 = (sigma1 - sigma1.getH())*1j
@@ -244,12 +259,12 @@ GamW1 = (sigmaW1 - sigmaW1.getH())*1j
 GamW2 = (sigmaW2 - sigmaW2.getH())*1j
 
 print('###################################')
-print('Entering Analytical Integration at: '+str(time.asctime()))
+print('Entering NEGF-SCF loop at: '+str(time.asctime()))
 print('###################################')
 
 #sys.exit("BREAK!")
 
-########################     Analytical Integral     ##########################
+########################     SCF LOOP    ##########################
 
 Loop = True
 Niter = 0
@@ -264,15 +279,6 @@ while Loop :
 
 
     Fock,locs = getFock(bar, spin)
-
-    if Niter == 0:
-        Fback = Fock
-
-    else:
-        Fock = Fback + damping*(Fock - Fback)
-        Fback = Fock
-
-
     Fbar = X * (Fock*har_to_eV + sigma12) * X
     GamBar1 = X * Gam1 * X
     GamBar2 = X * Gam2 * X
@@ -317,10 +323,6 @@ while Loop :
     TotalE.append(nelec)
 
 
-    print('Total electron from NEGF is: ', nelec)
-    print('Charge is: ', icharg)
-    print('Multiplicity is: ', multip)
-
 ####################      Check Convergence     ############################## 
     if Niter == 0:
         Dense_old = np.diagonal(P)
@@ -339,11 +341,14 @@ while Loop :
 
 
 
-        PP.append(max(Dense_diff))
+        PP.append(MaxDP)
         SS.append(Niter)
 
         if RMSDP<conv and MaxDP<conv:
-            print('loop done')
+            print('Convergence achieved!')
+            Loop = False
+        elif Niter >= maxcycles:
+            print('WARNING: Convergence criterion net, maxcycles reached!')
             Loop = False
         
         Dense_old = np.diagonal(P)
@@ -353,24 +358,28 @@ while Loop :
 
         
     P = np.real(X * P * X)
-    
-    
-    
+
+    # APPLY DAMPING:
+    if Niter == 0:
+        Pback = P
+
+    else:
+        P = Pback + damping*(P - Pback)
+        Pback = P
+
     #DEBUG:
 #    print("BEFORE")
 #    print(np.diag(bar.matlist['ALPHA DENSITY MATRIX'].expand()))
 #    print("AFTER")
 #    print(np.diag(P))
-
-
     storeDen(bar, P, spin)    
 
     
    
-    bar.update(model= method, basis=basis, toutput=outfile, dofock="density")
+    bar.update(model= method, basis=basis, toutput=outfile, dofock="density", miscroute=otherRoute)
     
 #    print(getEnergies(bar,spin))
-    print('Total electron from Gaussian is: ', bar.ne)
+    print('Total number of electrons: ', nelec)
 
 
 #    os.system('The calculation end at os system' + time.asctime() + ' >> Log.log')
@@ -385,80 +394,73 @@ for pair in zip(occList[inds], EList[inds]):
 
 
 ############################ End of the Analytical Integral ###################
-Count = 1
-Curr = 0
 step = 0.1
 E_min = -60
 E_max = 120
-N = (E_max - E_min)/step
 H0 = X*Fock*har_to_eV*X
-E_list=[]
+Elist=np.arange(E_min, E_max, step)
 Tr=[]
 DOS = []
 
-for E in np.arange(E_min, E_max, step):
+for E in Elist:
     
     G = np.linalg.inv(E*I - H0 - sigma12)
-    T = np.trace(Gam1*G*Gam2*G.getH())
+    T = np.real(np.trace(Gam1*G*Gam2*G.getH()))
     DOS.append(abs(np.imag(np.trace(G)/np.pi)))
-    E_list.append(E)
     Tr.append(T)
     
-    if E> mu1 and E<=mu2:
-        Df12=1
-    else:
-        Df12=0
-    if (count == 1 or count == N):
-    
-        Curr_tmp = np.real(T)* Df12
-    else:
-        Curr_tmp = 2*np.real(T)* Df12
-#    print('local current is: ', Curr_tmp)
 
-    Curr += Curr_tmp
- #   print(count)
-    Count += 1
-    
+fL = 1/(np.exp((Elist-mu1)/kT) + 1)
+fR = 1/(np.exp((Elist-mu2)/kT) + 1)
+print("Fermi Energy window = "+str(np.trapz(fL-fR, Elist)) + " eV")
+
+Curr = eoverh * np.trapz(Tr*(fL-fR), Elist)
+if spin == 'r':
+    Curr=Curr*2;
+print(f"Current = {Curr:.3E} A")
 
 savetxt('Iteration.txt', SS, delimiter=',')
 savetxt('DM_max.txt', PP, delimiter=',')
 savetxt('Electron.txt', TotalE, delimiter=',')
 savetxt('Transmission.txt', Tr, delimiter=',')
-savetxt('Energy.txt', E_list, delimiter=',')
+savetxt('Energy.txt', Elist, delimiter=',')
 savetxt('DOS.txt', DOS, delimiter=',')
 
 
-eign = LA.eigvals(H0)
-'''
-plt.figure(1)
-plt.title('Fermi level is: '+ str(mu1) + '(eV)   sigma is: ' 
-          +str(sig) + '(eV)     Method: '+ method + "\n")
-plt.ylabel('Max elemnt in DM matrix')
-plt.xlabel('Iteration')
+
+plt.subplot(221)
+plt.title('Fermi level is: '+ str(mu1) + 'eV   sigma is: ' +str(sig) + "eV\n")
+plt.ylabel(r'Max Change in $\rho$')
 plt.plot(SS, PP, color='g', linestyle='solid' ,linewidth = 1, marker='x')
 
-plt.figure(2)
-plt.title('Fermi level is: '+ str(mu1) + '(eV)   sigma is: ' 
-          +str(sig) + '(eV)     Method: '+ method + "\n")
+plt.subplot(223)
 plt.ylabel('Total # of electrons')
 plt.xlabel('Iteration')
 plt.plot(count, TotalE, color='black', linestyle='solid' ,linewidth = 1, marker='o')
 
 
-plt.figure(3)
+plt.subplot(222)
+plt.title(' Method: '+ method + '/' + basis + "\n")
 plt.ylabel('Transmission')
+plt.semilogy(Elist, Tr, color='b', linestyle='solid' ,linewidth = 1, marker='')
+
+for (occ, E) in zip(occList[inds], EList[inds]):
+    if occ > 1.0:
+        occ = 1.0
+    plt.plot(E, 10, color ='r', marker='o', alpha=occ)
+
+plt.xlim([Emin, 0])
+
+plt.subplot(224)
 plt.xlabel('Energy (eV)')
-plt.plot(E_list, Tr, color='b', linestyle='solid' ,linewidth = 1, marker='')
+plt.ylabel('Density of States')
+plt.semilogy(Elist, DOS, color='g', linestyle='solid' ,linewidth = 1, marker='')
+plt.plot(Elist, fL-fR+min(DOS))
 
-plt.figure(4)
-plt.plot(E_list, DOS, color='g', linestyle='solid' ,linewidth = 1, marker='')
-for i in range (0, len(eign)-1):
-    if E_min <= eign[i] <= E_max:
 
-        plt.plot(eign[i], 0, color ='r', marker='o')
-
+plt.xlim([Emin, 0])
 plt.show()
-'''
+
 
 print('')
 print('##########################################')
