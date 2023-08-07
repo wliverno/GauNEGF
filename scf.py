@@ -132,17 +132,16 @@ def storeDen(bar, P, spin):
     else:
         raise ValueError("Spin treatment not recognized!")
 
-
 #### MAIN SCF FUNCTION ######
 
-def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, basis="lanl2dz", 
+def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz",
     func="b3pw91", spin="r", damping = 0.1, conv = 1e-5, maxcycles=100, save=True):
     
     # Set up variables
     infile = fn + ".gjf"
+    chkfile = fn + ".chk"
     outfile = fn + ".log"
 
-    sig = -0.1j
     mu1 =  fermi + (qV/2)
     mu2 =  fermi - (qV/2)
 
@@ -174,8 +173,11 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, basis="lanl2dz",
     bar = qcb.BinAr(debug=False,lenint=8,inputfile=infile)
     print("Running Initial SCF...")
 
-    ## RUN GAUSSIAN:
-    bar.update(model=method, basis=basis, toutput=outfile, dofock="scf", miscroute=otherRoute)
+    ## RUN GAUSSIAN
+    try:
+        bar.update(model=method, basis=basis, toutput=outfile, dofock="scfread",chkname=chkfile)
+    except:
+        bar.update(model=method, basis=basis, toutput=outfile, dofock="scf",chkname=chkfile)
 
     print("Done!")
 
@@ -193,7 +195,7 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, basis="lanl2dz",
     rAtom = bar.c[(rContact[0]-1)*3:rContact[0]*3]
     vec  = (rAtom-lAtom) 
     #TODO: rotate coordinate system (bar.c) to make vec the x-direction
-    dist = LA.norm(vec)*np.sign(vec[0])
+    dist = vec[0]
     field = int(qV*V_to_au/(dist*0.0001));
     print("E-field set to "+str(field)+" au")
     if field>=0:
@@ -215,10 +217,23 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, basis="lanl2dz",
     I = np.asmatrix(np.identity(nsto))
 
     # Prepare Sigma matrices
-    lInd = np.where(abs(locs)==lContact)[0]
-    rInd = np.where(abs(locs)==rContact)[0]
-    sigma1 = formSigma(lInd, sig, nsto)
-    sigma2 = formSigma(rInd, sig, nsto)
+    lInd = np.where(np.isin(locs, lContact))[0]
+    rInd = np.where(np.isin(locs, rContact))[0]
+    if isinstance(sig, (int,complex,float)):  #if sigma is a single value
+        sigma1 = formSigma(lInd, sig, nsto)
+        if isinstance(sig2, (int,complex,float)):  #if sigma is a single value
+            sigma2 = formSigma(rInd, sig2, nsto)
+        else:
+            sigma2 = formSigma(rInd, sig, nsto)
+    else:                                     #if sigma is a matrix
+        sigma1 = np.asmatrix(np.zeros((nsto,nsto)),dtype=complex)
+        sigma2 = np.asmatrix(np.zeros((nsto,nsto)),dtype=complex)
+        sigma1[np.ix_(lInd, lInd)] = sig
+        if isinstance(sig2, (list, np.ndarray)):
+            sigma2[np.ix_(rInd, rInd)] = sig2   
+        else:
+            sigma2[np.ix_(rInd, rInd)] = sig
+
     sigma12 = sigma1 + sigma2
 
     Gam1 = (sigma1 - sigma1.getH())*1j
@@ -346,6 +361,8 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, basis="lanl2dz",
     
         Niter += 1
 
+    bar.update(model= method, basis=basis, toutput=outfile, chkname=chkfile, dofock=True, miscroute=otherRoute)
+    
     print('##########################################')
     print("--- %s seconds ---" % (time.time() - start_time))
     print('')
@@ -367,7 +384,7 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, basis="lanl2dz",
     
     # Plot convergence data 
     plt.subplot(311)
-    plt.title('Fermi level is: '+ str(fermi) + 'eV   sigma is: ' +str(sig) + r"eV $\Delta V=$"+str(qV)+'V Method: '+ method + '/' + basis + "\n")
+    plt.title('Fermi level is: '+ str(fermi) + 'eV   sigma is: ' +str(sig) + "eV\n" + r" $\Delta V=$"+str(qV)+'V Method: '+ method + '/' + basis + "\n")
     plt.ylabel(r'Max Change in $\rho$')
     plt.plot(count[1:], PP, color='g', linestyle='solid' ,linewidth = 1, marker='x')
 
@@ -382,14 +399,17 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, basis="lanl2dz",
     plt.xlabel('Energy')
     plt.ylabel('Occupation')
     plt.xlim([Emin, 0])
-    plt.show()
+    plt.savefig('debug.png')
     
     if save==True:
         # Save data in MATLAB .mat file
         matdict = {"H0":H0, "sig1": np.diag(sigma1), "sig2": np.diag(sigma2), 
                     "fermi" : fermi, "qV": qV, "X": X, "spin": spin}
-        io.savemat(fn+"_"+str(fermi)+"_"+str(qV)+"V.mat", matdict)
-    return H0
+        matfile = fn+"_"+str(fermi)+"_"+str(qV)+"V.mat"
+        io.savemat(matfile, matdict)
+        return matfile
+    else:
+        return H0
 
 #### TRANSPORT FUNCTIONS ####
 
