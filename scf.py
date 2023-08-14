@@ -151,18 +151,8 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
     PP=[]
     count=[]
     TotalE=[]
-
-    # Gaussian parameters
-
-    basis="lanl2dz"     #e.g. 6-31g(d,p), lanl2dz, sto-3g
-
-    spin = "r"          #"r" = restricted, "ro" = restricted open,
-                        #"u" = unrestricted", "g" = generalized
-
-    func = "b3pw91"     # DFT functional or "hf" for hartree fock
-
-    method = spin + func
-
+    
+    method= spin+func
     otherRoute = ""     # Other commands that are needed in Gaussian
 
     # Start Calculation
@@ -171,12 +161,29 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
     start_time = time.time()
 
     bar = qcb.BinAr(debug=False,lenint=8,inputfile=infile)
-    print("Running Initial SCF...")
+    
+    # Rotate the coordinate system so that the voltage is in the z-direction
+    lAtom = bar.c[(lContact[0]-1)*3:lContact[0]*3]
+    rAtom = bar.c[(rContact[0]-1)*3:rContact[0]*3]
+    vec  = (lAtom-rAtom)
+    dist = LA.norm(vec)
+    vecNorm = vec/dist
+    v = np.cross(vecNorm, np.array([0, 0, 1]))
+    c = np.dot(vecNorm, np.array([0, 0, 1]))
+    s = np.linalg.norm(v)
+    kmat = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+    R = np.eye(3) + kmat + kmat.dot(kmat) * ((1 - c) / (s ** 2)) #Rotation Matrix
+    for i in range(0, len(bar.c), 3):
+        coord = bar.c[i:i+3]
+        bar.c[i:i+3] = R.dot(coord)
 
     ## RUN GAUSSIAN
+    # TODO: allow user to use a stored Fock as a starting point
     try:
-        bar.update(model=method, basis=basis, toutput=outfile, dofock="scfread",chkname=chkfile)
+        bar.update(model=method, basis=basis, toutput=outfile, dofock="density",chkname=chkfile)
+        print('Checking '+chkfile+' for saved data...');
     except:
+        print('Checkpoint not loaded, running full SCF...');
         bar.update(model=method, basis=basis, toutput=outfile, dofock="scf",chkname=chkfile)
 
     print("Done!")
@@ -187,21 +194,18 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
     print(locs)
     icharg=bar.icharg
     multip=bar.multip
-    print('Charge is: ', icharg)
-    print('Multiplicity is: ', multip)
+    print('Expecting', str(bar.ne), 'electrons')
+    print('Charge is:', icharg)
+    print('Multiplicity is:', multip)
 
-    # Calculate electric field to apply during SCF
-    lAtom = bar.c[(lContact[0]-1)*3:lContact[0]*3]
-    rAtom = bar.c[(rContact[0]-1)*3:rContact[0]*3]
-    vec  = (rAtom-lAtom) 
-    #TODO: rotate coordinate system (bar.c) to make vec the x-direction
-    dist = vec[0]
-    field = int(qV*V_to_au/(dist*0.0001));
+     
+    # Calculate electric field to apply during SCF, apply in z-direction
+    field = int(-1*qV*V_to_au/(dist*0.0001));
     print("E-field set to "+str(field)+" au")
     if field>=0:
-        otherRoute += " field=x+" +str(field)
+        otherRoute += " field=z+" +str(field)
     else:
-        otherRoute += " field=x" +str(field)
+        otherRoute += " field=z" +str(field)
 
 
     # Prepare Overlap, Identity, and Lowdin TF matricies
@@ -226,8 +230,8 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
         else:
             sigma2 = formSigma(rInd, sig, nsto)
     else:                                     #if sigma is a matrix
-        sigma1 = np.asmatrix(np.zeros((nsto,nsto)),dtype=complex)
-        sigma2 = np.asmatrix(np.zeros((nsto,nsto)),dtype=complex)
+        sigma1 = np.asmatrix(-1j*1e-9*Overlap,dtype=complex)
+        sigma2 = np.asmatrix(-1j*1e-9*Overlap,dtype=complex)
         sigma1[np.ix_(lInd, lInd)] = sig
         if isinstance(sig2, (list, np.ndarray)):
             sigma2[np.ix_(rInd, rInd)] = sig2   
@@ -236,6 +240,7 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
 
     sigma12 = sigma1 + sigma2
 
+    print('Max imag sigma:', str(np.max(np.abs(np.imag(sigma12)))));
     Gam1 = (sigma1 - sigma1.getH())*1j
     Gam2 = (sigma2 - sigma2.getH())*1j
 
@@ -291,7 +296,6 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
 
 
         P=P1 + P2 + Pw
-        nelec = 2*np.trace(np.real(P))
         
         pshift = V.getH() * P * V
         occList = np.diag(np.real(pshift)) 
@@ -301,9 +305,6 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
     #    for pair in zip(occList[inds], EList[inds]):                       #DEBUG
     #        print("Energy =", str(pair[1]), ", Occ =", str(pair[0]))
 
-
-        count.append(Niter)
-        TotalE.append(nelec)
 
 
         # Check Convergence 
@@ -326,7 +327,7 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
             # Track MaxDP for convergence graphic
             PP.append(MaxDP)
 
-            if RMSDP<conv and MaxDP<conv:
+            if RMSDP<conv and MaxDP<conv and abs(dE)<conv:
                 print('Convergence achieved!')
                 Loop = False
             elif Niter >= maxcycles:
@@ -346,6 +347,11 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
         else:
             P = Pback + damping*(P - Pback)
             Pback = P
+        
+        nelec = np.trace(np.real(P))
+        count.append(Niter)
+        TotalE.append(nelec)
+
 
     #    print("BEFORE")                                                    #DEBUG
     #    print(np.diag(bar.matlist['ALPHA DENSITY MATRIX'].expand()))
@@ -360,8 +366,8 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
         print('Total number of electrons: ', nelec)
     
         Niter += 1
-
-    bar.update(model= method, basis=basis, toutput=outfile, chkname=chkfile, dofock=True, miscroute=otherRoute)
+    
+    #bar.update(model= method, basis=basis, toutput=outfile, chkname=chkfile, dofock="density", miscroute=otherRoute)
     
     print('##########################################')
     print("--- %s seconds ---" % (time.time() - start_time))
@@ -400,12 +406,13 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
     plt.ylabel('Occupation')
     plt.xlim([Emin, 0])
     plt.savefig('debug.png')
-    
+    plt.close()
+ 
     if save==True:
         # Save data in MATLAB .mat file
         matdict = {"H0":H0, "sig1": np.diag(sigma1), "sig2": np.diag(sigma2), 
                     "fermi" : fermi, "qV": qV, "X": X, "spin": spin}
-        matfile = fn+"_"+str(fermi)+"_"+str(qV)+"V.mat"
+        matfile = f"{fn}_{fermi:.2f}_{qV:.2f}V.mat"
         io.savemat(matfile, matdict)
         return matfile
     else:
