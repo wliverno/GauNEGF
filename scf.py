@@ -71,6 +71,21 @@ def formSigma(inds, value, nsto):
 
     return sigma
 
+
+# Build density matrix based on spin type
+def getDen(bar, spin):
+    # Set up Fock matrix and atom indexing
+    # Note: positive ind1ices are alpha/paired orbitals, negative are beta orbitals
+    if spin == "r" or spin == "g":
+        P = np.asmatrix(bar.matlist[AlphaSCFDen].expand())
+    elif spin == "ro" or spin == "u":
+        PA = np.asmatrix(bar.matlist[AlphaSCFDen].expand())
+        PB = np.asmatrix(bar.matlist[BetaSCFDen].expand())
+        P = np.block([[PA, np.zeros(PA.shape)], [np.zeros(PB.shape), PB]])
+    else:
+        raise ValueError("Spin treatment not recognized!")
+    return P
+
 # Build Fock matrix based on spin type, return orbital indices (alpha and beta are +/-)
 def getFock(bar, spin):
     # Set up Fock matrix and atom indexing
@@ -162,23 +177,18 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
 
     bar = qcb.BinAr(debug=False,lenint=8,inputfile=infile)
     
-    # Rotate the coordinate system so that the voltage is in the z-direction
-    lAtom = bar.c[(lContact[0]-1)*3:lContact[0]*3]
-    rAtom = bar.c[(rContact[0]-1)*3:rContact[0]*3]
-    vec  = (lAtom-rAtom)
-    dist = LA.norm(vec)
-    vecNorm = vec/dist
-    v = np.cross(vecNorm, np.array([0, 0, 1]))
-    c = np.dot(vecNorm, np.array([0, 0, 1]))
-    s = np.linalg.norm(v)
-    kmat = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
-    R = np.eye(3) + kmat + kmat.dot(kmat) * ((1 - c) / (s ** 2)) #Rotation Matrix
-    for i in range(0, len(bar.c), 3):
-        coord = bar.c[i:i+3]
-        bar.c[i:i+3] = R.dot(coord)
+    
+    # Old code for aligning E-field to z-direction through rotation
+    #v = np.cross(vecNorm, np.array([0, 0, 1]))
+    #c = np.dot(vecNorm, np.array([0, 0, 1]))
+    #s = np.linalg.norm(v)
+    #kmat = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+    #R = np.eye(3) + kmat + kmat.dot(kmat) * ((1 - c) / (s ** 2)) #Rotation Matrix
+    #for i in range(0, len(bar.c), 3):
+    #    coord = bar.c[i:i+3]
+    #    bar.c[i:i+3] = R.dot(coord)
 
     ## RUN GAUSSIAN
-    # TODO: allow user to use a stored Fock as a starting point
     try:
         bar.update(model=method, basis=basis, toutput=outfile, dofock="density",chkname=chkfile)
         print('Checking '+chkfile+' for saved data...');
@@ -199,13 +209,22 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
     print('Multiplicity is:', multip)
 
      
-    # Calculate electric field to apply during SCF, apply in z-direction
-    field = int(-1*qV*V_to_au/(dist*0.0001));
-    print("E-field set to "+str(field)+" au")
-    if field>=0:
-        otherRoute += " field=z+" +str(field)
-    else:
-        otherRoute += " field=z" +str(field)
+    # Calculate electric field to apply during SCF, apply between contacts
+    lAtom = bar.c[(lContact[0]-1)*3:lContact[0]*3]
+    rAtom = bar.c[(rContact[0]-1)*3:rContact[0]*3]
+    vec  = (lAtom-rAtom)
+    dist = LA.norm(vec)
+    vecNorm = vec/dist
+
+    field = -1*vecNorm*qV*V_to_au/(dist*0.0001)
+    bar.scalar("X-EFIELD", int(field[0]))
+    bar.scalar("Y-EFIELD", int(field[1]))
+    bar.scalar("Z-EFIELD", int(field[2]))
+    print("E-field set to "+str(LA.norm(field))+" au")
+    #if field>=0:
+    #    otherRoute += " field=z+" +str(field)
+    #else:
+    #    otherRoute += " field=z" +str(field)
 
 
     # Prepare Overlap, Identity, and Lowdin TF matricies
@@ -296,6 +315,7 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
 
 
         P=P1 + P2 + Pw
+
         
         pshift = V.getH() * P * V
         occList = np.diag(np.real(pshift)) 
@@ -309,47 +329,42 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
 
         # Check Convergence 
         if Niter == 0:
-            Dense_old = np.diagonal(P)
-            P_old = P
+            Pback = getDen(bar, spin)
+            Dense_old = np.diagonal(Pback)
             Total_E_Old = Total_E
             
-        else:        
-            # Convergence variables, currently using RMSDP and MaxDP
-            dE = Total_E-Total_E_Old
-            Dense_diff = abs(np.diagonal(P) - Dense_old)
-            MaxDP = max(Dense_diff)
-            RMSDP = np.sqrt(np.mean(Dense_diff**2))
-            
-            print('Energy difference is: ', dE)
-            print(f'MaxDP: {MaxDP:.2E} | RMSDP: {RMSDP:.2E}')
+        # Convergence variables, currently using RMSDP and MaxDP
+        dE = Total_E-Total_E_Old
+        Dense_diff = abs(np.diagonal(P) - Dense_old)
+        MaxDP = max(Dense_diff)
+        RMSDP = np.sqrt(np.mean(Dense_diff**2))
+        
+        print('Energy difference is: ', dE)
+        print(f'MaxDP: {MaxDP:.2E} | RMSDP: {RMSDP:.2E}')
 
 
-            # Track MaxDP for convergence graphic
-            PP.append(MaxDP)
 
-            if RMSDP<conv and MaxDP<conv and abs(dE)<conv:
-                print('Convergence achieved!')
-                Loop = False
-            elif Niter >= maxcycles:
-                print('WARNING: Convergence criterion net, maxcycles reached!')
-                Loop = False
-            
-            Dense_old = np.diagonal(P)
-            Total_E_Old = Total_E
-            
+        if RMSDP<conv and MaxDP<conv and abs(dE)<conv:
+            print('Convergence achieved after '+str(Niter)+' iterations!')
+            Loop = False
+        elif Niter >= maxcycles:
+            print('WARNING: Convergence criterion net, maxcycles reached!')
+            Loop = False
+        
+        Dense_old = np.diagonal(P)
+        Total_E_Old = Total_E
+        
         #Lowdin TF Back  
         P = np.real(X * P * X)
 
         # APPLY DAMPING:
-        if Niter == 0:
-            Pback = P
-
-        else:
-            P = Pback + damping*(P - Pback)
-            Pback = P
+        P = Pback + damping*(P - Pback)
+        Pback = P
         
+        # Track values for convergence graphic
         nelec = np.trace(np.real(P))
         count.append(Niter)
+        PP.append(MaxDP)
         TotalE.append(nelec)
 
 
@@ -367,7 +382,9 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
     
         Niter += 1
     
-    #bar.update(model= method, basis=basis, toutput=outfile, chkname=chkfile, dofock="density", miscroute=otherRoute)
+    print('Writing to checkpoint file...') 
+    bar.writefile(chkfile)
+    print(chkfile+' written!') 
     
     print('##########################################')
     print("--- %s seconds ---" % (time.time() - start_time))
@@ -392,7 +409,7 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
     plt.subplot(311)
     plt.title('Fermi level is: '+ str(fermi) + 'eV   sigma is: ' +str(sig) + "eV\n" + r" $\Delta V=$"+str(qV)+'V Method: '+ method + '/' + basis + "\n")
     plt.ylabel(r'Max Change in $\rho$')
-    plt.plot(count[1:], PP, color='g', linestyle='solid' ,linewidth = 1, marker='x')
+    plt.plot(count, PP, color='g', linestyle='solid' ,linewidth = 1, marker='x')
 
     plt.subplot(312)
     plt.ylabel('Total # of electrons')
@@ -430,6 +447,10 @@ def quickCurrent(H0, sig1, sig2, fermi, qV, spin="r",dE=0.01):
     gamma2 = np.imag(sig2)*2
     I = np.asmatrix(np.identity(len(H0)));
     
+    if qV < 0:
+        dE = -1*abs(dE)
+    else:
+        dE = abs(dE)
     Elist = np.arange(fermi-(qV/2), fermi+(qV/2), dE)
     Tr = []
     for E in Elist:
@@ -444,8 +465,8 @@ def quickCurrent(H0, sig1, sig2, fermi, qV, spin="r",dE=0.01):
     return curr
 
 # Calculate current from SCF mat file
-def qCurrentF(fn):
+def qCurrentF(fn, dE=0.01):
     matfile = io.loadmat(fn);
     return quickCurrent(matfile["H0"],matfile["sig1"][0],matfile["sig2"][0],
-            matfile["fermi"][0,0], matfile["qV"][0,0], matfile["spin"][0])
+            matfile["fermi"][0,0], matfile["qV"][0,0], matfile["spin"][0], dE=dE)
 
