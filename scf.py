@@ -62,15 +62,28 @@ def density(V, D, Gam, Emin, mu):
     return den
 
 
-# Form Sigma matrix given self-energy (value) and orbital indices (inds)
-def formSigma(inds, value, nsto):
-    sigma = np.asmatrix(np.zeros((nsto,nsto)),dtype=complex)
-
-    for i in inds:
-        sigma[i,i] = value
+# Form Sigma matrix given self-energy matrix or value (V) and orbital indices (inds)
+def formSigma(inds, V, nsto, S=0):
+    if isinstance(S, int):  #if overlap is not given
+       S = np.eye(nsto)
+    sigma = np.asmatrix(-1j*1e-9*S,dtype=complex)
+    if isinstance(V, (int,complex,float)):  #if sigma is a single value
+        for i in inds:
+            sigma[i,i] = V
+    else:                                     #if sigma is a matrix
+        sigma[np.ix_(inds, inds)] = V
 
     return sigma
 
+# Form Sigma matrix given contact Green's function (g), coupling (tau), electron energy (E) and orbital indices (inds)
+def formSigmaE(inds, g, tau, E, nsto, S=0):
+    if isinstance(S, int):  #if overlap is not given
+       S = np.eye(nsto)
+    matInds = np.ix_(inds, inds)
+    sigma = np.asmatrix(-1j*1e-9*Overlap,dtype=complex)
+    t = E*S[matInds] - tau
+    sigma[matInds] = t*g*t.getH()
+    return sigma
 
 # Build density matrix based on spin type
 def getDen(bar, spin):
@@ -234,29 +247,16 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
         Overlap = np.block([[Omat, np.zeros(Omat.shape)],[np.zeros(Omat.shape),Omat]])
     else:
         Overlap = Omat
-
+    
     X = np.asmatrix(fractional_matrix_power(Overlap, -0.5))
 
     I = np.asmatrix(np.identity(nsto))
 
     # Prepare Sigma matrices
-    lInd = np.where(np.isin(locs, lContact))[0]
-    rInd = np.where(np.isin(locs, rContact))[0]
-    if isinstance(sig, (int,complex,float)):  #if sigma is a single value
-        sigma1 = formSigma(lInd, sig, nsto)
-        if isinstance(sig2, (int,complex,float)):  #if sigma is a single value
-            sigma2 = formSigma(rInd, sig2, nsto)
-        else:
-            sigma2 = formSigma(rInd, sig, nsto)
-    else:                                     #if sigma is a matrix
-        sigma1 = np.asmatrix(-1j*1e-9*Overlap,dtype=complex)
-        sigma2 = np.asmatrix(-1j*1e-9*Overlap,dtype=complex)
-        sigma1[np.ix_(lInd, lInd)] = sig
-        if isinstance(sig2, (list, np.ndarray)):
-            sigma2[np.ix_(rInd, rInd)] = sig2   
-        else:
-            sigma2[np.ix_(rInd, rInd)] = sig
-
+    lInd = np.where(np.isin(abs(locs), lContact))[0]
+    rInd = np.where(np.isin(abs(locs), rContact))[0]
+    sigma1 = formSigma(lInd, sig, nsto, Overlap)
+    sigma2 = formSigma(rInd, sig, nsto, Overlap)
     sigma12 = sigma1 + sigma2
 
     print('Max imag sigma:', str(np.max(np.abs(np.imag(sigma12)))));
@@ -315,6 +315,12 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
 
 
         P=P1 + P2 + Pw
+        #DEBUG:
+        #print(Fock.shape)
+        #print(Overlap.shape)
+        #print(P.shape)
+        #print(np.diag(P))
+
 
         
         pshift = V.getH() * P * V
