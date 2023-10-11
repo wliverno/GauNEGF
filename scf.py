@@ -1,17 +1,16 @@
 import numpy as np
 from numpy import linalg as LA
 from scipy.linalg import fractional_matrix_power
-import scipy.io as io
 import sys
 import time
 import matplotlib.pyplot as plt
-from numpy import savetxt
 
 
 from gauopen import QCOpMat as qco
 from gauopen import QCBinAr as qcb
 from gauopen import QCUtil as qcu
 
+from matTools import *
 
 # Matrix Headers
 AlphaDen = "ALPHA DENSITY MATRIX"
@@ -31,134 +30,6 @@ eoverh = 3.874e-5       # A/eV
 kT = 0.025              # eV @ 20degC
 V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 
-
-#### HELPER FUNCTIONS ####
-
-# Get density using analytical integration
-def density(V, D, Gam, Emin, mu):
-    Nd = len(V)
-    repdum = np.asmatrix(np.ones(Nd))
-    DD = D*repdum
-
-    logmat = np.log(1-np.divide(mu,D))*repdum
-    logmat2 = np.log(1-np.divide(Emin,D))*repdum
-
-
-    invmat = np.divide(1,(2*np.pi*(DD-DD.getH())))
-    pref2 = logmat - logmat.getH()
-    pref3 = logmat2-logmat2.getH()
-
-    prefactor = np.multiply(invmat,(pref2-pref3))
-
-
-    Vc = LA.inv(V.getH())
-
-    Gammam = Vc.getH()*Gam*Vc
-
-    prefactor = np.multiply(prefactor,Gammam)
-
-    den = V* prefactor * V.getH()
-
-    return den
-
-
-# Form Sigma matrix given self-energy matrix or value (V) and orbital indices (inds)
-def formSigma(inds, V, nsto, S=0):
-    if isinstance(S, int):  #if overlap is not given
-       S = np.eye(nsto)
-    sigma = np.asmatrix(-1j*1e-9*S,dtype=complex)
-    if isinstance(V, (int,complex,float)):  #if sigma is a single value
-        for i in inds:
-            sigma[i,i] = V
-    else:                                     #if sigma is a matrix
-        sigma[np.ix_(inds, inds)] = V
-
-    return sigma
-
-# Form Sigma matrix given contact Green's function (g), coupling (tau), electron energy (E) and orbital indices (inds)
-def formSigmaE(inds, g, tau, E, nsto, S=0):
-    if isinstance(S, int):  #if overlap is not given
-       S = np.eye(nsto)
-    matInds = np.ix_(inds, inds)
-    sigma = np.asmatrix(-1j*1e-9*Overlap,dtype=complex)
-    t = E*S[matInds] - tau
-    sigma[matInds] = t*g*t.getH()
-    return sigma
-
-# Build density matrix based on spin type
-def getDen(bar, spin):
-    # Set up Fock matrix and atom indexing
-    # Note: positive ind1ices are alpha/paired orbitals, negative are beta orbitals
-    if spin == "r" or spin == "g":
-        P = np.asmatrix(bar.matlist[AlphaSCFDen].expand())
-    elif spin == "ro" or spin == "u":
-        PA = np.asmatrix(bar.matlist[AlphaSCFDen].expand())
-        PB = np.asmatrix(bar.matlist[BetaSCFDen].expand())
-        P = np.block([[PA, np.zeros(PA.shape)], [np.zeros(PB.shape), PB]])
-    else:
-        raise ValueError("Spin treatment not recognized!")
-    return P
-
-# Build Fock matrix based on spin type, return orbital indices (alpha and beta are +/-)
-def getFock(bar, spin):
-    # Set up Fock matrix and atom indexing
-    # Note: positive ind1ices are alpha/paired orbitals, negative are beta orbitals
-    if spin == "r":
-        locs = bar.ibfatm
-        Fock = np.asmatrix(bar.matlist[AlphaFock].expand())
-    elif spin == "ro" or spin == "u":
-        locs = np.concatenate((bar.ibfatm, bar.ibfatm*-1))
-        AFock = np.asmatrix(bar.matlist[AlphaFock].expand())
-        BFock = np.asmatrix(bar.matlist[BetaFock].expand())
-        Fock = np.block([[AFock, np.zeros(AFock.shape)], [np.zeros(BFock.shape), BFock]])
-    elif spin == "g":
-        locs = [loc for pair in zip(bar.ibfatm, bar.ibfatm*-1) for loc in pair]
-        Fock = np.asmatrix(bar.matlist[AlphaFock].expand())
-    else:
-        raise ValueError("Spin treatment not recognized!")
-    locs = np.array(locs)
-    return Fock,locs
-
-# Return energies for each electron in eV
-def getEnergies(bar, spin):
-    if spin =="r":
-        Alevels = np.sort(bar.matlist[AlphaEnergies].expand())
-        levels = [level for pair in zip(Alevels, Alevels) for level in pair]
-    elif spin=="ro" or spin == "u":
-        Alevels = np.sort(bar.matlist[AlphaEnergies].expand())
-        Blevels = np.sort(bar.matlist[BetaEnergies].expand())
-        levels = [level for pair in zip(Alevels, Blevels) for level in pair]
-    elif spin=="g":
-        levels = np.sort(bar.matlist[AlphaEnergies].expand())
-    else:
-        raise ValueError("Spin treatment not recognized!")
-    return np.sort(levels)*har_to_eV
-
-# Store density matrix to use in Gaussian
-def storeDen(bar, P, spin):
-    nsto = len(bar.ibfatm)
-    if spin=="r":
-        P = np.real(np.array(P))
-        PaO = qco.OpMat(AlphaSCFDen,P/2,dimens=(nsto,nsto))
-        PaO.compress()
-        bar.addobj(PaO)
-    elif spin=="ro" or spin=="u":
-        P = np.real(np.array(P))
-        Pa = P[0:nsto, 0:nsto]
-        Pb = P[nsto:, nsto:]
-        PaO = qco.OpMat(AlphaSCFDen,Pa,dimens=(nsto,nsto))
-        PbO = qco.OpMat(BetaSCFDen,Pb,dimens=(nsto,nsto))
-        PaO.compress()
-        PbO.compress()
-        bar.addobj(PaO)
-        bar.addobj(PbO)
-    elif spin=="g":
-        P = np.complex128(np.array(P))
-        PaO = qco.OpMat(AlphaSCFDen,P,dimens=(nsto*2,nsto*2))
-        PaO.compress()
-        bar.addobj(PaO)
-    else:
-        raise ValueError("Spin treatment not recognized!")
 
 #### MAIN SCF FUNCTION ######
 
@@ -218,6 +89,8 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
     icharg=bar.icharg
     multip=bar.multip
     print('Expecting', str(bar.ne), 'electrons')
+    nelec = np.trace(np.real(getDen(bar, spin)))
+    print('Actual', str(nelec), 'electrons')
     print('Charge is:', icharg)
     print('Multiplicity is:', multip)
 
@@ -264,8 +137,8 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
     Gam2 = (sigma2 - sigma2.getH())*1j
 
 
-    sigmaW1 = formSigma(lInd, -0.00001j, nsto)
-    sigmaW2 = formSigma(rInd, -0.00001j, nsto)
+    sigmaW1 = formSigma(lInd, -0.00001j, nsto, Overlap)
+    sigmaW2 = formSigma(rInd, -0.00001j, nsto, Overlap)
     sigmaW12 = sigmaW1+sigmaW2
 
     GamW1 = (sigmaW1 - sigmaW1.getH())*1j
@@ -315,15 +188,20 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
 
 
         P=P1 + P2 + Pw
+        Pback = getDen(bar, spin)
+        pshift = V.getH() * P * V
+        
+        #Lowdin TF Back  
+        P = np.real(X * P * X)
+        
+        
         #DEBUG:
         #print(Fock.shape)
         #print(Overlap.shape)
         #print(P.shape)
         #print(np.diag(P))
 
-
         
-        pshift = V.getH() * P * V
         occList = np.diag(np.real(pshift)) 
         EList = np.asarray(np.real(D)).flatten()
         inds = np.argsort(EList)
@@ -335,9 +213,9 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
 
         # Check Convergence 
         if Niter == 0:
-            Pback = getDen(bar, spin)
-            Dense_old = np.diagonal(Pback)
             Total_E_Old = Total_E
+            
+        Dense_old = np.diagonal(Pback)
             
         # Convergence variables, currently using RMSDP and MaxDP
         dE = Total_E-Total_E_Old
@@ -356,19 +234,20 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
         elif Niter >= maxcycles:
             print('WARNING: Convergence criterion net, maxcycles reached!')
             Loop = False
-        
-        Dense_old = np.diagonal(P)
+
         Total_E_Old = Total_E
         
-        #Lowdin TF Back  
-        P = np.real(X * P * X)
+        # DEBUG
+        print('Compare')
+        print(np.diag(P)[:6])
+        print(np.diag(Pback)[:6])
+        print(np.diag(Fock)[:6])
 
         # APPLY DAMPING:
         P = Pback + damping*(P - Pback)
-        Pback = P
+        nelec = np.trace(np.real(getDen(bar, spin)))
         
         # Track values for convergence graphic
-        nelec = np.trace(np.real(P))
         count.append(Niter)
         PP.append(MaxDP)
         TotalE.append(nelec)
@@ -406,11 +285,6 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
     # Final Hamiltonian:
     H0 = X*Fock*har_to_eV*X
 
-    # DEBUGGING: Save run data in text files
-#    savetxt('Iteration.txt', count, delimiter=',')
-#    savetxt('DM_max.txt', PP, delimiter=',')
-#    savetxt('Electron.txt', TotalE, delimiter=',')
-    
     # Plot convergence data 
     plt.subplot(311)
     plt.title('Fermi level is: '+ str(fermi) + 'eV   sigma is: ' +str(sig) + "eV\n" + r" $\Delta V=$"+str(qV)+'V Method: '+ method + '/' + basis + "\n")
@@ -440,39 +314,4 @@ def SCF(fn, lContact, rContact, fermi, qV, sig=-0.1j, sig2=False, basis="lanl2dz
         return matfile
     else:
         return H0
-
-#### TRANSPORT FUNCTIONS ####
-
-# Calculate Coherent Current at T=0K using NEGF
-def quickCurrent(H0, sig1, sig2, fermi, qV, spin="r",dE=0.01):
-    
-    H0 = np.asmatrix(H0)
-    sig1 = np.asmatrix(np.diag(sig1))
-    sig2 = np.asmatrix(np.diag(sig2))
-    gamma1 = np.imag(sig1)*2
-    gamma2 = np.imag(sig2)*2
-    I = np.asmatrix(np.identity(len(H0)));
-    
-    if qV < 0:
-        dE = -1*abs(dE)
-    else:
-        dE = abs(dE)
-    Elist = np.arange(fermi-(qV/2), fermi+(qV/2), dE)
-    Tr = []
-    for E in Elist:
-        G = LA.inv(E*I - H0 - sig1 - sig2)
-        T = np.real(np.trace(gamma1*G*gamma2*G.getH()))
-        Tr.append(T)
-    
-    curr = eoverh * np.trapz(Tr, Elist)
-    if spin=="r":
-        curr *= 2
-
-    return curr
-
-# Calculate current from SCF mat file
-def qCurrentF(fn, dE=0.01):
-    matfile = io.loadmat(fn);
-    return quickCurrent(matfile["H0"],matfile["sig1"][0],matfile["sig2"][0],
-            matfile["fermi"][0,0], matfile["qV"][0,0], matfile["spin"][0], dE=dE)
 
