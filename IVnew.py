@@ -10,7 +10,7 @@ lContact = [2]
 rContact = [6]
 fermi = -5.1 
 
-obj = NEGF(fn, spin="u")
+obj = NEGF(fn, spin="r")
 Vlist = np.concatenate((np.arange(0, 5.1, 0.1), np.arange(5.0, -0.1, -0.1)))
 Ilist = []
 f = open('IV3.log', 'w')

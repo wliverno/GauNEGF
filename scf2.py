@@ -98,6 +98,7 @@ class NEGF:
     
     def updateN(self):
         self.nelec = np.real(np.trace(self.P))
+        return self.nelec
 
     def setSigma(self, lContact, rContact, fermi, qV, sig=-0.1j, 
                     sig2=False, g=False, tau1=False, tau2=False): 
@@ -177,7 +178,9 @@ class NEGF:
         P1 = density(V, D, GamBar1, Emin, self.mu1)
         P2 = density(V, D, GamBar2, Emin, self.mu2)
         Pw = density(Vw, Dw, GamBarW1+GamBarW2, Eminf, Emin)
-
+        
+        P1_ = densityGrid(Fbar, GamBar1, Emin, self.mu1)
+        print(np.diag(P1_-P1))
         P = P1 + P2 + Pw
         
         # Calculate Level Occupation, Lowdin TF,  Return
@@ -201,10 +204,11 @@ class NEGF:
         Dense_old = np.diagonal(Pback)
         Dense_diff = abs(np.diagonal(self.P) - Dense_old)
         
-        print('Compare')
-        print(np.diag(self.P)[:6])
-        print(np.diag(Pback)[:6])
-        print(np.diag(self.F)[:6])
+        #DEBUG
+        #print('Compare')
+        #print(np.diag(self.P)[:6])
+        #print(np.diag(Pback)[:6])
+        #print(np.diag(self.F)[:6])
 
         
         # Apply Damping, store to Gaussian matrix
