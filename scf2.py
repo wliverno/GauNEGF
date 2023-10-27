@@ -99,10 +99,8 @@ class NEGF:
     def updateN(self):
         self.nelec = np.real(np.trace(self.P))
         return self.nelec
-
-    def setSigma(self, lContact, rContact, fermi, qV, sig=-0.1j, 
-                    sig2=False, g=False, tau1=False, tau2=False): 
-        
+    
+    def setVoltage(self, fermi, qV):
         self.fermi = fermi
         self.qV = qV
         self.mu1 =  fermi + (qV/2)
@@ -111,8 +109,8 @@ class NEGF:
     
         # Calculate electric field to apply during SCF, apply between contacts
         # TODO: average location of all contact atoms (currently just first atom)
-        lAtom = self.bar.c[(lContact[0]-1)*3:lContact[0]*3]
-        rAtom = self.bar.c[(rContact[0]-1)*3:rContact[0]*3]
+        lAtom = self.bar.c[(self.lContact[0]-1)*3:self.lContact[0]*3]
+        rAtom = self.bar.c[(self.rContact[0]-1)*3:self.rContact[0]*3]
         vec  = (lAtom-rAtom)
         dist = LA.norm(vec)
         vecNorm = vec/dist
@@ -122,19 +120,30 @@ class NEGF:
         self.bar.scalar("Y-EFIELD", int(field[1]))
         self.bar.scalar("Z-EFIELD", int(field[2]))
         print("E-field set to "+str(LA.norm(field))+" au")
-    
-        # Prepare Sigma matrices
+
+    def setSigmaE(self, contactList, gList, tauList, overlapList, fermi, qV):
+        self.energyDep = True
+        sigmaList = []
+        self.contacts = [np.where(np.isin(abs(self.locs), l))[0] for l in contactList]
+        self.gList = gList 
+        self.tau = tauList
+        self.stau = overlapList
+
+
+        #self.g2 = gList[1]for i in range(len(gList)):
+        #    ind = np.where(np.isin(abs(self.locs), contactList[i]))[0]
+        #    sigmaList.append(formSigmaE(ind, gList[i], tauList[i],
+        
+    def setSigma(self, lContact, rContact, sig=-0.1j, sig2=False): 
+        self.lContact=lContact
+        self.rContact=rContact
         lInd = np.where(np.isin(abs(self.locs), lContact))[0]
         rInd = np.where(np.isin(abs(self.locs), rContact))[0]
-        if not isinstance(g, bool) and not isinstance(tau1, bool) and not isintance(tau2, bool):
-            self.sigma1 = formSigmaE(lInd, g, tau1, self.mu1, self.nsto, self.S)
-            self.sigma2 = formSigmaE(lInd, g, tau2, self.mu2, self.nsto, self.S)
+        self.sigma1 = formSigma(lInd, sig, self.nsto, self.S)
+        if not isinstance(sig2, bool):
+            self.sigma2 = formSigma(rInd, sig2, self.nsto, self.S)
         else:
-            self.sigma1 = formSigma(lInd, sig, self.nsto, self.S)
-            if not isinstance(sig2, bool):
-                self.sigma2 = formSigma(rInd, sig2, self.nsto, self.S)
-            else:
-                self.sigma2 = formSigma(rInd, sig, self.nsto, self.S)
+            self.sigma2 = formSigma(rInd, sig, self.nsto, self.S)
         
         self.sigma12 = self.sigma1 + self.sigma2
     
