@@ -36,7 +36,7 @@ Eminf = -1e5
 
 
 
-class NEGF:
+class NEGF(object):
     def __init__(self, fn, basis="lanl2dz", func="b3pw91", spin="r", chkInit=True, route=""):
         # Set up variables
         self.ifile = fn + ".gjf"
@@ -47,6 +47,7 @@ class NEGF:
         self.method= spin+func
         self.otherRoute = route     # Other commands that are needed in Gaussian
         self.spin = spin
+        self.energyDep = False;
     
         # Start calculation: Load Initial Matrices from Gaussian
     
@@ -114,31 +115,23 @@ class NEGF:
         vec  = (lAtom-rAtom)
         dist = LA.norm(vec)
         vecNorm = vec/dist
+        print(vecNorm, qV, dist)
     
         field = -1*vecNorm*qV*V_to_au/(dist*0.0001)
         self.bar.scalar("X-EFIELD", int(field[0]))
         self.bar.scalar("Y-EFIELD", int(field[1]))
         self.bar.scalar("Z-EFIELD", int(field[2]))
         print("E-field set to "+str(LA.norm(field))+" au")
-
-    def setSigmaE(self, contactList, gList, tauList, overlapList, fermi, qV):
-        self.energyDep = True
-        sigmaList = []
-        self.contacts = [np.where(np.isin(abs(self.locs), l))[0] for l in contactList]
-        self.gList = gList 
-        self.tau = tauList
-        self.stau = overlapList
-
-
-        #self.g2 = gList[1]for i in range(len(gList)):
-        #    ind = np.where(np.isin(abs(self.locs), contactList[i]))[0]
-        #    sigmaList.append(formSigmaE(ind, gList[i], tauList[i],
         
-    def setSigma(self, lContact, rContact, sig=-0.1j, sig2=False): 
+    def setContacts(self, lContact, rContact):
         self.lContact=lContact
         self.rContact=rContact
         lInd = np.where(np.isin(abs(self.locs), lContact))[0]
         rInd = np.where(np.isin(abs(self.locs), rContact))[0]
+        return lInd, rInd
+    
+    def setSigma(self, lContact, rContact, sig=-0.1j, sig2=False): 
+        lInd, rInd = self.setContacts(lContact, rContact)
         self.sigma1 = formSigma(lInd, sig, self.nsto, self.S)
         if not isinstance(sig2, bool):
             self.sigma2 = formSigma(rInd, sig2, self.nsto, self.S)
@@ -188,8 +181,9 @@ class NEGF:
         P2 = density(V, D, GamBar2, Emin, self.mu2)
         Pw = density(Vw, Dw, GamBarW1+GamBarW2, Eminf, Emin)
         
-        P1_ = densityGrid(Fbar, GamBar1, Emin, self.mu1)
-        print(np.diag(P1_-P1))
+        #P1_ = densityGrid(Fbar, GamBar1, Emin, self.mu1)
+        #print(np.diag(P1_-P1))
+        
         P = P1 + P2 + Pw
         
         # Calculate Level Occupation, Lowdin TF,  Return
