@@ -32,9 +32,9 @@ class surfG:
         # Set up system and system-contact coupling
         self.tauList = taus
         self.stauList = staus
-        self.F = np.asmatrix(Fock)
-        self.S = np.asmatrix(Overlap)
-        self.X = np.asmatrix(fractional_matrix_power(Overlap, -0.5))
+        self.F = np.array(Fock)
+        self.S = np.array(Overlap)
+        self.X = np.array(fractional_matrix_power(Overlap, -0.5))
         self.indsList = indsList
         
         # Set up contact information
@@ -86,7 +86,7 @@ class surfG:
         diff = conv+1
         while diff>conv and count<maxIter:
             g_ = g.copy()
-            g = LA.inv(A - B*g*B.getH())#(E+1j*self.eps)*I - alpha - beta*g*beta.getH())
+            g = LA.inv(A - B@g@B.conj().T)
             dg = abs(g - g_)/(abs(g).max())
             g = g*relFactor + g_*(1-relFactor)
             diff = dg.max()
@@ -101,22 +101,22 @@ class surfG:
             self.setContacts()
     
     def sigma(self, E, i, conv=1e-5):
-        sigma = np.asmatrix(-1j*1e-9*self.S,dtype=complex)
+        sigma = np.array(-1j*1e-9*self.S,dtype=complex)
         inds = self.indsList[i]
         stau = self.stauList[i]
         tau = self.tauList[i]
         t = E*stau - tau
-        sig = t*self.g(E, i, conv)*t.getH()
+        sig = t@self.g(E, i, conv)@t.conj().T
         sigma[np.ix_(inds, inds)] += sig
         return sigma
     
     def sigmaTot(self, E, conv=1e-5):
-        sigma = np.asmatrix(-1j*1e-9*self.S,dtype=complex)
+        sigma = np.array(-1j*1e-9*self.S,dtype=complex)
         for i, inds in enumerate(self.indsList):
             stau = self.stauList[i]
             tau = self.tauList[i]
             t = E*stau - tau
-            sig = t*self.g(E, i, conv)*t.getH()
+            sig = t@self.g(E, i, conv)@t.conj().T
             sigma[np.ix_(inds, inds)] += sig
         return sigma
     
@@ -126,16 +126,15 @@ class surfG:
             sig = self.sigmaTot(E)
         else:
             sig = self.sigma(E, ind)
-        Gambar = self.X*(1j*(sig - sig.getH()))*self.X
-        Fbar = self.X*(self.F + sig)*self.X
-        D, V = LA.eig(Fbar);
-        print(E, D.flatten()[np.argsort(np.real(D).flatten())[18:20]])
-        V = np.asmatrix(V, dtype=complex)
-        Ga = np.asmatrix(np.diag(1/(E-np.conj(D))))
-        Ga = V*Ga*V.getH()
-        Gr = np.asmatrix(np.diag(1/(E-D)))
-        Gr = V*Gr*V.getH()
-        return Gr*Gambar*Ga
+        Gambar = self.X@(1j*(sig - sig.conj().T))@self.X
+        Fbar = self.X@(self.F + sig)@self.X
+        D, V = LA.eig(Fbar)
+        V = np.array(V, dtype=complex)
+        Ga = np.array(np.diag(1/(E-np.conj(D))))
+        Ga = V@Ga@V.conj().T
+        Gr = np.array(np.diag(1/(E-D)))
+        Gr = V@Gr@V.conj().T
+        return Gr@Gambar@Ga
     
     def recursiveResidue(self, E, ind=-1, conv=1e-3):
         resid = 1
@@ -146,7 +145,7 @@ class surfG:
                 sig = self.sigmaTot(E)
             else:
                 sig = self.sigma(E, ind)
-            Fbar = self.X*(self.F + sig)*self.X
+            Fbar = self.X@(self.F + sig)@self.X
             D, V = LA.eig(Fbar);
             ind = np.argmin(abs(E - D.flatten()))
             E = np.conj(D.flatten()[ind])
@@ -155,7 +154,7 @@ class surfG:
 
     def densityGrid(self, Emin, Emax, ind=-1, dE=0.001):
         Egrid = np.arange(Emin, Emax, dE)
-        den = np.asmatrix(np.zeros(np.shape(self.F)), dtype=complex)
+        den = np.array(np.zeros(np.shape(self.F)), dtype=complex)
         print('Starting Integration...')
         for i in range(1,len(Egrid)):
             E = (Egrid[i]+Egrid[i-1])/2
@@ -177,11 +176,11 @@ class surfG:
             sig = self.sigmaTot(center)
         else:
             sig = self.sigma(center, ind)
-        Fbar = self.X*(self.F + sig)*self.X
-        Res = np.asmatrix(np.zeros(np.shape(self.F)), dtype=complex)
-        I = np.asmatrix(np.identity(len(Fbar)))
+        Fbar = self.X@(self.F + sig)@self.X
+        Res = np.array(np.zeros(np.shape(self.F)), dtype=complex)
+        I = np.array(np.identity(len(Fbar)))
         D, V = LA.eig(Fbar)
-        Gambar = self.X*(1j*(sig - sig.getH()))*self.X
+        Gambar = self.X@(1j*(sig - sig.conj().T))@self.X
         for j, E in enumerate(D):
             if abs(E-center) < r:
                 #print('Residue, E=', E)
@@ -192,18 +191,19 @@ class surfG:
                         sig = self.sigmaTot(Enew)
                     else:
                         sig = self.sigma(Enew, ind)
-                    Fbar = self.X*(self.F + sig)*self.X
-                    Gambar = self.X*(1j*(sig - sig.getH()))*self.X
+                    Fbar = self.X@(self.F + sig)@self.X
+                    Gambar = self.X@(1j*(sig - sig.conj().T))@self.X
                     D, V = LA.eig(Fbar)
-                Ga = np.asmatrix(np.diag(1/(E-np.conj(D))))
-                Ga = V* Ga * V.getH() 
-                Y = V[:, j] * V.getH()[j,:]
-                Res += 2j*np.pi*np.conj(Y*Gambar*Ga) #WHY CONJUGATE???
+                Ga = np.array(np.diag(1/(E-np.conj(D))))
+                Ga = V@ Ga @ V.conj().T 
+                Vrow = np.array([V[j,:]])
+                Y = Vrow.T @ Vrow.conj()
+                Res += 2j*np.pi*np.conj(Y@Gambar@Ga) #WHY CONJUGATE???
                 #Res += 2j*np.pi*denFunc(D, V, Gambar, E+1e-9)*(-1e-9)
 
         #Integrate along contour
         print('Starting Integration...')
-        lineInt = np.asmatrix(np.zeros(np.shape(self.F)), dtype=complex)
+        lineInt = np.array(np.zeros(np.shape(self.F)), dtype=complex)
         for i in range(1,N):
             E = (Egrid[i]+Egrid[i-1])/2
             dS = Egrid[i]-Egrid[i-1]

@@ -1,6 +1,5 @@
 import numpy as np
 from numpy import linalg as LA
-from scipy.linalg import fractional_matrix_power
 import sys
 import time
 import matplotlib.pyplot as plt
@@ -70,13 +69,12 @@ class NEGFE(NEGF):
         self.sigmaW2 = formSigma(self.rInd, sigWVal, self.nsto, self.S)
         self.sigmaW12 = self.sigmaW1+self.sigmaW2
     
-        self.GamW1 = (self.sigmaW1 - self.sigmaW1.getH())*1j
-        self.GamW2 = (self.sigmaW2 - self.sigmaW2.getH())*1j
-        FbarW = self.X*(self.F*har_to_eV + self.sigmaW12)*self.X
-        GamBarW1 = self.X*self.GamW1*self.X
-        GamBarW2 = self.X*self.GamW2*self.X
-        Dw,Vw = LA.eig(np.asmatrix(FbarW))
-        Dw = np.asmatrix(Dw).T
+        self.GamW1 = (self.sigmaW1 - self.sigmaW1.conj().T)*1j
+        self.GamW2 = (self.sigmaW2 - self.sigmaW2.conj().T)*1j
+        FbarW = self.X@(self.F*har_to_eV + self.sigmaW12)@self.X
+        GamBarW1 = self.X@self.GamW1@self.X
+        GamBarW2 = self.X@self.GamW2@self.X
+        Dw,Vw = LA.eig(np.array(FbarW))
         Pw = density(Vw, Dw, GamBarW1+GamBarW2, Eminf, Emin)
         
         # Density contribution from above Emin
@@ -89,12 +87,11 @@ class NEGFE(NEGF):
         P = P1 + P2 + Pw
         
         # Calculate Level Occupation, Lowdin TF,  Return
-        D,V = LA.eig(self.X*(self.F*har_to_eV)*self.X)
-        D = np.asmatrix(D).T
-        pshift = V.getH() * P * V
-        self.P = np.real(self.X*P*self.X)
+        D,V = LA.eig(self.X@(self.F*har_to_eV)@self.X)
+        pshift = V.conj().T @ P @ V
+        self.P = np.real(self.X@P@self.X)
         occList = np.diag(np.real(pshift)) 
-        EList = np.asarray(np.real(D)).flatten()
+        EList = np.array(np.real(D)).flatten()
         inds = np.argsort(EList)
         
         # Debug:

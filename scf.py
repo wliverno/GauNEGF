@@ -1,5 +1,5 @@
-import numpy as np
-from numpy import linalg as LA
+import cupy as np
+from cupy import linalg as LA
 from scipy.linalg import fractional_matrix_power
 import sys
 import time
