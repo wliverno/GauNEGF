@@ -61,16 +61,16 @@ class NEGF(object):
         self.F, self.locs = getFock(self.bar, spin)
         self.P = getDen(self.bar, spin)
         self.nsto = len(self.locs)
-        Omat = np.asmatrix(self.bar.matlist["OVERLAP"].expand())
+        Omat = np.array(self.bar.matlist["OVERLAP"].expand())
         if spin == "ro" or spin == "u":
             self.S = np.block([[Omat, np.zeros(Omat.shape)],[np.zeros(Omat.shape),Omat]])
         else:
             self.S = Omat
         
-        self.X = np.asmatrix(fractional_matrix_power(self.S, -0.5))
+        self.X = np.array(fractional_matrix_power(self.S, -0.5))
     
-        self.I = np.asmatrix(np.identity(self.nsto))
-        H0 = self.X*self.F*har_to_eV*self.X.getH()
+        self.I = np.array(np.identity(self.nsto))
+        #H0 = self.X*self.F*har_to_eV*self.X.conj().T
     
         print("ORBS:")
         print(self.locs)
@@ -86,7 +86,7 @@ class NEGF(object):
     def runDFT(self, chkInit):
         if chkInit:
             try:
-                self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="density",chkname=self.chkfile)
+                self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock=True,chkname=self.chkfile)
                 print('Checking '+self.chkfile+' for saved data...');
             except:
                 print('Checkpoint not loaded, running full SCF...');
@@ -110,12 +110,11 @@ class NEGF(object):
     
         # Calculate electric field to apply during SCF, apply between contacts
         # TODO: average location of all contact atoms (currently just first atom)
-        lAtom = self.bar.c[(self.lContact[0]-1)*3:self.lContact[0]*3]
-        rAtom = self.bar.c[(self.rContact[0]-1)*3:self.rContact[0]*3]
-        vec  = (lAtom-rAtom)
+        lAtom = self.bar.c[int(self.lContact[0]-1)*3:int(self.lContact[0])*3]
+        rAtom = self.bar.c[int(self.rContact[0]-1)*3:int(self.rContact[0])*3]
+        vec  = np.array(lAtom-rAtom)
         dist = LA.norm(vec)
         vecNorm = vec/dist
-        print(vecNorm, qV, dist)
     
         field = -1*vecNorm*qV*V_to_au/(dist*0.0001)
         self.bar.scalar("X-EFIELD", int(field[0]))
@@ -124,10 +123,10 @@ class NEGF(object):
         print("E-field set to "+str(LA.norm(field))+" au")
         
     def setContacts(self, lContact, rContact):
-        self.lContact=lContact
-        self.rContact=rContact
-        lInd = np.where(np.isin(abs(self.locs), lContact))[0]
-        rInd = np.where(np.isin(abs(self.locs), rContact))[0]
+        self.lContact=np.array(lContact)
+        self.rContact=np.array(rContact)
+        lInd = np.where(np.isin(abs(self.locs), self.lContact))[0]
+        rInd = np.where(np.isin(abs(self.locs), self.rContact))[0]
         return lInd, rInd
     
     def setSigma(self, lContact, rContact, sig=-0.1j, sig2=False): 
@@ -141,40 +140,38 @@ class NEGF(object):
         self.sigma12 = self.sigma1 + self.sigma2
     
         print('Max imag sigma:', str(np.max(np.abs(np.imag(self.sigma12)))));
-        self.Gam1 = (self.sigma1 - self.sigma1.getH())*1j
-        self.Gam2 = (self.sigma2 - self.sigma2.getH())*1j
+        self.Gam1 = (self.sigma1 - self.sigma1.conj().T)*1j
+        self.Gam2 = (self.sigma2 - self.sigma2.conj().T)*1j
     
         sigWVal = -0.00001j #Based on Damle Code
         self.sigmaW1 = formSigma(lInd, sigWVal, self.nsto, self.S)
         self.sigmaW2 = formSigma(rInd, sigWVal, self.nsto, self.S)
         self.sigmaW12 = self.sigmaW1+self.sigmaW2
     
-        self.GamW1 = (self.sigmaW1 - self.sigmaW1.getH())*1j
-        self.GamW2 = (self.sigmaW2 - self.sigmaW2.getH())*1j
+        self.GamW1 = (self.sigmaW1 - self.sigmaW1.conj().T)*1j
+        self.GamW2 = (self.sigmaW2 - self.sigmaW2.conj().T)*1j
     
     def getSigma(self):
         return (self.sigma1, self.sigma2)
 
     def FockToP(self):
         # Prepare Variables for Analytical Integration
-        X = np.asmatrix(self.X)
+        X = np.array(self.X)
         self.F, self.locs = getFock(self.bar, self.spin)
-        Fbar = X * (self.F*har_to_eV + self.sigma12) * X
-        GamBar1 = X * self.Gam1 * X
-        GamBar2 = X * self.Gam2 * X
+        Fbar = X @ (self.F*har_to_eV + self.sigma12) @ X
+        GamBar1 = X @ self.Gam1 @ X
+        GamBar2 = X @ self.Gam2 @ X
 
-        D,V = LA.eig(np.asmatrix(Fbar))
-        D = np.asmatrix(D).T
+        D,V = LA.eig(np.array(Fbar))
            
         err =  np.float_(sum(np.imag(D)))
         if  err > 0:
             print('Imaginary elements on diagonal of D are positive ------->  ', err)
 
-        FbarW = X*(self.F*har_to_eV + self.sigmaW12)*X
-        GamBarW1 = X*self.GamW1*X
-        GamBarW2 = X*self.GamW2*X
-        Dw,Vw = LA.eig(np.asmatrix(FbarW))
-        Dw = np.asmatrix(Dw).T
+        FbarW = X@(self.F*har_to_eV + self.sigmaW12)@X
+        GamBarW1 = X@self.GamW1@X
+        GamBarW2 = X@self.GamW2@X
+        Dw,Vw = LA.eig(np.array(FbarW))
         
         # Calculate Density
         P1 = density(V, D, GamBar1, Emin, self.mu1)
@@ -187,15 +184,15 @@ class NEGF(object):
         P = P1 + P2 + Pw
         
         # Calculate Level Occupation, Lowdin TF,  Return
-        pshift = V.getH() * P * V
-        self.P = np.real(X*P*X)
+        pshift = V.conj().T @ P @ V
+        self.P = np.real(X@P@X)
         occList = np.diag(np.real(pshift)) 
-        EList = np.asarray(np.real(D)).flatten()
+        EList = np.array(np.real(D)).flatten()
         inds = np.argsort(EList)
         
         # Debug:
-        #for pair in zip(occList[inds], EList[inds]):                       
-        #    print("Energy =", str(pair[1]), ", Occ =", str(pair[0]))
+        for pair in zip(occList[inds], EList[inds]):                       
+            print("Energy =", str(pair[1]), ", Occ =", str(pair[0]))
         
         return EList[inds], occList[inds]
 
@@ -287,7 +284,7 @@ class NEGF(object):
  
         print("--- %s seconds ---" % (time.time() - self.start_time))
         print('')
-        print('SCF Loop existed at', time.asctime())
+        print('SCF Loop exited at', time.asctime())
         
         print('=========================')
         print('ENERGY LEVEL OCCUPATION:')
@@ -303,10 +300,10 @@ class NEGF(object):
         print(self.chkfile+' written!') 
     
     def saveMAT(self, matfile="out.mat"):
-        H0 = self.X*self.F*har_to_eV*self.X
-
+        H0 = self.X@(self.F*har_to_eV)@self.X
+        (sigma1, sigma2) = self.getSigma(self.fermi)
         # Save data in MATLAB .mat file
-        matdict = {"H0":H0, "sig1": np.diag(self.sigma1), "sig2": np.diag(self.sigma2), "X": self.X, "fermi": self.fermi, "qV": self.qV, "spin" : self.spin}
+        matdict = {"H0":H0, "sig1": sigma1, "sig2": sigma2, "X": self.X, "fermi": self.fermi, "qV": self.qV, "spin" : self.spin}
         io.savemat(matfile, matdict)
         return H0
 
