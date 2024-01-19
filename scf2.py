@@ -204,11 +204,10 @@ class NEGF(object):
         Dense_old = np.diagonal(Pback)
         Dense_diff = abs(np.diagonal(self.P) - Dense_old)
         
-        #DEBUG
-        #print('Compare')
+        ##DEBUG
+        #print('DEBUG: Compare Density')
         #print(np.diag(self.P)[:6])
         #print(np.diag(Pback)[:6])
-        #print(np.diag(self.F)[:6])
 
         
         # Apply Damping, store to Gaussian matrix
