@@ -77,6 +77,13 @@ class NEGFE(NEGF):
         Dw,Vw = LA.eig(np.array(FbarW))
         Pw = density(Vw, Dw, GamBarW1+GamBarW2, Eminf, Emin)
         
+        # DEBUG: 
+        #Pwalt = self.g.densityComplex(Emin=Eminf, Emax=Emin, dE=(Emin-Eminf)/400)
+        #print("Comparing Densities:")
+        #print(np.diag(Pw)[:10])
+        #print(np.diag(Pwalt)[:10])
+        #print("--------------------------")
+        
         # Density contribution from above Emin
         print('Calculating Density for left contact:')
         P1 = self.g.densityComplex(Emin, self.mu1, 0)
@@ -94,7 +101,7 @@ class NEGFE(NEGF):
         EList = np.array(np.real(D)).flatten()
         inds = np.argsort(EList)
         
-        # Debug:
+        ## Debug:
         #for pair in zip(occList[inds], EList[inds]):                       
         #    print("Energy =", str(pair[1]), ", Occ =", str(pair[0]))
         

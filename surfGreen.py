@@ -147,8 +147,8 @@ class surfG:
                 sig = self.sigma(E, ind)
             Fbar = self.X@(self.F + sig)@self.X
             D, V = LA.eig(Fbar);
-            ind = np.argmin(abs(E - D.flatten()))
-            E = np.conj(D.flatten()[ind])
+            Eind = np.argmin(abs(E - D.flatten()))
+            E = np.conj(D.flatten()[Eind])
             resid = abs((Eprev - E)/Eprev)
         return E
 
@@ -163,7 +163,7 @@ class surfG:
         print('Integration done!')
         return den/(2*np.pi)
 
-    def densityComplex(self, Emin, Emax, ind=-1, dE=0.1, recursiveResid=False):
+    def densityComplex(self, Emin, Emax, ind=-1, dE=0.1, recursiveResid=True):
         #Construct circular contour
         center = (Emin+Emax)/2
         r = (Emax-Emin)/2
