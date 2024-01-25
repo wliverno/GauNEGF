@@ -58,8 +58,8 @@ class NEGF(object):
         self.runDFT(chkInit)
 
         # Prepare self.F, Density, self.S, and TF matrices
-        self.F, self.locs = getFock(self.bar, spin)
         self.P = getDen(self.bar, spin)
+        self.F, self.locs = getFock(self.bar, spin)
         self.nsto = len(self.locs)
         Omat = np.array(self.bar.matlist["OVERLAP"].expand())
         if spin == "ro" or spin == "u":
@@ -96,6 +96,8 @@ class NEGF(object):
         else:
             print('Using default Harris DFT guess to initialize...')
             self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="GUESS",chkname=self.chkfile)
+            storeDen(self.bar, getDen(self.bar, self.spin), self.spin) 
+            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock=True)
     
     def updateN(self):
         self.nelec = np.real(np.trace(self.P))
@@ -151,7 +153,7 @@ class NEGF(object):
         self.GamW1 = (self.sigmaW1 - self.sigmaW1.conj().T)*1j
         self.GamW2 = (self.sigmaW2 - self.sigmaW2.conj().T)*1j
     
-    def getSigma(self):
+    def getSigma(self, E):
         return (self.sigma1, self.sigma2)
 
     def FockToP(self):
@@ -191,8 +193,8 @@ class NEGF(object):
         inds = np.argsort(EList)
         
         # Debug:
-        for pair in zip(occList[inds], EList[inds]):                       
-            print("Energy =", str(pair[1]), ", Occ =", str(pair[0]))
+        #for pair in zip(occList[inds], EList[inds]):                       
+        #    print("Energy =", str(pair[1]), ", Occ =", str(pair[0]))
         
         return EList[inds], occList[inds]
 
