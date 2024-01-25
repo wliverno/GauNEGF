@@ -42,11 +42,12 @@ class surfG:
             self.contactFromFock = True
             self.setContacts()
         else:
+            self.contactFromFock = False
             self.setContacts(alphas, aOverlaps, betas, bOverlaps)
             
         # Set up broadening for retarded/advanced Green's function, initialize g
         self.eps = eps
-        self.gPrev = 0;
+        self.gPrev = [np.zeros(np.shape(alpha)) for alpha in self.aList]
     
     def setContacts(self, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1):
         if self.contactFromFock:
@@ -73,14 +74,7 @@ class surfG:
         Sbeta = self.bSList[i]
         A = (E+1j*self.eps)*Salpha - alpha
         B = (E+1j*self.eps)*Sbeta - beta
-        if isinstance(self.gPrev, int):
-            try:
-                g = LA.inv(A)
-            except:
-                g = LA.pinv(A)
-                print(f'Warning: using pseudo inverse to initialize g (singular matrix) for E={E}')
-        else:
-            g = self.gPrev.copy()
+        g = self.gPrev[i].copy()
         count = 0
         maxIter = int(1/conv)
         diff = conv+1
@@ -92,7 +86,7 @@ class surfG:
             diff = dg.max()
             count = count+1
         #print(f'g generated in {count} iterations with convergence {diff}')
-        self.gPrev = g
+        self.gPrev[i] = g
         return g
     
     def setF(self, F):
@@ -101,7 +95,7 @@ class surfG:
             self.setContacts()
     
     def sigma(self, E, i, conv=1e-5):
-        sigma = np.array(-1j*1e-9*self.S,dtype=complex)
+        sigma = np.array(np.zeros(np.shape(self.F)), dtype=complex)
         inds = self.indsList[i]
         stau = self.stauList[i]
         tau = self.tauList[i]
@@ -111,7 +105,7 @@ class surfG:
         return sigma
     
     def sigmaTot(self, E, conv=1e-5):
-        sigma = np.array(-1j*1e-9*self.S,dtype=complex)
+        sigma = np.array(np.zeros(np.shape(self.F)), dtype=complex)
         for i, inds in enumerate(self.indsList):
             stau = self.stauList[i]
             tau = self.tauList[i]
