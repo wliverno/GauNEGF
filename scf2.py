@@ -301,10 +301,9 @@ class NEGF(object):
         print(self.chkfile+' written!') 
     
     def saveMAT(self, matfile="out.mat"):
-        H0 = self.X@(self.F*har_to_eV)@self.X
         (sigma1, sigma2) = self.getSigma(self.fermi)
         # Save data in MATLAB .mat file
-        matdict = {"H0":H0, "sig1": sigma1, "sig2": sigma2, "X": self.X, "fermi": self.fermi, "qV": self.qV, "spin" : self.spin}
+        matdict = {"F":self.F, "sig1": sigma1, "sig2": sigma2, "S": self.S, "fermi": self.fermi, "qV": self.qV, "spin" : self.spin}
         io.savemat(matfile, matdict)
         return H0
 
