@@ -305,5 +305,5 @@ class NEGF(object):
         # Save data in MATLAB .mat file
         matdict = {"F":self.F, "sig1": sigma1, "sig2": sigma2, "S": self.S, "fermi": self.fermi, "qV": self.qV, "spin" : self.spin}
         io.savemat(matfile, matdict)
-        return H0
+        return self.X@self.F@self.X
 

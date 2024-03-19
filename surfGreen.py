@@ -29,13 +29,21 @@ BetaEnergies = "BETA ORBITAL ENERGIES"
 class surfG:
     def __init__(self, Fock, Overlap, indsList, taus, staus, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eps=1e-9):
         
-        # Set up system and system-contact coupling
-        self.tauList = taus
-        self.stauList = staus
+        # Set up system
         self.F = np.array(Fock)
         self.S = np.array(Overlap)
         self.X = np.array(fractional_matrix_power(Overlap, -0.5))
         self.indsList = indsList
+        
+        # Set Contact Coupling
+        if len(np.shape(taus[0])) == 1:
+           self.tauFromFock = True
+           self.tauInds = taus
+           self.tauList = [self.F[np.ix_(taus[0], taus[1])], self.F[np.ix_(taus[1], taus[0])]]
+           self.stauList = [self.S[np.ix_(taus[0], taus[1])], self.S[np.ix_(taus[1], taus[0])]]
+        else:
+           self.tauList = taus
+           self.stauList = staus
         
         # Set up contact information
         if isinstance(alphas, int):
@@ -44,7 +52,7 @@ class surfG:
         else:
             self.contactFromFock = False
             self.setContacts(alphas, aOverlaps, betas, bOverlaps)
-            
+
         # Set up broadening for retarded/advanced Green's function, initialize g
         self.eps = eps
         self.gPrev = [np.zeros(np.shape(alpha)) for alpha in self.aList]
@@ -93,6 +101,10 @@ class surfG:
         self.F = F
         if self.contactFromFock:
             self.setContacts()
+        if self.tauFromFock:
+           taus = self.tauInds
+           self.tauList = [self.F[np.ix_(taus[0], taus[1])], self.F[np.ix_(taus[1], taus[0])]]
+           self.stauList = [self.S[np.ix_(taus[0], taus[1])], self.S[np.ix_(taus[1], taus[0])]]
     
     def sigma(self, E, i, conv=1e-5):
         sigma = np.array(np.zeros(np.shape(self.F)), dtype=complex)
