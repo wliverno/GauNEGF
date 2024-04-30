@@ -39,20 +39,8 @@ Eminf = -1e5
 
 
 class NEGFE(NEGF):
-#    def __init__(self, fn, basis="lanl2dz", func="b3pw91", spin="r", chkInit=True, route=""):
-#        self.NEGF = NEGF(fn, basis, func, spin, chkInit, route)
-#        self.F = self.NEGF.F
-#        self.S = self.NEGF.S
-#        self.X = self.NEGF.X
-#    
-#    def setVoltage(self, fermi, qV):
-#        self.NEGF.setVoltage(fermi, qV)
-#        self.fermi = fermi
-#        self.qV = qV
-#        self.mu1 =  fermi + (qV/2)
-#        self.mu2 =  fermi - (qV/2)
     
-    def setContactE(self, contactList, tauList, stauList, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eps=1e-9):
+    def setContactE(self, contactList, tauList=-1, stauList=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eps=1e-9):
         inds = super().setContacts(contactList[0], contactList[1])
         self.lInd = inds[0]
         self.rInd = inds[1]
@@ -71,6 +59,7 @@ class NEGFE(NEGF):
     
         self.GamW1 = (self.sigmaW1 - self.sigmaW1.conj().T)*1j
         self.GamW2 = (self.sigmaW2 - self.sigmaW2.conj().T)*1j
+        
         FbarW = self.X@(self.F*har_to_eV + self.sigmaW12)@self.X
         GamBarW1 = self.X@self.GamW1@self.X
         GamBarW2 = self.X@self.GamW2@self.X
@@ -99,20 +88,25 @@ class NEGFE(NEGF):
         self.P = np.real(self.X@P@self.X)
         occList = np.diag(np.real(pshift)) 
         EList = np.array(np.real(D)).flatten()
-        inds = np.argsort(EList)
-        
-        ## Debug:
-        #for pair in zip(occList[inds], EList[inds]):                       
-        #    print("Energy =", str(pair[1]), ", Occ =", str(pair[0]))
-        
+        inds = np.argsort(EList)        
         return EList[inds], occList[inds]
 
     
     # Use Gaussian to calculate the Density Matrix
     def PToFock(self, damping):
+        Fock_old = self.F.copy()
         dE, RMSDP, MaxDP = super().PToFock(damping)
         self.F, self.locs = getFock(self.bar, self.spin)
         self.g.setF(self.F)
+        
+        # Debug:
+        D,V = LA.eig(self.X@(Fock_old*har_to_eV)@self.X) 
+        EListBefore = np.sort(np.array(np.real(D)).flatten())
+        D,V = LA.eig(self.X@(self.F*har_to_eV)@self.X) 
+        EList = np.sort(np.array(np.real(D)).flatten())
+        for pair in zip(EListBefore, EList):                       
+            print("Energy Before =", str(pair[0]), ", Energy After =", str(pair[1]))
+        
         return dE, RMSDP, MaxDP
 
 

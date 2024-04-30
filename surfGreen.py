@@ -27,7 +27,7 @@ BetaEnergies = "BETA ORBITAL ENERGIES"
 
 
 class surfG:
-    def __init__(self, Fock, Overlap, indsList, taus, staus, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eps=1e-9):
+    def __init__(self, Fock, Overlap, indsList, taus=-1, staus=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eps=1e-9):
         
         # Set up system
         self.F = np.array(Fock)
@@ -36,6 +36,8 @@ class surfG:
         self.indsList = indsList
         
         # Set Contact Coupling
+        if isinstance(taus, int):
+            taus = indsList[-1:]+indsList[:-1]
         if len(np.shape(taus[0])) == 1:
            self.tauFromFock = True
            self.tauInds = taus

@@ -117,8 +117,12 @@ class NEGF(object):
         vec  = np.array(lAtom-rAtom)
         dist = LA.norm(vec)
         vecNorm = vec/dist
-    
-        field = -1*vecNorm*qV*V_to_au/(dist*0.0001)
+        
+        if dist == 0:
+            print("WARNING: left and right contact atoms identical, E-field set to zero!")
+            field = [0,0,0]
+        else:
+            field = -1*vecNorm*qV*V_to_au/(dist*0.0001)
         self.bar.scalar("X-EFIELD", int(field[0]))
         self.bar.scalar("Y-EFIELD", int(field[1]))
         self.bar.scalar("Z-EFIELD", int(field[2]))
@@ -191,11 +195,6 @@ class NEGF(object):
         occList = np.diag(np.real(pshift)) 
         EList = np.array(np.real(D)).flatten()
         inds = np.argsort(EList)
-        
-        # Debug:
-        #for pair in zip(occList[inds], EList[inds]):                       
-        #    print("Energy =", str(pair[1]), ", Occ =", str(pair[0]))
-        
         return EList[inds], occList[inds]
 
     
