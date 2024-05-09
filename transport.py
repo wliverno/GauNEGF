@@ -25,7 +25,7 @@ def quickCurrent(F, S, sig1, sig2, fermi, qV, spin="r",dE=0.01):
 # Calculate current from SCF mat file
 def qCurrentF(fn, dE=0.01):
     matfile = io.loadmat(fn)
-    return quickCurrent(matfile["F"], matfile["S"], matfile["sig1"][0],matfile["sig2"][0],
+    return quickCurrent(matfile["F"], matfile["S"], matfile["sig1"],matfile["sig2"],
             matfile["fermi"][0,0], matfile["qV"][0,0], matfile["spin"][0], dE=dE)
 
 # H0 is an NxN matrix, sig1 and sig2 are Nx1 vectors or NxN Matrices
