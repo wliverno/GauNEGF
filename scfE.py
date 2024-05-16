@@ -32,10 +32,6 @@ eoverh = 3.874e-5       # A/eV
 kT = 0.025              # eV @ 20degC
 V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 
-#From Sajjad/Damle:
-Emin = -15
-Eminf = -1e5
-
 
 
 class NEGFE(NEGF):
@@ -51,7 +47,7 @@ class NEGFE(NEGF):
         return (self.g.sigma(E, 0), self.g.sigma(E, 1))
 
     def FockToP(self):
-        # Density contribution from below Emin
+        # Density contribution from below self.Emin
         sigWVal = -0.00001j #Based on Damle Code
         self.sigmaW1 = formSigma(self.lInd, sigWVal, self.nsto, self.S)
         self.sigmaW2 = formSigma(self.rInd, sigWVal, self.nsto, self.S)
@@ -64,20 +60,20 @@ class NEGFE(NEGF):
         GamBarW1 = self.X@self.GamW1@self.X
         GamBarW2 = self.X@self.GamW2@self.X
         Dw,Vw = LA.eig(np.array(FbarW))
-        Pw = density(Vw, Dw, GamBarW1+GamBarW2, Eminf, Emin)
+        Pw = density(Vw, Dw, GamBarW1+GamBarW2, self.Eminf, self.Emin)
         
         # DEBUG: 
-        #Pwalt = self.g.densityComplex(Emin=Eminf, Emax=Emin, dE=(Emin-Eminf)/400)
+        #Pwalt = self.g.densityComplex(self.Emin=Eminf, Emax=Emin, dE=(Emin-Eminf)/400)
         #print("Comparing Densities:")
         #print(np.diag(Pw)[:10])
         #print(np.diag(Pwalt)[:10])
         #print("--------------------------")
         
-        # Density contribution from above Emin
+        # Density contribution from above self.Emin
         print('Calculating Density for left contact:')
-        P1 = self.g.densityComplex(Emin, self.mu1, 0)
+        P1 = self.g.densityComplex(self.Emin, self.mu1, 0)
         print('Calculating Density for right contact:')
-        P2 = self.g.densityComplex(Emin, self.mu2, 1)
+        P2 = self.g.densityComplex(self.Emin, self.mu2, 1)
         
         # Sum them Up.
         P = P1 + P2 + Pw
@@ -89,23 +85,28 @@ class NEGFE(NEGF):
         occList = np.diag(np.real(pshift)) 
         EList = np.array(np.real(D)).flatten()
         inds = np.argsort(EList)        
+        
+        #DEBUG:
+        for pair in zip(occList[inds], EList[inds]):                       
+            print("Energy=", str(pair[1]), ", Occ=", str(pair[0]))
+
         return EList[inds], occList[inds]
 
     
     # Use Gaussian to calculate the Density Matrix
-    def PToFock(self, damping):
+    def PToFock(self, damping, Edamp=False):
         Fock_old = self.F.copy()
-        dE, RMSDP, MaxDP = super().PToFock(damping)
+        dE, RMSDP, MaxDP = super().PToFock(damping, Edamp)
         self.F, self.locs = getFock(self.bar, self.spin)
         self.g.setF(self.F)
         
         # Debug:
-        D,V = LA.eig(self.X@(Fock_old*har_to_eV)@self.X) 
-        EListBefore = np.sort(np.array(np.real(D)).flatten())
-        D,V = LA.eig(self.X@(self.F*har_to_eV)@self.X) 
-        EList = np.sort(np.array(np.real(D)).flatten())
-        for pair in zip(EListBefore, EList):                       
-            print("Energy Before =", str(pair[0]), ", Energy After =", str(pair[1]))
+        #D,V = LA.eig(self.X@(Fock_old*har_to_eV)@self.X) 
+        #EListBefore = np.sort(np.array(np.real(D)).flatten())
+        #D,V = LA.eig(self.X@(self.F*har_to_eV)@self.X) 
+        #EList = np.sort(np.array(np.real(D)).flatten())
+        #for pair in zip(EListBefore, EList):                       
+        #    print("Energy Before =", str(pair[0]), ", Energy After =", str(pair[1]))
         
         return dE, RMSDP, MaxDP
 
