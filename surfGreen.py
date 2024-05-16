@@ -25,6 +25,9 @@ BetaMOs = "BETA MO COEFFICIENTS"
 AlphaEnergies = "ALPHA ORBITAL ENERGIES"
 BetaEnergies = "BETA ORBITAL ENERGIES"
 
+#Constants
+kT = 0.0257 #eV (room temperature)
+
 
 class surfG:
     def __init__(self, Fock, Overlap, indsList, taus=-1, staus=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eps=1e-9):
@@ -44,6 +47,7 @@ class surfG:
            self.tauList = [self.F[np.ix_(taus[0], taus[1])], self.F[np.ix_(taus[1], taus[0])]]
            self.stauList = [self.S[np.ix_(taus[0], taus[1])], self.S[np.ix_(taus[1], taus[0])]]
         else:
+           self.tauFromFock = False
            self.tauList = taus
            self.stauList = staus
         
@@ -129,12 +133,14 @@ class surfG:
         return sigma
     
 
-    def denFunc(self, E, ind=-1):
+    def denFunc(self, E, ind=-1, mu=-9999):
         if ind==-1:
             sig = self.sigmaTot(E)
         else:
             sig = self.sigma(E, ind)
         Gambar = self.X@(1j*(sig - sig.conj().T))@self.X
+        if mu!=-9999:
+            Gambar /= np.exp((E-mu)/kT)+1
         Fbar = self.X@(self.F + sig)@self.X
         D, V = LA.eig(Fbar)
         V = np.array(V, dtype=complex)
@@ -171,14 +177,13 @@ class surfG:
         print('Integration done!')
         return den/(2*np.pi)
 
-    def densityComplex(self, Emin, Emax, ind=-1, dE=0.1, recursiveResid=True):
+    def densityComplex(self, Emin, Emax, ind=-1, dE=0.1, recursiveResid=True, mu=-9999):
         #Construct circular contour
         center = (Emin+Emax)/2
         r = (Emax-Emin)/2
         N = int((Emax-Emin)/dE)
         theta = np.linspace(0, np.pi, N)
         Egrid = r*np.exp(1j*theta)+center
-
         #Calculate Residues, use center energy
         if ind==-1:
             sig = self.sigmaTot(center)
@@ -201,6 +206,8 @@ class surfG:
                         sig = self.sigma(Enew, ind)
                     Fbar = self.X@(self.F + sig)@self.X
                     Gambar = self.X@(1j*(sig - sig.conj().T))@self.X
+                    if mu!=-9999:
+                        Gambar /= np.exp((Enew-mu)/kT)+1
                     D, V = LA.eig(Fbar)
                 Ga = np.array(np.diag(1/(E-np.conj(D))))
                 Ga = V@ Ga @ V.conj().T 
@@ -208,14 +215,14 @@ class surfG:
                 Y = Vrow.T @ Vrow.conj()
                 Res += 2j*np.pi*np.conj(Y@Gambar@Ga) #WHY CONJUGATE???
                 #Res += 2j*np.pi*denFunc(D, V, Gambar, E+1e-9)*(-1e-9)
-
+        
         #Integrate along contour
         print('Starting Integration...')
         lineInt = np.array(np.zeros(np.shape(self.F)), dtype=complex)
         for i in range(1,N):
             E = (Egrid[i]+Egrid[i-1])/2
             dS = Egrid[i]-Egrid[i-1]
-            lineInt += self.denFunc(E, ind)*dS
+            lineInt += self.denFunc(E, ind,mu)*dS
         print('Integration done!')
 
         #Use Residue Theorem

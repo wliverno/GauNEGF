@@ -30,10 +30,6 @@ eoverh = 3.874e-5       # A/eV
 kT = 0.025              # eV @ 20degC
 V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 
-#From Sajjad/Damle:
-Emin = -15
-Eminf = -1e5
-
 
 
 class NEGF(object):
@@ -48,6 +44,12 @@ class NEGF(object):
         self.otherRoute = route     # Other commands that are needed in Gaussian
         self.spin = spin
         self.energyDep = False;
+        self.Total_E_Old=9999.0;
+        
+        #Default Integration Limits (from Damle thesis)
+        self.Emin = -15
+        self.Eminf = -1e5
+
     
         # Start calculation: Load Initial Matrices from Gaussian
     
@@ -86,7 +88,7 @@ class NEGF(object):
     def runDFT(self, chkInit):
         if chkInit:
             try:
-                self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock=True,chkname=self.chkfile)
+                self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="DENSITY",chkname=self.chkfile)
                 print('Checking '+self.chkfile+' for saved data...');
             except:
                 print('Checkpoint not loaded, running full SCF...');
@@ -105,6 +107,11 @@ class NEGF(object):
     
     def setVoltage(self, fermi, qV):
         self.fermi = fermi
+        if fermi<self.Emin:
+            self.Emin = fermi-15;
+        if fermi<self.Eminf:
+            self.Emin = fermi-15;
+            self.Eminf = fermi-1e5;
         self.qV = qV
         self.mu1 =  fermi + (qV/2)
         self.mu2 =  fermi - (qV/2)
@@ -180,11 +187,11 @@ class NEGF(object):
         Dw,Vw = LA.eig(np.array(FbarW))
         
         # Calculate Density
-        P1 = density(V, D, GamBar1, Emin, self.mu1)
-        P2 = density(V, D, GamBar2, Emin, self.mu2)
-        Pw = density(Vw, Dw, GamBarW1+GamBarW2, Eminf, Emin)
+        P1 = density(V, D, GamBar1, self.Emin, self.mu1)
+        P2 = density(V, D, GamBar2, self.Emin, self.mu2)
+        Pw = density(Vw, Dw, GamBarW1+GamBarW2, self.Eminf, self.Emin)
         
-        #P1_ = densityGrid(Fbar, GamBar1, Emin, self.mu1)
+        #P1_ = densityGrid(Fbar, GamBar1, self.Emin, self.mu1)
         #print(np.diag(P1_-P1))
         
         P = P1 + P2 + Pw
@@ -195,11 +202,16 @@ class NEGF(object):
         occList = np.diag(np.real(pshift)) 
         EList = np.array(np.real(D)).flatten()
         inds = np.argsort(EList)
+        
+        #DEBUG:
+        #for pair in zip(occList[inds], EList[inds]):                       
+        #    print("Energy=", str(pair[1]), ", Occ=", str(pair[0]))
+
         return EList[inds], occList[inds]
 
     
     # Use Gaussian to calculate the Density Matrix
-    def PToFock(self, damping):
+    def PToFock(self, damping, Edamp):
         # Store Old Density Info
         Pback = getDen(self.bar, self.spin)
         Dense_old = np.diagonal(Pback)
@@ -212,26 +224,30 @@ class NEGF(object):
 
         
         # Apply Damping, store to Gaussian matrix
-        self.P = Pback + damping*(self.P - Pback)
+        if self.Total_E_Old<self.Total_E and Edamp:
+            print("APPLYING EDAMP...")
+            self.P = Pback + 0.1*damping*(self.P - Pback)
+        else:
+            self.P = Pback + damping*(self.P - Pback)
         storeDen(self.bar, self.P, self.spin) 
         self.updateN()
         print('Total number of electrons: ', self.nelec)
         
         # Run Gaussian, update SCF Energy
         self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="density", miscroute=self.otherRoute)
-        Total_E_Old = self.Total_E.copy()
+        self.Total_E_Old = self.Total_E.copy()
         self.Total_E  = self.bar.scalar("escf")
         print("SCF energy: ", self.Total_E)
 
         # Convergence variables: dE, RMSDP and MaxDP
-        dE = self.Total_E-Total_E_Old
+        dE = self.Total_E-self.Total_E_Old
         MaxDP = max(Dense_diff)
         RMSDP = np.sqrt(np.mean(Dense_diff**2))
         print('Energy difference is: ', dE)
         print(f'MaxDP: {MaxDP:.2E} | RMSDP: {RMSDP:.2E}')
         return dE, RMSDP, MaxDP
 
-    def SCF(self, conv=1e-5, damping=0.1, maxcycles=100, plot=True):
+    def SCF(self, conv=1e-5, damping=0.1, maxcycles=100, Edamp=False, plot=True):
         
         Loop = True
         Niter = 0
@@ -245,7 +261,7 @@ class NEGF(object):
             print('Iteration '+str(Niter)+':')
             # Fock --> P --> Fock
             EList, occList = self.FockToP()
-            dE, RMSDP, MaxDP = self.PToFock(damping)
+            dE, RMSDP, MaxDP = self.PToFock(damping, Edamp)
             
             # Write monitor variables
             TotalE.append(self.Total_E)
@@ -278,7 +294,7 @@ class NEGF(object):
             plt.plot(EList, occList, color ='r', marker='o')
             plt.xlabel('Energy')
             plt.ylabel('Occupation')
-            plt.xlim([Emin, 0])
+            plt.xlim([self.Emin, 0])
             plt.savefig('debug.png')
             plt.close()
  
