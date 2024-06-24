@@ -88,23 +88,27 @@ class NEGF(object):
     def runDFT(self, chkInit):
         if chkInit:
             try:
-                self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="DENSITY",chkname=self.chkfile)
+                self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="DENSITY",chkname=self.chkfile, miscroute=self.otherRoute)
                 print('Checking '+self.chkfile+' for saved data...');
             except:
                 print('Checkpoint not loaded, running full SCF...');
-                self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="scf",chkname=self.chkfile)
+                self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="scf",chkname=self.chkfile, miscroute=self.otherRoute)
         
             print("Done!")
+            self.F, self.locs = getFock(self.bar, self.spin)
+            
         else:
             print('Using default Harris DFT guess to initialize...')
             self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="GUESS",chkname=self.chkfile)
-            storeDen(self.bar, getDen(self.bar, self.spin), self.spin) 
             self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock=True)
+            print("Done!")
+            self.F, self.locs = getFock(self.bar, self.spin)
     
     def updateN(self):
         self.nelec = np.real(np.trace(self.P))
         return self.nelec
-    
+    def setFock(self, F_):
+        self.F = F_ 
     def setVoltage(self, fermi, qV):
         self.fermi = fermi
         if fermi<self.Emin:
@@ -187,6 +191,8 @@ class NEGF(object):
         Dw,Vw = LA.eig(np.array(FbarW))
         
         # Calculate Density
+        #P1 = densityGrid(Fbar, GamBar2, self.Emin, self.mu1)
+        #P2 = densityGrid(Fbar, GamBar2, self.Emin, self.mu2)
         P1 = density(V, D, GamBar1, self.Emin, self.mu1)
         P2 = density(V, D, GamBar2, self.Emin, self.mu2)
         Pw = density(Vw, Dw, GamBarW1+GamBarW2, self.Eminf, self.Emin)
@@ -198,7 +204,7 @@ class NEGF(object):
         
         # Calculate Level Occupation, Lowdin TF,  Return
         pshift = V.conj().T @ P @ V
-        self.P = np.real(X@P@X)
+        self.P = X@P@X
         occList = np.diag(np.real(pshift)) 
         EList = np.array(np.real(D)).flatten()
         inds = np.argsort(EList)
@@ -218,9 +224,9 @@ class NEGF(object):
         Dense_diff = abs(np.diagonal(self.P) - Dense_old)
         
         ##DEBUG
-        #print('DEBUG: Compare Density')
-        #print(np.diag(self.P)[:6])
-        #print(np.diag(Pback)[:6])
+        print('DEBUG: Compare Density')
+        print(np.real(np.diag(self.P)[:10]))
+        print(np.real(np.diag(Pback)[:10]))
 
         
         # Apply Damping, store to Gaussian matrix
@@ -274,7 +280,7 @@ class NEGF(object):
                 Loop = False
             elif Niter >= maxcycles:
                 print('##########################################')
-                print('WARNING: Convergence criterion net, maxcycles reached!')
+                print('WARNING: Convergence criterion not met, maxcycles reached!')
                 Loop = False
             Niter += 1
 
