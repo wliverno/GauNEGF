@@ -30,6 +30,7 @@ har_to_eV = 27.211386   # eV/Hartree
 eoverh = 3.874e-5       # A/eV
 kT = 0.025              # eV @ 20degC
 V_to_au = 0.03675       # Volts to Hartree/elementary Charge
+kB = 8.617e-5           # eV/Kelvin
 
 #### HELPER FUNCTIONS ####
 
@@ -66,8 +67,9 @@ def denFunc(D, V, Gambar, E):
     Gr = V*Gr*V.conj().T
     return Gr*Gambar*Ga
 
-def densityGrid(Fbar, Gambar, Emin, Emax, dE=0.001):
-    Egrid = np.arange(Emin, Emax, dE)
+def densityGrid(Fbar, Gambar, Emin, Emax, dE=0.001, T=300):
+    kT = kB*T
+    Egrid = np.arange(Emin, Emax+(5*kT), dE)
     I = np.array(np.identity(len(Fbar)))
     den = np.array(np.zeros(np.shape(Fbar)), dtype=complex)
     D, V = LA.eig(Fbar)
@@ -75,7 +77,8 @@ def densityGrid(Fbar, Gambar, Emin, Emax, dE=0.001):
     for i in range(1,len(Egrid)):
         E = (Egrid[i]+Egrid[i-1])/2
         dE = Egrid[i]-Egrid[i-1]
-        den += denFunc(D, V, Gambar, E)*dE
+        fermiFunc = 1/(np.exp((E-Emax)/kT)+1)
+        den += denFunc(D, V, Gambar, E)*fermiFunc*dE
     print('Integration done!')
     return den/(2*np.pi)
 
@@ -202,7 +205,7 @@ def storeDen(bar, P, spin):
         bar.addobj(PbO)
     elif spin=="g":
         P = np.complex128(np.array(P))
-        PaO = qco.OpMat(AlphaSCFDen,P,dimens=(nsto*2,nsto*2))
+        PaO = qco.OpMat(AlphaSCFDen,P,dimens=(nsto*2,nsto*2), typed='c')
         PaO.compress()
         bar.addobj(PaO)
     else:

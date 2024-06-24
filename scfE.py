@@ -98,7 +98,7 @@ class NEGFE(NEGF):
         Fock_old = self.F.copy()
         dE, RMSDP, MaxDP = super().PToFock(damping, Edamp)
         self.F, self.locs = getFock(self.bar, self.spin)
-        self.g.setF(self.F)
+        #self.g.setF(self.F)
         
         # Debug:
         #D,V = LA.eig(self.X@(Fock_old*har_to_eV)@self.X) 
