@@ -37,6 +37,8 @@ class surfG:
         self.S = np.array(Overlap)
         self.X = np.array(fractional_matrix_power(Overlap, -0.5))
         self.indsList = indsList
+        self.poleList = len(indsList)*[np.array([], dtype=complex)]
+        self.Egrid = len(indsList)*[np.array([], dtype=complex)]
         
         # Set Contact Coupling
         if isinstance(taus, int):
@@ -112,7 +114,8 @@ class surfG:
            self.tauList = [self.F[np.ix_(taus[0], taus[1])], self.F[np.ix_(taus[1], taus[0])]]
            self.stauList = [self.S[np.ix_(taus[0], taus[1])], self.S[np.ix_(taus[1], taus[0])]]
     
-    def sigma(self, E, i, conv=1e-5):
+    def sigma(self, E, i, conv=1e-3):
+        E = E.real
         sigma = np.array(np.zeros(np.shape(self.F)), dtype=complex)
         inds = self.indsList[i]
         stau = self.stauList[i]
@@ -122,7 +125,8 @@ class surfG:
         sigma[np.ix_(inds, inds)] += sig
         return sigma
     
-    def sigmaTot(self, E, conv=1e-5):
+    def sigmaTot(self, E, conv=1e-3):
+        E = E.real
         sigma = np.array(np.zeros(np.shape(self.F)), dtype=complex)
         for i, inds in enumerate(self.indsList):
             stau = self.stauList[i]
@@ -134,14 +138,15 @@ class surfG:
     
 
     def denFunc(self, E, ind=-1, mu=-9999):
+        sigTot = self.sigmaTot(E)
         if ind==-1:
-            sig = self.sigmaTot(E)
+            sig = sigTot
         else:
             sig = self.sigma(E, ind)
         Gambar = self.X@(1j*(sig - sig.conj().T))@self.X
         if mu!=-9999:
-            Gambar /= np.exp((E-mu)/kT)+1
-        Fbar = self.X@(self.F + sig)@self.X
+            Gambar /= (np.exp((E-mu)/kT)+1)
+        Fbar = self.X@(self.F + sigTot)@self.X
         D, V = LA.eig(Fbar)
         V = np.array(V, dtype=complex)
         Ga = np.array(np.diag(1/(E-np.conj(D))))
@@ -150,20 +155,23 @@ class surfG:
         Gr = V@Gr@V.conj().T
         return Gr@Gambar@Ga
     
-    def recursiveResidue(self, E, ind=-1, conv=1e-3):
+    def recursiveResidue(self, E, ind, conv=1e-3):
         resid = 1
-        while resid>conv:
-            #print(E, resid)
-            Eprev = E+0.0
-            if ind==-1:
-                sig = self.sigmaTot(E)
-            else:
-                sig = self.sigma(E, ind)
-            Fbar = self.X@(self.F + sig)@self.X
+        counter = 1
+        print(f'RRes starting for E={E}')
+        Eprev = E+0.0
+        while resid>conv and counter<50:
+            Eprev = (E+Eprev)*0.5
+            Fbar = self.X@(self.F + self.sigmaTot(Eprev))@self.X
             D, V = LA.eig(Fbar);
-            Eind = np.argmin(abs(E - D.flatten()))
-            E = np.conj(D.flatten()[Eind])
+            E = D[np.argmin(abs(Eprev - D))].conj()
             resid = abs((Eprev - E)/Eprev)
+            #print(E, resid)
+            counter += 1
+        if counter <50:
+            print(f'RRes Done in {counter} iterations, final E={E}')
+        else:
+            print(f'RRes timed out, resid={resid}, final E={E}')
         return E
 
     def densityGrid(self, Emin, Emax, ind=-1, dE=0.001):
@@ -185,36 +193,45 @@ class surfG:
         theta = np.linspace(0, np.pi, N)
         Egrid = r*np.exp(1j*theta)+center
         #Calculate Residues, use center energy
-        if ind==-1:
-            sig = self.sigmaTot(center)
-        else:
-            sig = self.sigma(center, ind)
-        Fbar = self.X@(self.F + sig)@self.X
+        Fbar = self.X@(self.F + self.sigmaTot(center))@self.X
         Res = np.array(np.zeros(np.shape(self.F)), dtype=complex)
         I = np.array(np.identity(len(Fbar)))
         D, V = LA.eig(Fbar)
-        Gambar = self.X@(1j*(sig - sig.conj().T))@self.X
+        # Find minimum spacing and cut out any values 2*r from center
+        minDist = min([abs(D[i] - D[j]) for i in range(len(D)) for j in range(len(D)) if i>j])
+        D = D[abs(D-center)<(1.5*r)]
+        poleList = D.copy().conj();
+        
+        #Loop through each possible pole and calculate Residue
         for j, E in enumerate(D):
-            if abs(E-center) < r:
-                #print('Residue, E=', E)
-                if recursiveResid:
-                    Enew = self.recursiveResidue(E, ind)
-                    #print('New Residue, E=',Enew)
-                    if ind==-1:
-                        sig = self.sigmaTot(Enew)
-                    else:
-                        sig = self.sigma(Enew, ind)
-                    Fbar = self.X@(self.F + sig)@self.X
-                    Gambar = self.X@(1j*(sig - sig.conj().T))@self.X
-                    if mu!=-9999:
-                        Gambar /= np.exp((Enew-mu)/kT)+1
-                    D, V = LA.eig(Fbar)
+            if recursiveResid:
+                E = self.recursiveResidue(E, j)
+            sigTot = self.sigmaTot(E)
+            if ind==-1:
+                sig = sigTot
+            else:
+                sig = self.sigma(E, ind)
+            Fbar = self.X@(self.F + sigTot)@self.X
+            D, V = LA.eig(Fbar)
+            Gambar = self.X@(1j*(sig - sig.conj().T))@self.X
+            if mu!=-9999:
+                Gambar /= (np.exp((E-mu)/kT)+1)
+            
+            # Final check - ignore if outside of contour or duplicate
+            subPoleList = np.delete(poleList, j)
+            if len(subPoleList) > 0:
+                polDist = min(abs(subPoleList-E.conj()))
+            else:
+                polDist = minDist
+            if abs(E-center) <= r and polDist > minDist/10:
+                print('Residue, E=', poleList[j])
                 Ga = np.array(np.diag(1/(E-np.conj(D))))
                 Ga = V@ Ga @ V.conj().T 
                 Vrow = np.array([V[j,:]])
                 Y = Vrow.T @ Vrow.conj()
-                Res += 2j*np.pi*np.conj(Y@Gambar@Ga) #WHY CONJUGATE???
-                #Res += 2j*np.pi*denFunc(D, V, Gambar, E+1e-9)*(-1e-9)
+                Res += 2j*np.pi*np.conj(Y@Gambar@Ga)
+            #Res += 2j*np.pi*denFunc(D, V, Gambar, E+1e-9)*(-1e-9)
+            poleList[j] = E.conj()
         
         #Integrate along contour
         print('Starting Integration...')
@@ -224,6 +241,10 @@ class surfG:
             dS = Egrid[i]-Egrid[i-1]
             lineInt += self.denFunc(E, ind,mu)*dS
         print('Integration done!')
+        
+        # Store Egrid and poleList for access
+        self.Egrid[ind] = Egrid
+        self.poleList[ind]  = poleList
 
         #Use Residue Theorem
         return (Res-lineInt)/(2*np.pi)

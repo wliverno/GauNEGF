@@ -3,6 +3,8 @@ from numpy import linalg as LA
 import sys
 import time
 import matplotlib.pyplot as plt
+from PIL import Image
+import os
 
 
 from gauopen import QCOpMat as qco
@@ -40,7 +42,8 @@ class NEGFE(NEGF):
         inds = super().setContacts(contactList[0], contactList[1])
         self.lInd = inds[0]
         self.rInd = inds[1]
-        self.g = surfG(self.F, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eps)
+        self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eps)
+        self.figures = []
         return inds
         
     def getSigma(self, E):
@@ -71,9 +74,11 @@ class NEGFE(NEGF):
         
         # Density contribution from above self.Emin
         print('Calculating Density for left contact:')
-        P1 = self.g.densityComplex(self.Emin, self.mu1, 0)
+        #P1 = self.g.densityComplex(self.Emin, self.mu1, 0)
+        P1 = self.g.densityComplex(Emin = self.Emin, Emax = self.mu1 + 5*kT, ind=0, mu=self.mu1)
         print('Calculating Density for right contact:')
-        P2 = self.g.densityComplex(self.Emin, self.mu2, 1)
+        #P2 = self.g.densityComplex(self.Emin, self.mu2, 1)
+        P2 = self.g.densityComplex(Emin = self.Emin, Emax = self.mu2 + 5*kT, ind=1, mu=self.mu2)
         
         # Sum them Up.
         P = P1 + P2 + Pw
@@ -87,8 +92,8 @@ class NEGFE(NEGF):
         inds = np.argsort(EList)        
         
         #DEBUG:
-        for pair in zip(occList[inds], EList[inds]):                       
-            print("Energy=", str(pair[1]), ", Occ=", str(pair[0]))
+        #for pair in zip(occList[inds], EList[inds]):                       
+        #    print("Energy=", str(pair[1]), ", Occ=", str(pair[0]))
 
         return EList[inds], occList[inds]
 
@@ -98,8 +103,25 @@ class NEGFE(NEGF):
         Fock_old = self.F.copy()
         dE, RMSDP, MaxDP = super().PToFock(damping, Edamp)
         self.F, self.locs = getFock(self.bar, self.spin)
-        #self.g.setF(self.F)
+        self.g.setF(self.F)
         
+        # Plot integral path and contours
+        fig, ax = plt.subplots()
+        ax.plot(self.g.Egrid[0].real, self.g.Egrid[0].imag, '-r')
+        ax.plot(self.g.poleList[0].real, self.g.poleList[0].imag, 'xr')
+        ax.axvline(self.mu1, c = 'r', ls='-')
+        ax.plot(self.g.Egrid[1].real, self.g.Egrid[1].imag, '--b')
+        ax.plot(self.g.poleList[1].real, self.g.poleList[1].imag,'+b')
+        ax.axvline(self.mu2, c = 'b', ls='--')
+        ax.set_xlabel('Re(Z) eV')
+        ax.set_ylabel('Imag(Z) eV')
+        ax.set_title(f'Frame {len(self.figures)}: RMSDP - {RMSDP:.2E}, MaxDP - {MaxDP:.2E}')
+        lowBnd = self.Emin
+        upBnd = max(self.mu1, self.mu2)+5*kT
+        ax.set_xlim(lowBnd, upBnd)
+        ax.set_ylim(-1, upBnd-lowBnd)
+        self.figures.append(fig)
+
         # Debug:
         #D,V = LA.eig(self.X@(Fock_old*har_to_eV)@self.X) 
         #EListBefore = np.sort(np.array(np.real(D)).flatten())
@@ -107,7 +129,29 @@ class NEGFE(NEGF):
         #EList = np.sort(np.array(np.real(D)).flatten())
         #for pair in zip(EListBefore, EList):                       
         #    print("Energy Before =", str(pair[0]), ", Energy After =", str(pair[1]))
-        
+         
         return dE, RMSDP, MaxDP
 
+    def plotAnimation(self, gif_path='output.gif'):
+        images = []
 
+        for fig in self.figures:
+            # Save the figure to a temporary file
+            fig_path = f'temp_frame_{self.figures.index(fig)}.png'
+            fig.savefig(fig_path)
+            plt.close(fig)
+            
+            # Open the image and append to the list
+            images.append(Image.open(fig_path))
+            
+            # Remove the temporary file
+            os.remove(fig_path)
+
+        # Save all frames as a new or updated GIF
+        if images:
+            images[0].save(gif_path, format='GIF', append_images=images[1:], save_all=True, duration=300, loop=0)
+            print(f'Saved GIF as {gif_path}')
+        else:
+            print('No frames to save.')
+        self.figures = []
+        print('Figures stack cleared!')
