@@ -57,6 +57,7 @@ class NEGF(object):
         self.start_time = time.time()
     
         self.bar = qcb.BinAr(debug=False,lenint=8,inputfile=self.ifile)
+        self.bar.write('debug.baf')
         self.runDFT(chkInit)
 
         # Prepare self.F, Density, self.S, and TF matrices
@@ -88,7 +89,7 @@ class NEGF(object):
     def runDFT(self, chkInit):
         if chkInit:
             try:
-                self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="DENSITY",chkname=self.chkfile, miscroute=self.otherRoute)
+                self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock=True,chkname=self.chkfile, miscroute=self.otherRoute)
                 print('Checking '+self.chkfile+' for saved data...');
             except:
                 print('Checkpoint not loaded, running full SCF...');
@@ -99,8 +100,8 @@ class NEGF(object):
             
         else:
             print('Using default Harris DFT guess to initialize...')
-            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="GUESS",chkname=self.chkfile)
-            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock=True)
+            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="GUESS",chkname=self.chkfile, miscroute=self.otherRoute)
+            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock=True, miscroute=self.otherRoute)
             print("Done!")
             self.F, self.locs = getFock(self.bar, self.spin)
     
@@ -111,11 +112,8 @@ class NEGF(object):
         self.F = F_ 
     def setVoltage(self, fermi, qV):
         self.fermi = fermi
-        if fermi<self.Emin:
-            self.Emin = fermi-15;
-        if fermi<self.Eminf:
-            self.Emin = fermi-15;
-            self.Eminf = fermi-1e5;
+        self.Emin = fermi-15;
+        self.Eminf = fermi-1e5;
         self.qV = qV
         self.mu1 =  fermi + (qV/2)
         self.mu2 =  fermi - (qV/2)
@@ -224,9 +222,9 @@ class NEGF(object):
         Dense_diff = abs(np.diagonal(self.P) - Dense_old)
         
         ##DEBUG
-        print('DEBUG: Compare Density')
-        print(np.real(np.diag(self.P)[:10]))
-        print(np.real(np.diag(Pback)[:10]))
+        #print('DEBUG: Compare Density')
+        #print(np.real(np.diag(self.P)[:10]))
+        #print(np.real(np.diag(Pback)[:10]))
 
         
         # Apply Damping, store to Gaussian matrix
@@ -240,7 +238,7 @@ class NEGF(object):
         print('Total number of electrons: ', self.nelec)
         
         # Run Gaussian, update SCF Energy
-        self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="density", miscroute=self.otherRoute)
+        self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="DENSITY", miscroute=self.otherRoute)
         self.Total_E_Old = self.Total_E.copy()
         self.Total_E  = self.bar.scalar("escf")
         print("SCF energy: ", self.Total_E)
@@ -253,7 +251,7 @@ class NEGF(object):
         print(f'MaxDP: {MaxDP:.2E} | RMSDP: {RMSDP:.2E}')
         return dE, RMSDP, MaxDP
 
-    def SCF(self, conv=1e-5, damping=0.1, maxcycles=100, Edamp=False, plot=True):
+    def SCF(self, conv=1e-5, damping=0.1, maxcycles=100, Edamp=False, plot=False):
         
         Loop = True
         Niter = 0
