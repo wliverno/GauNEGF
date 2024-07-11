@@ -106,7 +106,11 @@ class NEGF(object):
             self.F, self.locs = getFock(self.bar, self.spin)
     
     def updateN(self):
-        self.nelec = np.real(np.trace(self.P))
+        nOcc = np.real(np.trace(self.P@self.S))
+        if self.spin == 'r':     #each occupied orbital is an electron pair
+            self.nelec = nOcc * 2
+        else:                   #each orbital is a single electron    
+            self.nelec = nOcc
         return self.nelec
     def setFock(self, F_):
         self.F = F_ 
@@ -188,16 +192,14 @@ class NEGF(object):
         GamBarW2 = X@self.GamW2@X
         Dw,Vw = LA.eig(np.array(FbarW))
         
-        # Calculate Density
+        # Calculate each integral
         #P1 = densityGrid(Fbar, GamBar2, self.Emin, self.mu1)
         #P2 = densityGrid(Fbar, GamBar2, self.Emin, self.mu2)
         P1 = density(V, D, GamBar1, self.Emin, self.mu1)
         P2 = density(V, D, GamBar2, self.Emin, self.mu2)
         Pw = density(Vw, Dw, GamBarW1+GamBarW2, self.Eminf, self.Emin)
         
-        #P1_ = densityGrid(Fbar, GamBar1, self.Emin, self.mu1)
-        #print(np.diag(P1_-P1))
-        
+        # Sum them up 
         P = P1 + P2 + Pw
         
         # Calculate Level Occupation, Lowdin TF,  Return
@@ -233,9 +235,9 @@ class NEGF(object):
             self.P = Pback + 0.1*damping*(self.P - Pback)
         else:
             self.P = Pback + damping*(self.P - Pback)
-        storeDen(self.bar, self.P, self.spin) 
-        self.updateN()
-        print('Total number of electrons: ', self.nelec)
+        storeDen(self.bar, self.P, self.spin)
+        self.updateN() 
+        print(f'Total number of electrons (NEGF): {self.nelec:.2f}')
         
         # Run Gaussian, update SCF Energy
         self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="DENSITY", miscroute=self.otherRoute)
