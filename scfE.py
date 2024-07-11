@@ -99,28 +99,29 @@ class NEGFE(NEGF):
 
     
     # Use Gaussian to calculate the Density Matrix
-    def PToFock(self, damping, Edamp=False):
+    def PToFock(self, damping, Edamp=False, debug=True):
         Fock_old = self.F.copy()
         dE, RMSDP, MaxDP = super().PToFock(damping, Edamp)
         self.F, self.locs = getFock(self.bar, self.spin)
         self.g.setF(self.F*har_to_eV)
         
-        # Plot integral path and contours
-        fig, ax = plt.subplots()
-        ax.plot(self.g.Egrid[0].real, self.g.Egrid[0].imag, '-r')
-        ax.plot(self.g.poleList[0].real, self.g.poleList[0].imag, 'xr')
-        ax.axvline(self.mu1, c = 'r', ls='-')
-        ax.plot(self.g.Egrid[1].real, self.g.Egrid[1].imag, '--b')
-        ax.plot(self.g.poleList[1].real, self.g.poleList[1].imag,'+b')
-        ax.axvline(self.mu2, c = 'b', ls='--')
-        ax.set_xlabel('Re(Z) eV')
-        ax.set_ylabel('Imag(Z) eV')
-        ax.set_title(f'Frame {len(self.figures)}: RMSDP - {RMSDP:.2E}, MaxDP - {MaxDP:.2E}')
-        lowBnd = self.Emin
-        upBnd = max(self.mu1, self.mu2)+5*kT
-        ax.set_xlim(lowBnd, upBnd)
-        ax.set_ylim(-1, upBnd-lowBnd)
-        self.figures.append(fig)
+        # Plot integral path and poles
+        if debug==True:
+            fig, ax = plt.subplots()
+            ax.plot(self.g.Egrid[0].real, self.g.Egrid[0].imag, '-r')
+            ax.plot(self.g.poleList[0].real, self.g.poleList[0].imag, 'xr')
+            ax.axvline(self.mu1, c = 'r', ls='-')
+            ax.plot(self.g.Egrid[1].real, self.g.Egrid[1].imag, '--b')
+            ax.plot(self.g.poleList[1].real, self.g.poleList[1].imag,'+b')
+            ax.axvline(self.mu2, c = 'b', ls='--')
+            ax.set_xlabel('Re(Z) eV')
+            ax.set_ylabel('Imag(Z) eV')
+            ax.set_title(f'Frame {len(self.figures)}: RMSDP - {RMSDP:.2E}, MaxDP - {MaxDP:.2E}')
+            lowBnd = self.Emin - 5*kT
+            upBnd = max(self.mu1, self.mu2)+5*kT
+            ax.set_xlim(lowBnd, upBnd)
+            ax.set_ylim(-1, upBnd-lowBnd)
+            self.figures.append(fig)
 
         # Debug:
         #D,V = LA.eig(self.X@(Fock_old*har_to_eV)@self.X) 

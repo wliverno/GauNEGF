@@ -38,36 +38,37 @@ kB = 8.617e-5           # eV/Kelvin
 def density(V, D, Gam, Emin, mu):
     Nd = len(V)
     DD = np.array([D for i in range(Nd)]).T
+    
+    #Integral of 1/x is log(x), calculating at lower and upper limit
     logmat = np.array([np.emath.log(1-(mu/D)) for i in range(Nd)]).T
     logmat2 = np.array([np.emath.log(1-(Emin/D)) for i in range(Nd)]).T
 
-
+    #Compute integral, add prefactor
     invmat = 1/(2*np.pi*(DD-DD.conj().T))
     pref2 = logmat - logmat.conj().T
     pref3 = logmat2-logmat2.conj().T
 
     prefactor = np.multiply(invmat,(pref2-pref3))
 
-
+    #Convert Gamma into Fbar eigenbasis, element-wise multiplication
     Vc = LA.inv(V.conj().T)
-
     Gammam = Vc.conj().T@Gam@Vc
-
     prefactor = np.multiply(prefactor,Gammam)
-
+    
+    #Convert back to input basis, return
     den = V@ prefactor @ V.conj().T
-
     return den
 
+# G< function converting to Fbar eigenbasis
 def denFunc(D, V, Gambar, E):
-    V = np.array(V, dtype=complex)
     Ga = np.array(np.diag(1/(E-np.conj(D))))
-    Ga = V*Ga*V.conj().T
+    Ga = V@Ga@V.conj().T
     Gr = np.array(np.diag(1/(E-D)))
-    Gr = V*Gr*V.conj().T
-    return Gr*Gambar*Ga
+    Gr = V@Gr@V.conj().T
+    return Gr@Gambar@Ga
 
-def densityGrid(Fbar, Gambar, Emin, Emax, dE=0.001, T=300):
+# Get density using a (real) energy grid
+def densityGrid(Fbar, Gambar, Emin, mu, dE=0.001, T=300):
     kT = kB*T
     Egrid = np.arange(Emin, Emax+(5*kT), dE)
     I = np.array(np.identity(len(Fbar)))
@@ -82,27 +83,29 @@ def densityGrid(Fbar, Gambar, Emin, Emax, dE=0.001, T=300):
     print('Integration done!')
     return den/(2*np.pi)
 
-def densityComplex(Fbar, Gambar, Emin, Emax, dE=0.001):
+# Get density using a complex contour and applying Residue theorem
+def densityComplex(Fbar, Gambar, Emin, mu, dE=0.001, T=300):
     #Construct circular contour
+    kT = kB*T
+    Emax = Emax+(5*kT)
     center = (Emin+Emax)/2
     r = (Emax-Emin)/2
     N = int((Emax-Emin)/dE)
     theta = np.linspace(0, np.pi, N)
     Egrid = r*np.exp(1j*theta)+center
     
-    #Calculate Residues
-    Res = np.array(np.zeros(np.shape(Fbar)), dtype=complex)
-    I = np.array(np.identity(len(Fbar)))
+    #Calculate Residues (assuming Fbar is energy independent)
+    Res = np.zeros(np.shape(Fbar), dtype=complex)
+    I = np.identity(len(Fbar))
     D, V = LA.eig(Fbar)
-    V = np.array(V, dtype=complex)
     for ind, E in enumerate(D):
         if abs(E-center) < r:
-            #print(E)
+            print('Residue at E=',E)
             Ga = np.array(np.diag(1/(E-np.conj(D))))
-            Ga = V* Ga * V.conj().T 
-            Y = V[:, ind] * V.conj().T[ind,:]
-            Res += 2j*np.pi*np.conj(Y*Gambar*Ga) #WHY CONJUGATE???
-            #Res += 2j*np.pi*denFunc(D, V, Gambar, E+1e-9)*(-1e-9)
+            Ga = V@ Ga @ V.conj().T
+            Vrow= np.array([V[:, ind]])
+            Y = Vrow.T @ Vrow.conj()
+            Res += 2j*np.pi*np.conj(Y@Gambar@Ga)
     
     #Integrate along contour
     print('Starting Integration...')
@@ -113,7 +116,7 @@ def densityComplex(Fbar, Gambar, Emin, Emax, dE=0.001):
         lineInt += denFunc(D, V, Gambar, E)*dS
     print('Integration done!')
     
-    #Use Residue Theorem
+    #Apply Residue Theorem and return
     return (Res-lineInt)/(2*np.pi)
 
 # Form Sigma matrix given self-energy matrix or value (V) and orbital indices (inds)

@@ -148,7 +148,6 @@ class surfG:
             Gambar /= (np.exp((E-mu)/kT)+1)
         Fbar = self.X@(self.F + sigTot)@self.X
         D, V = LA.eig(Fbar)
-        V = np.array(V, dtype=complex)
         Ga = np.array(np.diag(1/(E-np.conj(D))))
         Ga = V@Ga@V.conj().T
         Gr = np.array(np.diag(1/(E-D)))
@@ -185,7 +184,7 @@ class surfG:
         print('Integration done!')
         return den/(2*np.pi)
 
-    def densityComplex(self, Emin, Emax, ind=-1, dE=0.1, recursiveResid=True, mu=-9999):
+    def densityComplex(self, Emin, Emax, ind=-1, dE=0.1, recursiveResid=False, mu=-9999):
         #Construct circular contour
         center = (Emin+Emax)/2
         r = (Emax-Emin)/2
@@ -227,10 +226,10 @@ class surfG:
                 print('Residue, E=', poleList[j])
                 Ga = np.array(np.diag(1/(E-np.conj(D))))
                 Ga = V@ Ga @ V.conj().T 
-                Vrow = np.array([V[j,:]])
+                Vrow = np.array([V[:, j]])
                 Y = Vrow.T @ Vrow.conj()
                 Res += 2j*np.pi*np.conj(Y@Gambar@Ga)
-            #Res += 2j*np.pi*denFunc(D, V, Gambar, E+1e-9)*(-1e-9)
+                #Res += 2j*np.pi*denFunc(D, V, Gambar, E+1e-9)*(-1e-9) #For Testing
             poleList[j] = E.conj()
         
         #Integrate along contour
