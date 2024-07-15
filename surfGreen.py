@@ -26,7 +26,7 @@ AlphaEnergies = "ALPHA ORBITAL ENERGIES"
 BetaEnergies = "BETA ORBITAL ENERGIES"
 
 #Constants
-kT = 0.0257 #eV (room temperature)
+kB = 8.617e-5           # eV/Kelvin
 
 
 class surfG:
@@ -137,7 +137,8 @@ class surfG:
         return sigma
     
 
-    def denFunc(self, E, ind=-1, mu=-9999):
+    def denFunc(self, E, ind=-1, mu=-9999, T=300):
+        kT = kB*T
         sigTot = self.sigmaTot(E)
         if ind==-1:
             sig = sigTot
@@ -184,7 +185,8 @@ class surfG:
         print('Integration done!')
         return den/(2*np.pi)
 
-    def densityComplex(self, Emin, Emax, ind=-1, dE=0.1, recursiveResid=False, mu=-9999):
+    def densityComplex(self, Emin, Emax, ind=-1, dE=0.1, recursiveResid=False, mu=-9999, T=300):
+        kT = kB*T
         #Construct circular contour
         center = (Emin+Emax)/2
         r = (Emax-Emin)/2
@@ -238,7 +240,7 @@ class surfG:
         for i in range(1,N):
             E = (Egrid[i]+Egrid[i-1])/2
             dS = Egrid[i]-Egrid[i-1]
-            lineInt += self.denFunc(E, ind,mu)*dS
+            lineInt += self.denFunc(E, ind,mu, T)*dS
         print('Integration done!')
         
         # Store Egrid and poleList for access

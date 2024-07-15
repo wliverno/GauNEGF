@@ -31,7 +31,7 @@ BetaEnergies = "BETA ORBITAL ENERGIES"
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
 eoverh = 3.874e-5       # A/eV
-kT = 0.025              # eV @ 20degC
+kB = 8.617e-5           # eV/Kelvin
 V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 
 
@@ -50,7 +50,7 @@ class NEGFE(NEGF):
         return (self.g.sigma(E, 0), self.g.sigma(E, 1))
 
     # Updated to use energy-dependent contour integral from surfG()
-    def FockToP(self):
+    def FockToP(self, T=300):
         # Density contribution from below self.Emin
         sigWVal = -0.00001j #Based on Damle Code
         self.sigmaW1 = formSigma(self.lInd, sigWVal, self.nsto, self.S)
@@ -76,10 +76,12 @@ class NEGFE(NEGF):
         # Density contribution from above self.Emin
         print('Calculating Density for left contact:')
         #P1 = self.g.densityComplex(self.Emin, self.mu1, 0)
-        P1 = self.g.densityComplex(Emin = self.Emin, Emax = self.mu1 + 5*kT, ind=0, mu=self.mu1)
+        upperLim1 = self.mu1 + (5*kB*T)
+        upperLim2 = self.mu2 + (5*kB*T)
+        P1 = self.g.densityComplex(Emin = self.Emin, Emax = upperLim1, ind=0, mu=self.mu1, T=T)
         print('Calculating Density for right contact:')
         #P2 = self.g.densityComplex(self.Emin, self.mu2, 1)
-        P2 = self.g.densityComplex(Emin = self.Emin, Emax = self.mu2 + 5*kT, ind=1, mu=self.mu2)
+        P2 = self.g.densityComplex(Emin = self.Emin, Emax = upperLim2, ind=1, mu=self.mu2, T=T)
         
         # Sum them Up.
         P = P1 + P2 + Pw
