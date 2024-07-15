@@ -35,9 +35,8 @@ kT = 0.025              # eV @ 20degC
 V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 
 
-
 class NEGFE(NEGF):
-    
+    # Set contact as surfG() object
     def setContactE(self, contactList, tauList=-1, stauList=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eps=1e-9):
         inds = super().setContacts(contactList[0], contactList[1])
         self.lInd = inds[0]
@@ -45,10 +44,12 @@ class NEGFE(NEGF):
         self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eps)
         self.figures = []
         return inds
-        
+    
+    # Get left and right contact self-energies at specified energy
     def getSigma(self, E):
         return (self.g.sigma(E, 0), self.g.sigma(E, 1))
 
+    # Updated to use energy-dependent contour integral from surfG()
     def FockToP(self):
         # Density contribution from below self.Emin
         sigWVal = -0.00001j #Based on Damle Code
@@ -98,7 +99,7 @@ class NEGFE(NEGF):
         return EList[inds], occList[inds]
 
     
-    # Use Gaussian to calculate the Density Matrix
+    # Updated to update surfG() Fock matrix and plot integral and residues
     def PToFock(self, damping, Edamp=False, debug=True):
         Fock_old = self.F.copy()
         dE, RMSDP, MaxDP = super().PToFock(damping, Edamp)
@@ -132,7 +133,8 @@ class NEGFE(NEGF):
         #    print("Energy Before =", str(pair[0]), ", Energy After =", str(pair[1]))
          
         return dE, RMSDP, MaxDP
-
+    
+    # Save integration plots as frame in animated gif
     def plotAnimation(self, gif_path='output.gif'):
         images = []
 
@@ -154,5 +156,7 @@ class NEGFE(NEGF):
             print(f'Saved GIF as {gif_path}')
         else:
             print('No frames to save.')
+        
+        # Empty the list of figures
         self.figures = []
         print('Figures stack cleared!')
