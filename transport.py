@@ -28,7 +28,7 @@ def qCurrentF(fn, dE=0.01):
     return quickCurrent(matfile["F"], matfile["S"], matfile["sig1"],matfile["sig2"],
             matfile["fermi"][0,0], matfile["qV"][0,0], matfile["spin"][0], dE=dE)
 
-# H0 is an NxN matrix, sig1 and sig2 are Nx1 vectors or NxN Matrices
+# F,S are NxN matrices, sig1 and sig2 are Nx1 vectors or NxN Matrices
 def cohTrans(Elist, F, S, sig1, sig2):
     F = np.array(F)
     N = len(F)
@@ -42,17 +42,76 @@ def cohTrans(Elist, F, S, sig1, sig2):
             Gr = LA.inv(E*S - F - sig1 - sig2)
             gam1Gr = gamma1@Gr
             gam2Ga = gamma2@Gr.conj().T
-        else:
+        elif sig1.shape==(N,) and sig2.shape==(N,):
             sig = np.diag(sig1 + sig2)
             Gr = LA.inv(E*S - F - sig)
             gam1Gr = np.array([gamma1*row for row in Gr])
             gam2Ga = np.array([gamma2*row for row in Gr.conj().T])
+        else:
+            raise Exception('Sigma size mismatch!')
         for i in range(N):
             T += np.dot(gam1Gr[i, :],gam2Ga[:, i])
         T = np.real(T)
         print("Energy:",E, "eV, Transmission=", T)
         Tr.append(T)
     return Tr
+
+# F,S are NxN matrices, sig1 and sig2 are Nx1 vectors or NxN Matrices
+def cohTransSpin(Elist, F, S, sig1, sig2, spin='u'):
+    F = np.array(F)
+    N = int(len(F)/2)
+    S = np.array(S)
+    gamma1 = -1j*(sig1 - sig1.conj().T)
+    gamma2 = -1j*(sig2 - sig2.conj().T)
+    Tr = []
+    Tspin = []
+    for E in Elist:
+        T = 0
+        Ts = [0, 0, 0, 0]
+        # Case: sigmas are NxN Matrices
+        if sig1.shape == (N, N) and sig2.shape == (N, N):
+            if spin == 'g':
+                sigMat = np.kron(sig1+sig2, np.eye(2))
+                Gr = LA.inv(E*S - F - sigMat)
+                aInds = np.arange(0, 2*N, 2)
+                bInds = np.arange(1, 2*N, 2)
+                GrQuad = [Gr[np.ix_(aInds, aInds)], Gr[np.ix_(aInds, bInds)],
+                          Gr[np.ix_(bInds, aInds)], Gr[np.ix_(bInds, bInds)]]
+            else:
+                sigMat = np.kron(np.eye(2), sig1+sig2)
+                Gr = LA.inv(E*S - F - sigMat)
+                GrQuad = [Gr[:N, :N], Gr[:N, N:], Gr[N:, :N], Gr[N:, N:]]
+            gam1Gr = [gamma1@Gr for Gr in GrQuad]     #Full Matrix Multiplication
+            gam2Ga = [gamma2@Gr.conj().T for Gr in GrQuad]
+        #Case sigmas are Nx1 vectors
+        elif sig1.shape == (N, ) and sig2.shape == (N, ):
+            if spin == 'g':
+                sigMat = np.kron(np.diag(sig1+sig2), np.eye(2))
+                Gr = LA.inv(E*S - F - sigMat)
+                aInds = np.arange(0, 2*N, 2)
+                bInds = np.arange(1, 2*N, 2)
+                GrQuad = [Gr[np.ix_(aInds, aInds)], Gr[np.ix_(aInds, bInds)],
+                          Gr[np.ix_(bInds, aInds)], Gr[np.ix_(bInds, bInds)]]
+            else:
+                sigMat = np.kron(np.eye(2), np.diag(sig1+sig2))
+                Gr = LA.inv(E*S - F - sigMat)
+                GrQuad = [Gr[:N, :N], Gr[:N, N:], Gr[N:, :N], Gr[N:, N:]]
+            gam1Gr = [np.array([gamma1*row for row in Gr]) for Gr in GrQuad] #Faster algorithm
+            gam2Ga = [np.array([gamma2*row for row in Gr.conj().T]) for Gr in GrQuad]
+        else:
+            raise Exception('Sigma size mismatch!')
+        for i in range(N):
+            Ttot =  0
+            for j in range(4):
+                T_ = np.dot(gam1Gr[j][i,:],gam2Ga[j][:,i])
+                Ts[j] += T_
+                T+= T_
+        T = np.real(T)
+        Ts = np.real(Ts)
+        print("Energy:",E, "eV, Transmission=", T, ", Tspin=", Ts)
+        Tr.append(T)
+        Tspin.append(Ts)
+    return (Tr, np.array(Tspin))
 
 # H0 is an NxN matrix, sig1 and sig2 are Nx1 vectors
 def DOS(Elist, F, S, sig1, sig2):
