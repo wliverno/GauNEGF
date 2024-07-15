@@ -33,7 +33,7 @@ V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 
 
 class NEGF(object):
-    def __init__(self, fn, basis="lanl2dz", func="b3pw91", spin="r", chkInit=True, route=""):
+    def __init__(self, fn, basis="lanl2dz", func="b3pw91", spin="r", fullSCF=True, route=""):
         # Set up variables
         self.ifile = fn + ".gjf"
         self.chkfile = fn + ".chk"
@@ -58,7 +58,7 @@ class NEGF(object):
     
         self.bar = qcb.BinAr(debug=False,lenint=8,inputfile=self.ifile)
         self.bar.write('debug.baf')
-        self.runDFT(chkInit)
+        self.runDFT(fullSCF)
 
         # Prepare self.F, Density, self.S, and TF matrices
         self.P = getDen(self.bar, spin)
@@ -85,9 +85,10 @@ class NEGF(object):
         print('Multiplicity is:', self.bar.multip)
         print("Initial SCF energy: ", self.Total_E)
         print('###################################')
-
-    def runDFT(self, chkInit):
-        if chkInit:
+    
+    #Run DFT in Gaussian, default run full SCF to convergence, otherwise use Harris guess only
+    def runDFT(self, fullSCF=True):
+        if fullSCF:
             try:
                 self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock=True,chkname=self.chkfile, miscroute=self.otherRoute)
                 print('Checking '+self.chkfile+' for saved data...');
@@ -105,11 +106,19 @@ class NEGF(object):
             print("Done!")
             self.F, self.locs = getFock(self.bar, self.spin)
     
+    # Update number of Electrons (self.nelec) from density matrix
     def updateN(self):
-        self.nelec = np.real(np.trace(self.P))
+        nOcc =  np.real(np.trace(self.P@self.S))
+        if self.spin == 'r':
+            self.nelec = 2*nOcc
+        else:
+            self.nelec = nOcc
         return self.nelec
+
     def setFock(self, F_):
         self.F = F_ 
+
+    # Set voltage and fermi energy, update electric field applied and integral limits
     def setVoltage(self, fermi, qV):
         self.fermi = fermi
         self.Emin = fermi-15;
@@ -136,7 +145,8 @@ class NEGF(object):
         self.bar.scalar("Y-EFIELD", int(field[1]))
         self.bar.scalar("Z-EFIELD", int(field[2]))
         print("E-field set to "+str(LA.norm(field))+" au")
-        
+    
+    # Set contacts based on atom orbital locations
     def setContacts(self, lContact, rContact):
         self.lContact=np.array(lContact)
         self.rContact=np.array(rContact)
@@ -144,13 +154,40 @@ class NEGF(object):
         rInd = np.where(np.isin(abs(self.locs), self.rContact))[0]
         return lInd, rInd
     
+    # Set self-energies of left and right contacts (TODO: n>2 terminal device?)
     def setSigma(self, lContact, rContact, sig=-0.1j, sig2=False): 
         lInd, rInd = self.setContacts(lContact, rContact)
-        self.sigma1 = formSigma(lInd, sig, self.nsto, self.S)
-        if not isinstance(sig2, bool):
-            self.sigma2 = formSigma(rInd, sig2, self.nsto, self.S)
+        #Is there a second sigma matrix? If not, copy the first one
+        if isinstance(sig2, bool):
+            sig2 = sig + 0.0
+        
+        # Sigma can be a value, list, or matrix
+        if np.ndim(np.array(sig)) == 0  and np.ndim(np.array(sig2)) == 0:
+            pass
+        elif np.ndim(sig) == 1 and np.ndim(sig2) == 1:
+            if self.spin=='g':
+                sig = np.kron(sig, [1, 1])
+                sig2 = np.kron(sig2, [1, 1])
+            elif self.spin=='ro' or self.spin=='u':
+                sig = np.kron([1, 1], sig)
+                sig2 = np.kron([1, 1], sig2)
+        elif np.ndim(sig) == 2 and np.ndim(sig2) == 2:
+            if self.spin=='g':
+                sig = np.kron(sig, np.eye(2))
+                sig2 = np.kron(sig2, np.eye(2))
+            elif self.spin=='ro' or self.spin=='u':
+                sig = np.kron(np.eye(2), sig)
+                sig2 = np.kron(np.eye(2), sig2)
+            
         else:
-            self.sigma2 = formSigma(rInd, sig, self.nsto, self.S)
+            raise Exception('Sigma matrix dimension mismatch!')
+        
+        self.sigma1 = formSigma(lInd, sig, self.nsto, self.S)
+        self.sigma2 = formSigma(rInd, sig2, self.nsto, self.S)
+        
+        if self.sigma1.shape != self.F.shape or self.sigma2.shape != self.F.shape:
+            raise Exception(f'Sigma size mismatch! F shape={self.F.shape},'+
+                            f' sigma shapes={self.sigma1.shape}, {self.sigma2.shape}')
         
         self.sigma12 = self.sigma1 + self.sigma2
     
@@ -166,9 +203,10 @@ class NEGF(object):
         self.GamW1 = (self.sigmaW1 - self.sigmaW1.conj().T)*1j
         self.GamW2 = (self.sigmaW2 - self.sigmaW2.conj().T)*1j
     
-    def getSigma(self, E):
+    def getSigma(self, E=0): #E only used by NEGFE() object, function inherited
         return (self.sigma1, self.sigma2)
 
+    # Calculate density matrix from stored Fock matrix
     def FockToP(self):
         # Prepare Variables for Analytical Integration
         X = np.array(self.X)
@@ -214,8 +252,9 @@ class NEGF(object):
         return EList[inds], occList[inds]
 
     
-    # Use Gaussian to calculate the Density Matrix
-    def PToFock(self, damping, Edamp):
+    # Use Gaussian to calculate the Density Matrix, apply damping factor
+    # Edamp - when True, add multiple additional 0.1 damp when energy increases
+    def PToFock(self, damping, Edamp=False):
         # Store Old Density Info
         Pback = getDen(self.bar, self.spin)
         Dense_old = np.diagonal(Pback)
@@ -251,6 +290,8 @@ class NEGF(object):
         print(f'MaxDP: {MaxDP:.2E} | RMSDP: {RMSDP:.2E}')
         return dE, RMSDP, MaxDP
 
+    # Main SCF loop, runs Fock <-> Density cycle until convergence reached
+    # Convergence criteria: dE, RMSDP, and MaxDP < conv, or maxcycles reached
     def SCF(self, conv=1e-5, damping=0.1, maxcycles=100, Edamp=False, plot=False):
         
         Loop = True
@@ -313,12 +354,13 @@ class NEGF(object):
             print(f"Energy = {pair[1]:9.3f} eV | Occ = {pair[0]:5.3f}")
         print('=========================')
         return count, PP, TotalE
-    
+
     def writeChk(self):
         print('Writing to checkpoint file...') 
         self.bar.writefile(self.chkfile)
         print(self.chkfile+' written!') 
     
+    # Save's matlab *.mat file with main variables
     def saveMAT(self, matfile="out.mat"):
         (sigma1, sigma2) = self.getSigma(self.fermi)
         # Save data in MATLAB .mat file
