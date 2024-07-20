@@ -153,15 +153,16 @@ class surfG:
         Ga = V@Ga@V.conj().T
         Gr = np.array(np.diag(1/(E-D)))
         Gr = V@Gr@V.conj().T
-        return Gr@Gambar@Ga
-    
-    def recursiveResidue(self, E, ind, conv=1e-3):
+        return (Gr@Gambar@Ga, D)
+   
+    # Function to use recursive algorithm to find poles, no longer used 
+    def recursiveResidue(self, E, conv=1e-3):
         resid = 1
         counter = 1
-        print(f'RRes starting for E={E}')
+        #print(f'RRes starting for E={E}')
         Eprev = E+0.0
         while resid>conv and counter<50:
-            Eprev = (E+Eprev)*0.5
+            Eprev = E+0.0
             Fbar = self.X@(self.F + self.sigmaTot(Eprev))@self.X
             D, V = LA.eig(Fbar);
             E = D[np.argmin(abs(Eprev - D))].conj()
@@ -171,9 +172,10 @@ class surfG:
         if counter <50:
             print(f'RRes Done in {counter} iterations, final E={E}')
         else:
-            print(f'RRes timed out, resid={resid}, final E={E}')
+            print(f'RRes timed out, conv={resid}, final E={E}')
         return E
-
+    
+    # Density matrix generation using direct integration across the (real) energy axis
     def densityGrid(self, Emin, Emax, ind=-1, dE=0.001):
         Egrid = np.arange(Emin, Emax, dE)
         den = np.array(np.zeros(np.shape(self.F)), dtype=complex)
@@ -181,32 +183,64 @@ class surfG:
         for i in range(1,len(Egrid)):
             E = (Egrid[i]+Egrid[i-1])/2
             dE = Egrid[i]-Egrid[i-1]
-            den += self.denFunc(E, ind)*dE
+            den += self.denFunc(E, ind)[0]*dE
         print('Integration done!')
         return den/(2*np.pi)
-
-    def densityComplex(self, Emin, Emax, ind=-1, dE=0.1, recursiveResid=False, mu=-9999, T=300):
+    
+    # Density matrix generation using the complex contour and residue theorem
+    def densityComplex(self, Emin, Emax, ind=-1, dE=0.1, plotPoles=True, mu=-9999, T=300):
         kT = kB*T
+        if plotPoles:
+            plt.clf()
+        
         #Construct circular contour
         center = (Emin+Emax)/2
         r = (Emax-Emin)/2
         N = int((Emax-Emin)/dE)
         theta = np.linspace(0, np.pi, N)
         Egrid = r*np.exp(1j*theta)+center
-        #Calculate Residues, use center energy
-        Fbar = self.X@(self.F + self.sigmaTot(center))@self.X
-        Res = np.array(np.zeros(np.shape(self.F)), dtype=complex)
-        I = np.array(np.identity(len(Fbar)))
-        D, V = LA.eig(Fbar)
-        # Find minimum spacing and cut out any values 2*r from center
-        minDist = min([abs(D[i] - D[j]) for i in range(len(D)) for j in range(len(D)) if i>j])
-        D = D[abs(D-center)<(1.5*r)]
-        poleList = D.copy().conj();
+
+        #Integrate along contour, store eigenvalues at each point in Dlist
+        print('Starting Integration...')
+        lineInt = np.array(np.zeros(np.shape(self.F)), dtype=complex)
+        nD = len(self.F)
+        Dlist = np.zeros((N, nD), dtype=complex)
+        for i in range(N):
+            E = (Egrid[i]+Egrid[i-1])/2
+            dS = Egrid[i]-Egrid[i-1]
+            (F, D) = self.denFunc(E, ind, mu, T)
+            Dlist[i,:] = D[np.argsort(D.real)]
+            lineInt += F*dS
+        print('Integration done!')
         
+        #Calculate pole locations from Dlist
+        poles = np.zeros(nD, dtype=complex)
+        for i in range(nD):
+            Di = Dlist[:, i]
+            Ediff = np.abs(Egrid-Di.real)
+            poles[i] = Di[np.argmin(Ediff)]
+            if plotPoles:
+                plt.scatter(Di.real, -1*Di.imag, (1 - Ediff/max(Ediff))*20)
+        
+        #Apply contour cutoff to poles
+        poleList = poles.copy().conj()
+        #print(poleList)
+        poleList = poleList[(abs(poleList-center)<r)&(poleList.imag>0)]
+        if plotPoles:
+            plt.plot(poleList.real, poleList.imag, '+k')
+            plt.plot(Egrid.real, Egrid.imag, '--')
+            plt.xlabel('Re(Z)')
+            plt.ylabel('Im(Z)')
+            plt.title('Variation in Poles')
+            plt.xlim(Emin-5*kT, Emax+10*kT)
+            plt.ylim(0, r+5*kT)
+            plt.savefig('poleFig.png')
+            plt.clf()
+ 
         #Loop through each possible pole and calculate Residue
-        for j, E in enumerate(D):
-            if recursiveResid:
-                E = self.recursiveResidue(E, j)
+        Res = np.array(np.zeros(np.shape(self.F)), dtype=complex)
+        for j, E in enumerate(poleList):
+            print('Residue at E=', E)
             sigTot = self.sigmaTot(E)
             if ind==-1:
                 sig = sigTot
@@ -217,31 +251,12 @@ class surfG:
             Gambar = self.X@(1j*(sig - sig.conj().T))@self.X
             if mu!=-9999:
                 Gambar /= (np.exp((E-mu)/kT)+1)
-            
-            # Final check - ignore if outside of contour or duplicate
-            subPoleList = np.delete(poleList, j)
-            if len(subPoleList) > 0:
-                polDist = min(abs(subPoleList-E.conj()))
-            else:
-                polDist = minDist
-            if abs(E-center) <= r and polDist > minDist/10:
-                print('Residue, E=', poleList[j])
-                Ga = np.array(np.diag(1/(E-np.conj(D))))
-                Ga = V@ Ga @ V.conj().T 
-                Vrow = np.array([V[:, j]])
-                Y = Vrow.T @ Vrow.conj()
-                Res += 2j*np.pi*np.conj(Y@Gambar@Ga)
-                #Res += 2j*np.pi*denFunc(D, V, Gambar, E+1e-9)*(-1e-9) #For Testing
-            poleList[j] = E.conj()
-        
-        #Integrate along contour
-        print('Starting Integration...')
-        lineInt = np.array(np.zeros(np.shape(self.F)), dtype=complex)
-        for i in range(1,N):
-            E = (Egrid[i]+Egrid[i-1])/2
-            dS = Egrid[i]-Egrid[i-1]
-            lineInt += self.denFunc(E, ind,mu, T)*dS
-        print('Integration done!')
+            Ga = np.array(np.diag(1/(E-np.conj(D))))
+            Ga = V@ Ga @ V.conj().T 
+            Vrow = np.array([V[:, j]])
+            Y = Vrow.T @ Vrow.conj()
+            Res += 2j*np.pi*np.conj(Y@Gambar@Ga)
+            #Res += 2j*np.pi*denFunc(D, V, Gambar, E+1e-9)*(-1e-9) #For Testing
         
         # Store Egrid and poleList for access
         self.Egrid[ind] = Egrid
