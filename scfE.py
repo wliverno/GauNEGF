@@ -102,7 +102,7 @@ class NEGFE(NEGF):
 
     
     # Updated to update surfG() Fock matrix and plot integral and residues
-    def PToFock(self, damping, Edamp=False, debug=True):
+    def PToFock(self, damping, Edamp=False, debug=False):
         Fock_old = self.F.copy()
         dE, RMSDP, MaxDP = super().PToFock(damping, Edamp)
         self.F, self.locs = getFock(self.bar, self.spin)
@@ -154,7 +154,7 @@ class NEGFE(NEGF):
 
         # Save all frames as a new or updated GIF
         if images:
-            images[0].save(gif_path, format='GIF', append_images=images[1:], save_all=True, duration=300, loop=0)
+            images[0].save(gif_path, format='GIF', append_images=images[1:], save_all=True, duration=len(images)*10, loop=0)
             print(f'Saved GIF as {gif_path}')
         else:
             print('No frames to save.')

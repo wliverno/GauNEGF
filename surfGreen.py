@@ -146,7 +146,7 @@ class surfG:
             sig = self.sigma(E, ind)
         Gambar = self.X@(1j*(sig - sig.conj().T))@self.X
         if mu!=-9999:
-            Gambar /= (np.exp((E-mu)/kT)+1)
+            Gambar /= (np.exp((np.real(E)-mu)/kT)+1)
         Fbar = self.X@(self.F + sigTot)@self.X
         D, V = LA.eig(Fbar)
         Ga = np.array(np.diag(1/(E-np.conj(D))))
@@ -250,7 +250,7 @@ class surfG:
             D, V = LA.eig(Fbar)
             Gambar = self.X@(1j*(sig - sig.conj().T))@self.X
             if mu!=-9999:
-                Gambar /= (np.exp((E-mu)/kT)+1)
+                Gambar /= (np.exp((np.real(E)-mu)/kT)+1)
             Ga = np.array(np.diag(1/(E-np.conj(D))))
             Ga = V@ Ga @ V.conj().T 
             Vrow = np.array([V[:, j]])

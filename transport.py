@@ -33,8 +33,8 @@ def cohTrans(Elist, F, S, sig1, sig2):
     F = np.array(F)
     N = len(F)
     S = np.array(S)
-    gamma1 = -1j*(sig1 - sig1.conj().T)
-    gamma2 = -1j*(sig2 - sig2.conj().T)
+    gamma1 = -1j*(sig1 - np.conj(sig1).T)
+    gamma2 = -1j*(sig2 - np.conj(sig2).T)
     Tr = []
     for E in Elist:
         T = 0
@@ -61,8 +61,8 @@ def cohTransSpin(Elist, F, S, sig1, sig2, spin='u'):
     F = np.array(F)
     N = int(len(F)/2)
     S = np.array(S)
-    gamma1 = -1j*(sig1 - sig1.conj().T)
-    gamma2 = -1j*(sig2 - sig2.conj().T)
+    gamma1 = -1j*(sig1 - np.conj(sig1).T)
+    gamma2 = -1j*(sig2 - np.conj(sig2).T)
     Tr = []
     Tspin = []
     for E in Elist:
@@ -138,8 +138,8 @@ def cohTransE(Elist, F, S, g):
     for E in Elist:
         sig1 = g.sigma(E, 0)
         sig2 = g.sigma(E, 1)
-        gamma1 = -1j*(sig1 - sig1.conj().T)
-        gamma2 = -1j*(sig2 - sig2.conj().T)
+        gamma1 = -1j*(sig1 - np.conj(sig1).T)
+        gamma2 = -1j*(sig2 - np.conj(sig2).T)
         Gr = LA.inv(E*S - F - sig1 - sig2)
         T = np.real(np.trace(gamma1@Gr@gamma2@Gr.conj().T))
         print("Energy:",E, "eV, Transmission=", T)

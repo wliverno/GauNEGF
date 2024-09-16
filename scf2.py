@@ -119,10 +119,17 @@ class NEGF(object):
         self.F = F_ 
 
     # Set voltage and fermi energy, update electric field applied and integral limits
-    def setVoltage(self, fermi, qV):
+    def setVoltage(self, fermi, qV, Emin=0, Eminf=0):
+        # Set Fermi Energy and integration limits
         self.fermi = fermi
-        self.Emin = fermi-15;
-        self.Eminf = fermi-1e5;
+        if Emin==0:
+            self.Emin = fermi-15
+        else:
+            self.Emin = Emin
+        if Eminf==0:
+            self.Eminf = fermi-1e5
+        else:
+            self.Eminf = Eminf
         self.qV = qV
         self.mu1 =  fermi + (qV/2)
         self.mu2 =  fermi - (qV/2)
@@ -160,7 +167,7 @@ class NEGF(object):
         #Is there a second sigma matrix? If not, copy the first one
         if isinstance(sig2, bool):
             sig2 = sig + 0.0
-        
+       
         # Sigma can be a value, list, or matrix
         if np.ndim(np.array(sig)) == 0  and np.ndim(np.array(sig2)) == 0:
             pass
@@ -362,7 +369,7 @@ class NEGF(object):
     def saveMAT(self, matfile="out.mat"):
         (sigma1, sigma2) = self.getSigma(self.fermi)
         # Save data in MATLAB .mat file
-        matdict = {"F":self.F*har_to_eV, "sig1": sigma1, "sig2": sigma2, "S": self.S, "fermi": self.fermi, "qV": self.qV, "spin" : self.spin}
+        matdict = {"F":self.F*har_to_eV, "sig1": sigma1, "sig2": sigma2, "S": self.S, "fermi": self.fermi, "qV": self.qV, "spin" : self.spin, "den" : self.P}
         io.savemat(matfile, matdict)
         return self.X@self.F@self.X
 
