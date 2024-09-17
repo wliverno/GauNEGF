@@ -74,7 +74,16 @@ class NEGF(object):
     
         self.I = np.array(np.identity(self.nsto))
         #H0 = self.X*self.F*har_to_eV*self.X.conj().T
-    
+        
+        # Pulay Mixing Initialization
+        nPulay = 6
+        self.pList = np.array([self.P for i in range(nPulay)], dtype=complex)
+        self.DPList = np.ones((nPulay, self.nsto, self.nsto))*1e4
+        self.pMat = np.ones((nPulay+1, nPulay+1))*-1
+        self.pMat[-1, -1] = 0
+        self.pB = np.zeros(nPulay+1)
+        self.pB[-1] = -1
+
         print("ORBS:")
         print(self.locs)
         self.Total_E =  self.bar.scalar("escf")
@@ -259,23 +268,34 @@ class NEGF(object):
     
     # Use Gaussian to calculate the Density Matrix, apply damping factor
     # Edamp - when True, add multiple additional 0.1 damp when energy increases
-    def PToFock(self, damping, Edamp=False):
+    def PToFock(self, damping, Pulay=False):
         # Store Old Density Info
         Pback = getDen(self.bar, self.spin)
         Dense_old = np.diagonal(Pback)
         Dense_diff = abs(np.diagonal(self.P) - Dense_old)
+        self.DPList[1:, :, :] = self.DPList[:-1, :, :]
+        self.DPList[0,  :] = np.real(self.pList[0, :, :] - self.pList[1, :, :])
+        self.pList[1:, :, :] = self.pList[:-1, :, :]
+        self.pList[0,  :, :] = self.P.copy()
         
         ##DEBUG
         #print('DEBUG: Compare Density')
         #print(np.real(np.diag(self.P)[:10]))
         #print(np.real(np.diag(Pback)[:10]))
-
         
+        # Pulay Mixing
+        for i, v1 in enumerate(self.DPList):
+            for j, v2 in enumerate(self.DPList):
+                self.pMat[i,j] = np.sum(abs(v1*v2))
+       
+        print(self.pMat) 
         # Apply Damping, store to Gaussian matrix
-        if self.Total_E_Old<self.Total_E and Edamp:
-            print("APPLYING EDAMP...")
-            self.P = Pback + 0.1*damping*(self.P - Pback)
+        if Pulay:
+            coeff = np.linalg.solve(self.pMat, self.pB)[:-1]
+            print("Applying Pulay Coeff: ", coeff)
+            self.P += sum([self.DPList[i, :, :]*coeff[i] for i in range(len(coeff))])
         else:
+            print("Applying Damping value=", damping)
             self.P = Pback + damping*(self.P - Pback)
         storeDen(self.bar, self.P, self.spin)
         self.updateN() 
@@ -297,7 +317,7 @@ class NEGF(object):
 
     # Main SCF loop, runs Fock <-> Density cycle until convergence reached
     # Convergence criteria: dE, RMSDP, and MaxDP < conv, or maxcycles reached
-    def SCF(self, conv=1e-5, damping=0.1, maxcycles=100, Edamp=False, plot=False):
+    def SCF(self, conv=1e-5, damping=0.1, maxcycles=100, plot=False):
         
         Loop = True
         Niter = 0
@@ -311,7 +331,7 @@ class NEGF(object):
             print('Iteration '+str(Niter)+':')
             # Fock --> P --> Fock
             EList, occList = self.FockToP()
-            dE, RMSDP, MaxDP = self.PToFock(damping, Edamp)
+            dE, RMSDP, MaxDP = self.PToFock(damping, (Niter+1)%10 == 0)
             
             # Write monitor variables
             TotalE.append(self.Total_E)
