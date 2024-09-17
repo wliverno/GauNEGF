@@ -84,40 +84,29 @@ def densityGrid(Fbar, Gambar, Emin, mu, dE=0.001, T=300):
     return den/(2*np.pi)
 
 # Get density using a complex contour and applying Residue theorem
-def densityComplex(Fbar, Gambar, Emin, mu, dE=0.001, T=300):
+def densityComplex(F, S, g, Emin, mu, dE=0.001, T=300):
     #Construct circular contour
     kT = kB*T
-    Emax = Emax+(5*kT)
+    Emax = mu+(5*kT)
     center = (Emin+Emax)/2
     r = (Emax-Emin)/2
     N = int((Emax-Emin)/dE)
     theta = np.linspace(0, np.pi, N)
     Egrid = r*np.exp(1j*theta)+center
-    
-    #Calculate Residues (assuming Fbar is energy independent)
-    Res = np.zeros(np.shape(Fbar), dtype=complex)
-    I = np.identity(len(Fbar))
-    D, V = LA.eig(Fbar)
-    for ind, E in enumerate(D):
-        if abs(E-center) < r:
-            print('Residue at E=',E)
-            Ga = np.array(np.diag(1/(E-np.conj(D))))
-            Ga = V@ Ga @ V.conj().T
-            Vrow= np.array([V[:, ind]])
-            Y = Vrow.T @ Vrow.conj()
-            Res += 2j*np.pi*np.conj(Y@Gambar@Ga)
-    
+        
     #Integrate along contour
     print('Starting Integration...')
-    lineInt = np.array(np.zeros(np.shape(Fbar)), dtype=complex)
+    lineInt = np.array(np.zeros(np.shape(F)), dtype=complex)
     for i in range(1,N):
         E = (Egrid[i]+Egrid[i-1])/2
         dS = Egrid[i]-Egrid[i-1]
-        lineInt += denFunc(D, V, Gambar, E)*dS
+        fermi = 1/(np.exp((np.real(E)-mu)/kT)+1)
+        Gr = LA.inv(E*S - F - g.sigmaTot(E))
+        lineInt += Gr*fermi*dS
     print('Integration done!')
     
-    #Apply Residue Theorem and return
-    return (Res-lineInt)/(2*np.pi)
+    #Return -Im(Integral)/pi, Equation 19 in 10.1103/PhysRevB.63.245407
+    return (1+0j)*np.imag(lineInt)/np.pi
 
 # Form Sigma matrix given self-energy matrix or value (V) and orbital indices (inds)
 def formSigma(inds, V, nsto, S=0):

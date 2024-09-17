@@ -74,17 +74,23 @@ class NEGFE(NEGF):
         #print("--------------------------")
         
         # Density contribution from above self.Emin
-        print('Calculating Density for left contact:')
-        #P1 = self.g.densityComplex(self.Emin, self.mu1, 0)
-        upperLim1 = self.mu1 + (5*kB*T)
-        upperLim2 = self.mu2 + (5*kB*T)
-        P1 = self.g.densityComplex(Emin = self.Emin, Emax = upperLim1, ind=0, mu=self.mu1, T=T)
-        print('Calculating Density for right contact:')
-        #P2 = self.g.densityComplex(self.Emin, self.mu2, 1)
-        P2 = self.g.densityComplex(Emin = self.Emin, Emax = upperLim2, ind=1, mu=self.mu2, T=T)
-        
-        # Sum them Up.
-        P = P1 + P2 + Pw
+        # If fermi energies are equivalent, don't need any pole information 
+        if self.mu1 == self.mu2:
+            P1 = densityComplex(self.F, self.S, self.g, self.Emin, self.mu1, T=T)
+            #P2 = self.g.densityGrid(self.Emin, self.mu1, 0, dE=0.1)*2
+            #print(np.diag(P1)[:10], np.diag(P2)[:10])
+            P = P1
+        # Otherwise will need to use residue theorem
+        else:
+            upperLim1 = self.mu1 + (5*kB*T)
+            upperLim2 = self.mu2 + (5*kB*T)
+            print('Calculating Density for left contact:')
+            #P1 = self.g.densityComplex(self.Emin, self.mu1, 0)
+            P = self.g.densityComplex(Emin = self.Emin, Emax = upperLim1, ind=0, mu=self.mu1, T=T)
+            print('Calculating Density for right contact:')
+            #P2 = self.g.densityComplex(self.Emin, self.mu2, 1)
+            P += self.g.densityComplex(Emin = self.Emin, Emax = upperLim2, ind=1, mu=self.mu2, T=T)
+        P+= Pw
         
         # Calculate Level Occupation, Lowdin TF,  Return
         D,V = LA.eig(self.X@(self.F*har_to_eV)@self.X)
