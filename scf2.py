@@ -83,7 +83,8 @@ class NEGF(object):
         self.pMat[-1, -1] = 0
         self.pB = np.zeros(nPulay+1)
         self.pB[-1] = -1
-
+        
+        # DFT Info dump
         print("ORBS:")
         print(self.locs)
         self.Total_E =  self.bar.scalar("escf")
@@ -288,7 +289,7 @@ class NEGF(object):
             for j, v2 in enumerate(self.DPList):
                 self.pMat[i,j] = np.sum(abs(v1*v2))
        
-        print(self.pMat) 
+        #print(self.pMat) 
         # Apply Damping, store to Gaussian matrix
         if Pulay:
             coeff = np.linalg.solve(self.pMat, self.pB)[:-1]
@@ -331,7 +332,7 @@ class NEGF(object):
             print('Iteration '+str(Niter)+':')
             # Fock --> P --> Fock
             EList, occList = self.FockToP()
-            dE, RMSDP, MaxDP = self.PToFock(damping, (Niter+1)%10 == 0)
+            dE, RMSDP, MaxDP = self.PToFock(damping)#, (Niter+1)%10 == 0)
             
             # Write monitor variables
             TotalE.append(self.Total_E)
