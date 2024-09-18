@@ -84,7 +84,7 @@ def densityGrid(Fbar, Gambar, Emin, mu, dE=0.001, T=300):
     return den/(2*np.pi)
 
 # Get density using a complex contour and applying Residue theorem
-def densityComplex(F, S, g, Emin, mu, dE=0.001, T=300):
+def densityComplex(F, S, g, Emin, mu, dE=0.1, T=300):
     #Construct circular contour
     kT = kB*T
     Emax = mu+(5*kT)
@@ -93,7 +93,7 @@ def densityComplex(F, S, g, Emin, mu, dE=0.001, T=300):
     N = int((Emax-Emin)/dE)
     theta = np.linspace(0, np.pi, N)
     Egrid = r*np.exp(1j*theta)+center
-        
+
     #Integrate along contour
     print('Starting Integration...')
     lineInt = np.array(np.zeros(np.shape(F)), dtype=complex)
@@ -105,6 +105,10 @@ def densityComplex(F, S, g, Emin, mu, dE=0.001, T=300):
         lineInt += Gr*fermi*dS
     print('Integration done!')
     
+    # Inverse Lowdin TF
+    TF = fractional_matrix_power(S, 0.5)
+    lineInt = TF@lineInt@TF
+
     #Return -Im(Integral)/pi, Equation 19 in 10.1103/PhysRevB.63.245407
     return (1+0j)*np.imag(lineInt)/np.pi
 
