@@ -76,7 +76,7 @@ class NEGFE(NEGF):
         # Density contribution from above self.Emin
         # If fermi energies are equivalent, don't need any pole information 
         if self.mu1 == self.mu2:
-            P1 = densityComplex(self.F, self.S, self.g, self.Emin, self.mu1, T=T)
+            P1 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, T=T)
             #P2 = self.g.densityGrid(self.Emin, self.mu1, 0, dE=0.1)*2
             #print(np.diag(P1)[:10], np.diag(P2)[:10])
             P = P1
