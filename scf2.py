@@ -1,5 +1,5 @@
 import numpy as np
-from numpy import linalg as LA
+from scipy import linalg as LA
 from scipy.linalg import fractional_matrix_power
 import sys
 import time
@@ -11,6 +11,8 @@ from gauopen import QCBinAr as qcb
 from gauopen import QCUtil as qcu
 
 from matTools import *
+from transport import DOS
+from fermiSearch import DOSFermiSearch
 
 # Matrix Headers
 AlphaDen = "ALPHA DENSITY MATRIX"
@@ -49,13 +51,12 @@ class NEGF(object):
         #Default Integration Limits (from Damle thesis)
         self.Emin = -15
         self.Eminf = -1e5
-
+        self.fSearch = None
+        self.updFermi = False
     
         # Start calculation: Load Initial Matrices from Gaussian
-    
         print('Calculation started at '+str(time.asctime()))
         self.start_time = time.time()
-    
         self.bar = qcb.BinAr(debug=False,lenint=8,inputfile=self.ifile)
         self.bar.write('debug.baf')
         self.runDFT(fullSCF)
@@ -69,12 +70,8 @@ class NEGF(object):
             self.S = np.block([[Omat, np.zeros(Omat.shape)],[np.zeros(Omat.shape),Omat]])
         else:
             self.S = Omat
-        
         self.X = np.array(fractional_matrix_power(self.S, -0.5))
-    
-        self.I = np.array(np.identity(self.nsto))
-        #H0 = self.X*self.F*har_to_eV*self.X.conj().T
-        
+
         # Pulay Mixing Initialization
         nPulay = 6
         self.pList = np.array([self.P for i in range(nPulay)], dtype=complex)
@@ -129,9 +126,34 @@ class NEGF(object):
         self.F = F_ 
 
     # Set voltage and fermi energy, update electric field applied and integral limits
-    def setVoltage(self, fermi, qV, Emin=0, Eminf=0):
-        # Set Fermi Energy and integration limits
+    def setVoltage(self, qV, fermi=np.nan, Emin=0, Eminf=0):
+        # Set Fermi Energy
+        if np.isnan(fermi):
+            self.updFermi = True
+            if self.fSearch is None:
+                # Set initial fermi energy as (HOMO + LUMO)/2
+                orbs = LA.eigh(self.X@self.F@self.X, eigvals_only=True)
+                orbs = np.sort(orbs)*har_to_eV
+                nae = int(self.bar.ne/2 + (self.bar.multip-1)/2)
+                nbe = int(self.bar.ne/2 - (self.bar.multip-1)/2)
+                if self.spin=='r':
+                    homo_lumo = orbs[nae-1:nae+1]
+                else:
+                    homo_lumo = orbs[nae+nbe-1:nae+nbe+1]
+                print(f'Setting initial Fermi energy between HOMO ({homo_lumo[0]:.2f} eV) and LUMO ({homo_lumo[1]:.2f} eV)')
+                fermi = sum(homo_lumo)/2
+                self.fSearch = DOSFermiSearch(fermi, nae+nbe)#,numpoints=1)
+            else:
+                n_curr = self.updateN()
+                dosFunc = lambda E: DOS([E], self.F*har_to_eV, self.S, self.getSigma(E)[0], self.getSigma(E)[1])[0][0]
+                fermi = self.fSearch.step(dosFunc, n_curr)
+                print(f'Updating fermi level with accuracy {self.fSearch.get_accuracy():.2E} eV...')
+        else:
+            self.updFermi = False
+        print(f'Fermi Energy set to {fermi:.2f} eV')
         self.fermi = fermi
+        
+        # Set Integration limits
         if Emin==0:
             self.Emin = fermi-15
         else:
@@ -161,7 +183,8 @@ class NEGF(object):
         self.bar.scalar("X-EFIELD", int(field[0]))
         self.bar.scalar("Y-EFIELD", int(field[1]))
         self.bar.scalar("Z-EFIELD", int(field[2]))
-        print("E-field set to "+str(LA.norm(field))+" au")
+        if not self.updFermi:
+            print("E-field set to "+str(LA.norm(field))+" au")
     
     # Set contacts based on atom orbital locations
     def setContacts(self, lContact, rContact):
@@ -182,19 +205,29 @@ class NEGF(object):
         if np.ndim(np.array(sig)) == 0  and np.ndim(np.array(sig2)) == 0:
             pass
         elif np.ndim(sig) == 1 and np.ndim(sig2) == 1:
-            if self.spin=='g':
-                sig = np.kron(sig, [1, 1])
-                sig2 = np.kron(sig2, [1, 1])
-            elif self.spin=='ro' or self.spin=='u':
-                sig = np.kron([1, 1], sig)
-                sig2 = np.kron([1, 1], sig2)
+            if len(sig) == len(lInd) and len(sig2) == len(rInd):
+                pass
+            elif len(sig) == len(lInd)/2 and len(sig2) == len(rInd)/2:
+                if self.spin=='g':
+                    sig = np.kron(sig, [1, 1])
+                    sig2 = np.kron(sig2, [1, 1])
+                elif self.spin=='ro' or self.spin=='u':
+                    sig = np.kron([1, 1], sig)
+                    sig2 = np.kron([1, 1], sig2)
+            else:
+                raise Exception('Sigma matrix dimension mismatch!')
         elif np.ndim(sig) == 2 and np.ndim(sig2) == 2:
-            if self.spin=='g':
-                sig = np.kron(sig, np.eye(2))
-                sig2 = np.kron(sig2, np.eye(2))
-            elif self.spin=='ro' or self.spin=='u':
-                sig = np.kron(np.eye(2), sig)
-                sig2 = np.kron(np.eye(2), sig2)
+            if len(sig) == len(lInd) and len(sig2) == len(rInd):
+                pass
+            elif len(sig) == len(rInd)/2 and len(sig2) == len(rInd)/2:
+                if self.spin=='g':
+                    sig = np.kron(sig, np.eye(2))
+                    sig2 = np.kron(sig2, np.eye(2))
+                elif self.spin=='ro' or self.spin=='u':
+                    sig = np.kron(np.eye(2), sig)
+                    sig2 = np.kron(np.eye(2), sig2)
+            else:
+                raise Exception('Sigma matrix dimension mismatch!')
             
         else:
             raise Exception('Sigma matrix dimension mismatch!')
@@ -275,7 +308,7 @@ class NEGF(object):
         Dense_old = np.diagonal(Pback)
         Dense_diff = abs(np.diagonal(self.P) - Dense_old)
         self.DPList[1:, :, :] = self.DPList[:-1, :, :]
-        self.DPList[0,  :] = np.real(self.pList[0, :, :] - self.pList[1, :, :])
+        self.DPList[0,  :] = np.real(self.pList[1, :, :] - self.pList[0, :, :])
         self.pList[1:, :, :] = self.pList[:-1, :, :]
         self.pList[0,  :, :] = self.P.copy()
         
@@ -292,7 +325,7 @@ class NEGF(object):
         #print(self.pMat) 
         # Apply Damping, store to Gaussian matrix
         if Pulay:
-            coeff = np.linalg.solve(self.pMat, self.pB)[:-1]
+            coeff = LA.solve(self.pMat, self.pB)[:-1]
             print("Applying Pulay Coeff: ", coeff)
             self.P += sum([self.DPList[i, :, :]*coeff[i] for i in range(len(coeff))])
         else:
@@ -331,6 +364,8 @@ class NEGF(object):
             print()
             print('Iteration '+str(Niter)+':')
             # Fock --> P --> Fock
+            if self.updFermi and Niter > 0:
+                self.setVoltage(self.qV)
             EList, occList = self.FockToP()
             dE, RMSDP, MaxDP = self.PToFock(damping)#, (Niter+1)%10 == 0)
             
