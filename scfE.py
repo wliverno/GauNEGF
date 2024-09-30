@@ -1,5 +1,5 @@
 import numpy as np
-from numpy import linalg as LA
+from scipy import linalg as LA
 import sys
 import time
 import matplotlib.pyplot as plt
@@ -95,7 +95,7 @@ class NEGFE(NEGF):
         # Calculate Level Occupation, Lowdin TF,  Return
         D,V = LA.eig(self.X@(self.F*har_to_eV)@self.X)
         pshift = V.conj().T @ P @ V
-        self.P = np.real(self.X@P@self.X)
+        self.P = self.X@P@self.X
         occList = np.diag(np.real(pshift)) 
         EList = np.array(np.real(D)).flatten()
         inds = np.argsort(EList)        

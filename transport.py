@@ -1,5 +1,5 @@
 import numpy as np
-from numpy import linalg as LA
+from scipy import linalg as LA
 import scipy.io as io
 from matTools import *
 
@@ -127,7 +127,7 @@ def DOS(Elist, F, S, sig1, sig2):
         Gr = LA.inv(E*S - F - sig)
         DOSList.append(-1*np.imag(np.diag(Gr))/np.pi)
         DOS.append(np.sum(DOSList[-1]))
-        print("Energy:",E, "eV, DOS=", DOS[-1])
+        #print("Energy:",E, "eV, DOS=", DOS[-1])
     return DOS, DOSList
                    
 # H0 is an NxN matrix, g is a surfGreen() object

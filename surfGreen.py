@@ -30,7 +30,7 @@ kB = 8.617e-5           # eV/Kelvin
 
 
 class surfG:
-    def __init__(self, Fock, Overlap, indsList, taus=-1, staus=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eps=1e-9):
+    def __init__(self, Fock, Overlap, indsList, taus=-1, staus=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eps=1e-6):
         
         # Set up system
         self.F = np.array(Fock)
