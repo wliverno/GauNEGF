@@ -129,8 +129,10 @@ def DOS(Elist, F, S, sig1, sig2):
         DOS.append(np.sum(DOSList[-1]))
         #print("Energy:",E, "eV, DOS=", DOS[-1])
     return DOS, DOSList
-                   
-# H0 is an NxN matrix, g is a surfGreen() object
+
+## ENERGY DEPENDENT SIGMA:
+
+# F,S are NxN matrices, g is a surfGreen() object
 def cohTransE(Elist, F, S, g):
     F = np.array(F)
     S = np.array(S)
@@ -145,8 +147,53 @@ def cohTransE(Elist, F, S, g):
         print("Energy:",E, "eV, Transmission=", T)
         Tr.append(T)
     return Tr
+
+# F,S are 2Nx2N matrices, g is a surfGreen() object size 2Nx2N
+def cohTransSpinE(Elist, F, S, g, spin='u'):
+    F = np.array(F)
+    N = int(len(F)/2)
+    S = np.array(S)
+    Tr = []
+    Tspin = []
+    for E in Elist:
+        T = 0
+        Ts = [0, 0, 0, 0]
+        sig1 = g.sigma(E, 0)
+        sig2 = g.sigma(E, 1)
+        gamma1 = -1j*(sig1 - np.conj(sig1).T)
+        gamma2 = -1j*(sig2 - np.conj(sig2).T)
+        sigMat = sig1+sig2
+        Gr = LA.inv(E*S - F - sigMat)
+        if spin == 'g':
+            aInds = np.arange(0, 2*N, 2)
+            bInds = np.arange(1, 2*N, 2)
+            GrQuad = [Gr[np.ix_(aInds, aInds)], Gr[np.ix_(aInds, bInds)],
+                      Gr[np.ix_(bInds, aInds)], Gr[np.ix_(bInds, bInds)]]
+            g1Quad = [gamma1[np.ix_(aInds, aInds)], gamma1[np.ix_(aInds, bInds)],
+                      gamma1[np.ix_(bInds, aInds)], gamma1[np.ix_(bInds, bInds)]]
+            g2Quad = [gamma2[np.ix_(aInds, aInds)], gamma2[np.ix_(aInds, bInds)],
+                      gamma2[np.ix_(bInds, aInds)], gamma2[np.ix_(bInds, bInds)]]
+        else:
+            GrQuad = [Gr[:N, :N], Gr[:N, N:], Gr[N:, :N], Gr[N:, N:]]
+            g1Quad = [gamma1[:N,:N], gamma1[:N,N:], gamma1[N:, :N], gamma1[N:,N:]]
+            g2Quad = [gamma2[:N,:N], gamma2[:N,N:], gamma2[N:, :N], gamma2[N:,N:]]
+        gam1Gr = [g1Quad[i]@GrQuad[i] for i in range(4)]     #Full Matrix Multiplication
+        gam2Ga = [g2Quad[i]@GrQuad[i].conj().T for i in range(4)]
+        for i in range(N):
+            Ttot =  0
+            for j in range(4):
+                T_ = np.dot(gam1Gr[j][i,:],gam2Ga[j][:,i])
+                Ts[j] += T_
+                T+= T_
+        T = np.real(T)
+        Ts = np.real(Ts)
+        print("Energy:",E, "eV, Transmission=", T, ", Tspin=", Ts)
+        Tr.append(T)
+        Tspin.append(Ts)
+    return (Tr, np.array(Tspin))
+
                    
-# H0 is an NxN matrix, g is a surfGreen() object
+# F,S are NxN matrices, g is a surfGreen() object
 def DOSE(Elist, F, S, g):
     F = np.array(F)
     S = np.array(S)
