@@ -1,5 +1,5 @@
 import numpy as np
-from numpy import linalg as LA
+from scipy import linalg as LA
 from scipy.linalg import fractional_matrix_power
 import scipy.io as io
 import sys
@@ -149,47 +149,39 @@ class surfG:
         if mu!=-9999:
             Gambar /= (np.exp((np.real(E)-mu)/kT)+1)
         Fbar = self.X@(self.F + sigTot)@self.X
-        D, V = LA.eig(Fbar)
-        Ga = np.array(np.diag(1/(E-np.conj(D))))
-        Ga = V@Ga@V.conj().T
-        Gr = np.array(np.diag(1/(E-D)))
-        Gr = V@Gr@V.conj().T
+        D, V_lhp = LA.eig(Fbar)
+        V_uhp = LA.inv(V_lhp).conj().T
+        Gr = np.zeros(np.shape(Fbar), dtype=complex)
+        for i in range(len(D)):
+            vl = V_lhp[:, i].reshape(-1, 1)
+            vu = V_uhp[i, :].reshape(1, -1)
+            Gr += (vl@vu)/(E-D[i])
+        Ga = Gr.conj().T
         return (Gr@Gambar@Ga, D)
-   
-    # Function to use recursive algorithm to find poles, no longer used 
-    def recursiveResidue(self, E, conv=1e-3):
-        resid = 1
-        counter = 1
-        #print(f'RRes starting for E={E}')
-        Eprev = E+0.0
-        while resid>conv and counter<50:
-            Eprev = E+0.0
-            Fbar = self.X@(self.F + self.sigmaTot(Eprev))@self.X
-            D, V = LA.eig(Fbar);
-            E = D[np.argmin(abs(Eprev - D))].conj()
-            resid = abs((Eprev - E)/Eprev)
-            #print(E, resid)
-            counter += 1
-        if counter <50:
-            print(f'RRes Done in {counter} iterations, final E={E}')
-        else:
-            print(f'RRes timed out, conv={resid}, final E={E}')
-        return E
     
     # Density matrix generation using direct integration across the (real) energy axis
-    def densityGrid(self, Emin, Emax, ind=-1, dE=0.001):
+    def densityGrid(self, Emin, Emax, ind=-1, dE=0.001, mu=-9999, T=300):
+        # Create Fermi function if mu given
+        kT = kB*T
+        fermi = lambda E: 1
+        if mu!=-9999:
+            Emax += 5*kT
+            fermi = lambda E: 1/(np.exp((E-mu)/kT)+1)
+        # Direct integration
         Egrid = np.arange(Emin, Emax, dE)
         den = np.array(np.zeros(np.shape(self.F)), dtype=complex)
         print('Starting Integration...')
         for i in range(1,len(Egrid)):
             E = (Egrid[i]+Egrid[i-1])/2
             dE = Egrid[i]-Egrid[i-1]
-            den += self.denFunc(E, ind)[0]*dE
+            den += self.denFunc(E, ind)[0]*fermi(E)*dE
         print('Integration done!')
-        return den/(2*np.pi)
+        den /= 2*np.pi
+        return den
     
     # Density matrix generation using the complex contour and residue theorem
-    def densityComplex(self, Emin, Emax, ind=-1, dE=0.1, plotPoles=True, mu=-9999, T=300):
+    # TODO: CURRENTLY NOT WORKING - DENSITY HAS NON-REAL COMPONENTS
+    def densityComplexRes(self, Emin, Emax, ind=-1, dE=0.1, plotPoles=True, mu=-9999, T=300):
         kT = kB*T
         if plotPoles:
             plt.clf()
@@ -199,34 +191,38 @@ class surfG:
         r = (Emax-Emin)/2
         N = int((Emax-Emin)/dE)
         theta = np.linspace(0, np.pi, N)
-        Egrid = r*np.exp(1j*theta)+center
+        Egrid = r*np.exp(-1j*theta)+center
 
         #Integrate along contour, store eigenvalues at each point in Dlist
         print('Starting Integration...')
         lineInt = np.array(np.zeros(np.shape(self.F)), dtype=complex)
         nD = len(self.F)
-        Dlist = np.zeros((N, nD), dtype=complex)
-        for i in range(N):
+        Dlist = np.zeros((N-1, nD), dtype=complex)
+        Elist = np.zeros(N-1, dtype=complex)
+        for i in range(1,N):
             E = (Egrid[i]+Egrid[i-1])/2
             dS = Egrid[i]-Egrid[i-1]
-            (F, D) = self.denFunc(E, ind, mu, T)
-            Dlist[i,:] = D[np.argsort(D.real)]
-            lineInt += F*dS
+            (DOS, D) = self.denFunc(E, ind, mu, T)
+            Dlist[i-1,:] = D[np.argsort(D.real)]
+            Elist[i-1] = E
+            lineInt += DOS*dS
         print('Integration done!')
+        print("Line integral:")
+        print(f"  Max abs: {np.max(np.abs(lineInt))}")
+        print(f"  Trace: {np.trace(lineInt)}")
         
         #Calculate pole locations from Dlist
         poles = np.zeros(nD, dtype=complex)
         for i in range(nD):
             Di = Dlist[:, i]
-            Ediff = np.abs(Egrid-Di.real)
+            Ediff = np.abs(Elist-Di.real)
             poles[i] = Di[np.argmin(Ediff)]
             if plotPoles:
-                plt.scatter(Di.real, -1*Di.imag, (1 - Ediff/max(Ediff))*20)
+                plt.scatter(Di.real, Di.imag, (1 - Ediff/max(Ediff))*20)
         
         #Apply contour cutoff to poles
-        poleList = poles.copy().conj()
-        #print(poleList)
-        poleList = poleList[(abs(poleList-center)<r)&(poleList.imag>0)]
+        poleList = poles.copy()
+        poleList = poleList[(abs(poleList-center)<r)&(poleList.imag<0)]
         if plotPoles:
             plt.plot(poleList.real, poleList.imag, '+k')
             plt.plot(Egrid.real, Egrid.imag, '--')
@@ -234,36 +230,54 @@ class surfG:
             plt.ylabel('Im(Z)')
             plt.title('Variation in Poles')
             plt.xlim(Emin-5*kT, Emax+10*kT)
-            plt.ylim(0, r+5*kT)
+            plt.ylim(-r-5*kT, 0)
             plt.savefig('poleFig.png')
             plt.clf()
  
         #Loop through each possible pole and calculate Residue
         Res = np.array(np.zeros(np.shape(self.F)), dtype=complex)
-        for j, E in enumerate(poleList):
-            print('Residue at E=', E)
+        for E in poleList:
+            #print('Residue at E=', E)
+            # Calculate sigma and gamma
             sigTot = self.sigmaTot(E)
             if ind==-1:
                 sig = sigTot
             else:
                 sig = self.sigma(E, ind)
-            Fbar = self.X@(self.F + sigTot)@self.X
-            D, V = LA.eig(Fbar)
             Gambar = self.X@(1j*(sig - sig.conj().T))@self.X
             if mu!=-9999:
                 Gambar /= (np.exp((np.real(E)-mu)/kT)+1)
-            Ga = np.array(np.diag(1/(E-np.conj(D))))
-            Ga = V@ Ga @ V.conj().T 
-            Vrow = np.array([V[:, j]])
-            Y = Vrow.T @ Vrow.conj()
-            Res += 2j*np.pi*np.conj(Y@Gambar@Ga)
-            #Res += 2j*np.pi*denFunc(D, V, Gambar, E+1e-9)*(-1e-9) #For Testing
+            
+            # Calculate Ga
+            Fbar = self.X@(self.F + sigTot)@self.X
+            D, V_lhp = LA.eig(Fbar)
+            V_uhp = LA.inv(V_lhp).conj().T
+            Ga = np.zeros(np.shape(Fbar), dtype=complex)
+            for i in range(len(D)):
+                vl = V_lhp[:, i].reshape(-1, 1)
+                vu = V_uhp[i, :].reshape(1, -1)
+                Ga += (vl@vu)/(E-D[i].conj())
+            
+            # Calculate outer product for Gr residue
+            j = np.argmin(np.abs(D - E))
+            vl = V_lhp[:, j].reshape(-1, 1)
+            vu = V_uhp[j, :].reshape(1, -1)
+            Y = vl@vu  # outer product
+
+            # Get residue
+            residue = 2j*np.pi* (Y @ Gambar @ Ga)
+            #residue2 = 2j*np.pi*self.denFunc(E+1e-9, ind, mu, T)[0]/-1e-9 #For Testing
+            Res += residue
+            print(f"Residue for pole {E}:")
+            print(f"  Max abs: {np.max(np.abs(residue))}")
+            print(f"  Trace: {np.trace(residue)}")
+            #print(f"  Trace: {np.trace(residue2)}")
         
         # Store Egrid and poleList for access
         self.Egrid[ind] = Egrid
         self.poleList[ind]  = poleList
 
         #Use Residue Theorem
-        return (Res-lineInt)/(2*np.pi)
+        return (Res - lineInt)/(2*np.pi)
 
 
