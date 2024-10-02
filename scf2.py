@@ -5,26 +5,16 @@ import sys
 import time
 import matplotlib.pyplot as plt
 
-
+# Gaussian interface packages
 from gauopen import QCOpMat as qco
 from gauopen import QCBinAr as qcb
 from gauopen import QCUtil as qcu
 
+# Other packages
 from matTools import *
 from transport import DOS
 from fermiSearch import DOSFermiSearch
-
-# Matrix Headers
-AlphaDen = "ALPHA DENSITY MATRIX"
-BetaDen = "BETA DENSITY MATRIX"
-AlphaSCFDen = "ALPHA SCF DENSITY MATRIX"
-BetaSCFDen = "BETA SCF DENSITY MATRIX"
-AlphaFock = "ALPHA FOCK MATRIX"
-BetaFock = "BETA FOCK MATRIX"
-AlphaMOs = "ALPHA MO COEFFICIENTS"
-BetaMOs = "BETA MO COEFFICIENTS"
-AlphaEnergies = "ALPHA ORBITAL ENERGIES"
-BetaEnergies = "BETA ORBITAL ENERGIES"
+from density import integralFit
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
@@ -48,9 +38,10 @@ class NEGF(object):
         self.energyDep = False;
         self.Total_E_Old=9999.0;
         
-        #Default Integration Limits (from Damle thesis)
-        self.Emin = -15
+        #Default Integration Limits
+        self.Emin = -1*har_to_eV
         self.Eminf = -1e5
+        self.dE = 0.1
         self.fSearch = None
         self.updFermi = False
     
@@ -126,7 +117,7 @@ class NEGF(object):
         self.F = F_ 
 
     # Set voltage and fermi energy, update electric field applied and integral limits
-    def setVoltage(self, qV, fermi=np.nan, Emin=0, Eminf=0):
+    def setVoltage(self, qV, fermi=np.nan, Emin=None, Eminf=None):
         # Set Fermi Energy
         if np.isnan(fermi):
             self.updFermi = True
@@ -150,18 +141,14 @@ class NEGF(object):
                 print(f'Updating fermi level with accuracy {self.fSearch.get_accuracy():.2E} eV...')
         else:
             self.updFermi = False
+            # Set Integration limits
+        if Emin!=None:
+            self.Emin = Emin
+        if Eminf!=None:
+            self.Eminf = Eminf
+
         print(f'Fermi Energy set to {fermi:.2f} eV')
         self.fermi = fermi
-        
-        # Set Integration limits
-        if Emin==0:
-            self.Emin = fermi-15
-        else:
-            self.Emin = Emin
-        if Eminf==0:
-            self.Eminf = fermi-1e5
-        else:
-            self.Eminf = Eminf
         self.qV = qV
         self.mu1 =  fermi + (qV/2)
         self.mu2 =  fermi - (qV/2)
@@ -308,9 +295,10 @@ class NEGF(object):
         Dense_old = np.diagonal(Pback)
         Dense_diff = abs(np.diagonal(self.P) - Dense_old)
         self.DPList[1:, :, :] = self.DPList[:-1, :, :]
-        self.DPList[0,  :] = np.real(self.pList[1, :, :] - self.pList[0, :, :])
+        self.DPList[0,  :] = np.abs(np.real(self.P - Pback))
         self.pList[1:, :, :] = self.pList[:-1, :, :]
         self.pList[0,  :, :] = self.P.copy()
+        beta = 0.1
         
         ##DEBUG
         #print('DEBUG: Compare Density')
@@ -327,7 +315,7 @@ class NEGF(object):
         if Pulay:
             coeff = LA.solve(self.pMat, self.pB)[:-1]
             print("Applying Pulay Coeff: ", coeff)
-            self.P += sum([self.DPList[i, :, :]*coeff[i] for i in range(len(coeff))])
+            self.P = sum([(self.pList[i, :, :]+ beta*self.DPList[i, :, :])*coeff[i] for i in range(len(coeff))])
         else:
             print("Applying Damping value=", damping)
             self.P = Pback + damping*(self.P - Pback)
@@ -352,7 +340,9 @@ class NEGF(object):
     # Main SCF loop, runs Fock <-> Density cycle until convergence reached
     # Convergence criteria: dE, RMSDP, and MaxDP < conv, or maxcycles reached
     def SCF(self, conv=1e-5, damping=0.1, maxcycles=100, plot=False):
-        
+        #Determin integral info:
+        #self.dE, self.Emin = integralFit(self.F*har_to_eV, self.S, self.g, self.fermi)
+
         Loop = True
         Niter = 0
         PP=[]
@@ -367,7 +357,7 @@ class NEGF(object):
             if self.updFermi and Niter > 0:
                 self.setVoltage(self.qV)
             EList, occList = self.FockToP()
-            dE, RMSDP, MaxDP = self.PToFock(damping)#, (Niter+1)%10 == 0)
+            dE, RMSDP, MaxDP = self.PToFock(damping)# (Niter+1)%10 == 0)
             
             # Write monitor variables
             TotalE.append(self.Total_E)

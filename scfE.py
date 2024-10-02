@@ -12,6 +12,7 @@ from gauopen import QCBinAr as qcb
 from gauopen import QCUtil as qcu
 
 from matTools import *
+from density import *
 
 from scf2 import NEGF
 from surfGreen import surfG
@@ -64,7 +65,7 @@ class NEGFE(NEGF):
         GamBarW1 = self.X@self.GamW1@self.X
         GamBarW2 = self.X@self.GamW2@self.X
         Dw,Vw = LA.eig(np.array(FbarW))
-        Pw = density(Vw, Dw, GamBarW1+GamBarW2, self.Eminf, self.Emin)
+        Pw = density(Vw, Dw, GamBarW1+GamBarW2, self.Eminf, self.Emin)#def densityGrid(F, S, g, Emin, mu, ind=None, N=100, T=300):
         
         # DEBUG: 
         #Pwalt = self.g.densityComplex(self.Emin=Eminf, Emax=Emin, dE=(Emin-Eminf)/400)
@@ -76,10 +77,16 @@ class NEGFE(NEGF):
         # Density contribution from above self.Emin
         # If fermi energies are equivalent, don't need any pole information 
         if self.mu1 == self.mu2:
-            P1 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, T=T)
-            #P2 = self.g.densityGrid(self.Emin, self.mu1, 0, dE=0.1)*2
-            #print(np.diag(P1)[:10], np.diag(P2)[:10])
-            P = P1
+            #P1 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=10, T=T)
+            #P2 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=50, T=T)
+            P3 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=100, T=T)
+            #P4 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=1000, T=T)
+            
+            #print(np.diag(P1)[:6])
+            #print(np.diag(P2)[:6])
+            #print(np.diag(P3))
+            #print(np.diag(P4)[:6])
+            P = P3
         # Otherwise will need to use residue theorem
         else:
             upperLim1 = self.mu1 + (5*kB*T)
