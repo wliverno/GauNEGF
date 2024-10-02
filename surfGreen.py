@@ -107,12 +107,13 @@ class surfG:
     
     def setF(self, F):
         self.F = F
+        taus = self.tauInds
+        if self.tauFromFock:
+            self.F[np.ix_(taus[0], taus[0])] = self.F[np.ix_(taus[1], taus[1])].copy()
+            self.tauList = [self.F[np.ix_(taus[0], taus[1])], self.F[np.ix_(taus[1], taus[0])]]
+            self.stauList = [self.S[np.ix_(taus[0], taus[1])], self.S[np.ix_(taus[1], taus[0])]]
         if self.contactFromFock:
             self.setContacts()
-        if self.tauFromFock:
-           taus = self.tauInds
-           self.tauList = [self.F[np.ix_(taus[0], taus[1])], self.F[np.ix_(taus[1], taus[0])]]
-           self.stauList = [self.S[np.ix_(taus[0], taus[1])], self.S[np.ix_(taus[1], taus[0])]]
     
     def sigma(self, E, i, conv=1e-3):
         E = E.real
