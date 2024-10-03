@@ -51,21 +51,21 @@ def density(V, D, Gam, Emin, mu):
 def densityGrid(F, S, g, Emin, mu, ind=None, N=100, T=300):
     kT = kB*T
     Emax = mu + 5*kT
-    r = (Emax-Emin)/2
+    mid = (Emax-Emin)/2
     den = np.array(np.zeros(np.shape(F)), dtype=complex)
     x,w = roots_legendre(N)
     x = np.real(x)
     print(f'Integrating over {N} points...')
     for i, val in enumerate(x):
-        E = r*(val + 1) + Emin
+        E = mid*(val + 1) + Emin
         GrE = Gr(F, S, g, E)
         GaE = GrE.conj().T
         if ind == None:
             sig = g.sigmaTot(E)
         else:
             sig = g.sigma(E, ind)
-        Gamma = 1j*(sig + sig.conj().T)
-        den += r*(GrE@Gamma@GaE)*fermi(E, mu, T)
+        Gamma = 1j*(sig - sig.conj().T)
+        den += mid*w[i]*(GrE@Gamma@GaE)*fermi(E, mu, T)
     print('Integration done!')
     
     # Inverse Lowdin TF
@@ -73,6 +73,33 @@ def densityGrid(F, S, g, Emin, mu, ind=None, N=100, T=300):
     den = TF@den@TF
     
     return den/(2*np.pi)
+
+# Get non-equilibrium density at a single contact (ind) using a real energy grid
+def densityGridTrap(F, S, g, Emin, mu, ind=None, N=100, T=300):
+    kT = kB*T
+    Emax = mu + 5*kT
+    Egrid = np.linspace(Emin, Emax, N)
+    den = np.array(np.zeros(np.shape(F)), dtype=complex)
+    print(f'Integrating over {N} points...')
+    for i in range(1,N):
+        E = (Egrid[i] + Egrid[i-1])/2
+        dE = Egrid[i] - Egrid[i-1]
+        GrE = Gr(F, S, g, E)
+        GaE = GrE.conj().T
+        if ind == None:
+            sig = g.sigmaTot(E)
+        else:
+            sig = g.sigma(E, ind)
+        Gamma = 1j*(sig - sig.conj().T)
+        den += (GrE@Gamma@GaE)*fermi(E, mu, T)*dE
+    print('Integration done!')
+    
+    # Inverse Lowdin TF
+    TF = fractional_matrix_power(S, 0.5)
+    den = TF@den@TF
+    
+    return den/(2*np.pi)
+
 
 def Gr(F, S, g, E):
     return LA.inv(E*S - F - g.sigmaTot(E)) 
@@ -114,26 +141,26 @@ def densityComplex(F, S, g, Emin, mu, N=100, T=300):
 
 
 # Get density using a complex contour and trapezoidal integration
-def densityComplexTrap(F, S, g, Emin, mu, Npoints, T=300):
+def densityComplexTrap(F, S, g, Emin, mu, N, T=300):
     #Construct circular contour
     kT = kB*T
     Emax = mu+(5*kT)
     center = (Emin+Emax)/2
     r = (Emax-Emin)/2
-    theta = np.linspace(0, np.pi, Npoints)
+    theta = np.linspace(0, np.pi, N)
     Egrid = r*np.exp(1j*theta)+center
 
     #Integrate along contour
-    print(f'Integrating over {Npoints} points...')
+    print(f'Integrating over {N} points...')
     lineInt = np.array(np.zeros(np.shape(F)), dtype=complex)
-    for i in range(1,Npoints):
+    for i in range(1,N):
         E = (Egrid[i]+Egrid[i-1])/2
         dS = Egrid[i]-Egrid[i-1]
         if T>0:
             fermi = 1/(np.exp((np.real(E)-mu)/kT)+1)
         else:
             fermi = 1
-        lineInt += Gr(E, S, g, E)*fermi*dS
+        lineInt += Gr(F, S, g, E)*fermi*dS
     print('Integration done!')
     
     # Inverse Lowdin TF
@@ -156,9 +183,9 @@ def integralFit(F, S, g, mu, tol=1e-2, T=300, maxcycles=500):
     counter = 0
     dN = DOS(F,S,g,Emin)
     while dN>tol and counter<maxcycles:
-        Emin -= 1.0
+        Emin -= 0.1
         dN = DOS(F,S,g,Emin)
-        #print(Emin, dN)
+        print(Emin, dN)
         counter += 1
     if counter == maxcycles:
         print(f'Warning: Emin still not within tolerance after {maxcycles} cycles')
@@ -173,10 +200,10 @@ def integralFit(F, S, g, mu, tol=1e-2, T=300, maxcycles=500):
         N *= 2 # Start with 16 points, double each time
         rho_ = np.real(densityComplex(F, S, g, Emin, mu, N, T))
         dN = np.trace(np.abs(rho_ - rho))
-        #print(dE, dN)
+        print(N, dN)
         rho = rho_
         counter += 1
     if counter == maxcycles:
         print(f'Warning: dE still not within tolerance after {maxcycles} cycles')
-    print(f'Final dE: {dE} eV') 
-    return Emin, dE
+    print(f'Final N: {N}') 
+    return Emin, N

@@ -116,7 +116,6 @@ class surfG:
             self.setContacts()
     
     def sigma(self, E, i, conv=1e-3):
-        E = E.real
         sigma = np.array(np.zeros(np.shape(self.F)), dtype=complex)
         inds = self.indsList[i]
         stau = self.stauList[i]
@@ -127,7 +126,6 @@ class surfG:
         return sigma
     
     def sigmaTot(self, E, conv=1e-3):
-        E = E.real
         sigma = np.array(np.zeros(np.shape(self.F)), dtype=complex)
         for i, inds in enumerate(self.indsList):
             stau = self.stauList[i]
