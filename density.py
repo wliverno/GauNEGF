@@ -22,6 +22,21 @@ V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 kB = 8.617e-5           # eV/Kelvin
 
 
+## HELPER FUNCTIONS
+def Gr(F, S, g, E):
+    return LA.inv(E*S - F - g.sigmaTot(E)) 
+
+def fermi(E, mu, T):
+    kT = kB*T
+    if kT==0:
+        return (E<mu)*1
+    else:
+        return 1/(np.exp((np.real(E) - mu)/kT)+1)
+
+def DOS(F, S, g, E):
+    return -np.trace(np.imag(Gr(F,S, g, E)))/np.pi
+
+## DENSITY FUNCTIONS
 # Get density using analytical integration
 def density(V, D, Gam, Emin, mu):
     Nd = len(V)
@@ -47,10 +62,34 @@ def density(V, D, Gam, Emin, mu):
     den = V@ prefactor @ V.conj().T
     return den
 
-# Get non-equilibrium density at a single contact (ind) using a real energy grid
-def densityGrid(F, S, g, Emin, mu, ind=None, N=100, T=300):
+# Get equilibrium density at a single contact (ind) using a real energy grid
+def densityReal(F, S, g, Emin, mu, N=100, T=300):
     kT = kB*T
     Emax = mu + 5*kT
+    mid = (Emax-Emin)/2
+    defInt = np.array(np.zeros(np.shape(F)), dtype=complex)
+    x,w = roots_legendre(N)
+    x = np.real(x)
+    print(f'Integrating over {N} points...')
+    for i, val in enumerate(x):
+        E = mid*(val + 1) + Emin
+        defInt += mid*w[i]*Gr(F, S, g, E)*fermi(E, mu, T)
+    print('Integration done!')
+    
+    # Inverse Lowdin TF
+    TF = fractional_matrix_power(S, 0.5)
+    defInt = TF@defInt@TF
+    
+    return (-1+0j)*np.imag(defInt)/(np.pi)
+
+# Get non-equilibrium density at a single contact (ind) using a real energy grid
+def densityGrid(F, S, g, mu1, mu2, ind=None, N=100, T=300):
+    kT = kB*T
+    muLo = min(mu1, mu2)
+    muHi = max(mu1, mu2)
+    dInt = np.sign(mu2 - mu1)
+    Emax = muHi + 5*kT
+    Emin = muLo - 5*kT
     mid = (Emax-Emin)/2
     den = np.array(np.zeros(np.shape(F)), dtype=complex)
     x,w = roots_legendre(N)
@@ -65,19 +104,20 @@ def densityGrid(F, S, g, Emin, mu, ind=None, N=100, T=300):
         else:
             sig = g.sigma(E, ind)
         Gamma = 1j*(sig - sig.conj().T)
-        den += mid*w[i]*(GrE@Gamma@GaE)*fermi(E, mu, T)
+        dFermi = fermi(E, muHi, T) - fermi(E, muLo, T)
+        den += mid*w[i]*(GrE@Gamma@GaE)*dFermi*dInt
     print('Integration done!')
-    
-    # Inverse Lowdin TF
-    TF = fractional_matrix_power(S, 0.5)
-    den = TF@den@TF
     
     return den/(2*np.pi)
 
 # Get non-equilibrium density at a single contact (ind) using a real energy grid
 def densityGridTrap(F, S, g, Emin, mu, ind=None, N=100, T=300):
     kT = kB*T
-    Emax = mu + 5*kT
+    muLo = min(mu1, mu2)
+    muHi = max(mu1, mu2)
+    dInt = np.sign(mu2 - mu1)
+    Emax = muHi + 5*kT
+    Emin = muLo - 5*kT
     Egrid = np.linspace(Emin, Emax, N)
     den = np.array(np.zeros(np.shape(F)), dtype=complex)
     print(f'Integrating over {N} points...')
@@ -91,22 +131,11 @@ def densityGridTrap(F, S, g, Emin, mu, ind=None, N=100, T=300):
         else:
             sig = g.sigma(E, ind)
         Gamma = 1j*(sig - sig.conj().T)
-        den += (GrE@Gamma@GaE)*fermi(E, mu, T)*dE
+        dFermi = fermi(E, muHi, T) - fermi(E, muLo, T)
+        den += mid*w[i]*(GrE@Gamma@GaE)*dFermi*dInt
     print('Integration done!')
     
-    # Inverse Lowdin TF
-    TF = fractional_matrix_power(S, 0.5)
-    den = TF@den@TF
-    
     return den/(2*np.pi)
-
-
-def Gr(F, S, g, E):
-    return LA.inv(E*S - F - g.sigmaTot(E)) 
-
-def fermi(E, mu, T):
-    kT = kB*T
-    return 1/(np.exp((np.real(E) - mu)/kT)+1)
 
 # Get equilibrium density using a complex contour and a Gaussian quadrature
 def densityComplex(F, S, g, Emin, mu, N=100, T=300):
@@ -125,17 +154,9 @@ def densityComplex(F, S, g, Emin, mu, N=100, T=300):
         theta = np.pi/2 * (val + 1)
         z = center + r*np.exp(1j*theta)
         dz = 1j * r * np.exp(1j*theta)
-        if T>0:
-            fermi = 1/(np.exp((np.real(z)-mu)/kT)+1)
-        else:
-            fermi = 1
-        lineInt += (np.pi/2)*w[i]*Gr(F, S, g, z)*fermi*dz
+        lineInt += (np.pi/2)*w[i]*Gr(F, S, g, z)*fermi(z, mu, T)*dz
     print('Integration done!')
     
-    # Inverse Lowdin TF
-    TF = fractional_matrix_power(S, 0.5)
-    lineInt = TF@lineInt@TF
-
     #Return -Im(Integral)/pi, Equation 19 in 10.1103/PhysRevB.63.245407
     return (1+0j)*np.imag(lineInt)/np.pi
 
@@ -156,54 +177,57 @@ def densityComplexTrap(F, S, g, Emin, mu, N, T=300):
     for i in range(1,N):
         E = (Egrid[i]+Egrid[i-1])/2
         dS = Egrid[i]-Egrid[i-1]
-        if T>0:
-            fermi = 1/(np.exp((np.real(E)-mu)/kT)+1)
-        else:
-            fermi = 1
-        lineInt += Gr(F, S, g, E)*fermi*dS
+        lineInt += Gr(F, S, g, E)*fermi(E, mu, T)*dS
     print('Integration done!')
     
-    # Inverse Lowdin TF
-    TF = fractional_matrix_power(S, 0.5)
-    lineInt = TF@lineInt@TF
-
     #Return -Im(Integral)/pi, Equation 19 in 10.1103/PhysRevB.63.245407
     return (1+0j)*np.imag(lineInt)/np.pi
 
-def DOS(F, S, g, E):
-    return -np.trace(np.imag(Gr(F,S, g, E)))/np.pi
-
-def integralFit(F, S, g, mu, tol=1e-2, T=300, maxcycles=500):
-    kT = kB*T
-    Emax = mu + (5*kT)
-    D,V = LA.eig(F, S)
+def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
 
     # Calculate Emin using DOS
+    D = LA.eigh(F, S, eigvals_only=True)
     Emin = min(D.real.flatten())
     counter = 0
-    dN = DOS(F,S,g,Emin)
-    while dN>tol and counter<maxcycles:
+    dP = DOS(F,S,g,Emin)
+    while dP>tol and counter<maxcycles:
         Emin -= 0.1
-        dN = DOS(F,S,g,Emin)
-        print(Emin, dN)
+        dP = DOS(F,S,g,Emin)
+        print(Emin, dP)
         counter += 1
     if counter == maxcycles:
-        print(f'Warning: Emin still not within tolerance after {maxcycles} cycles')
+        print(f'Warning: Emin still not within tolerance after {maxcycles} energy samples')
     print(f'Final Emin: {Emin} eV') 
     
-    #Determine grid using dN
+    #Determine grid using dP
     counter = 0
-    N = 8
-    dN = 100
+    N1 = 8
+    dP = 100
     rho = np.zeros(np.shape(F))
-    while dN > tol and counter < maxcycles:
-        N *= 2 # Start with 16 points, double each time
-        rho_ = np.real(densityComplex(F, S, g, Emin, mu, N, T))
-        dN = np.trace(np.abs(rho_ - rho))
-        print(N, dN)
+    while dP > tol and N1 < maxcycles:
+        N1 *= 2 # Start with 16 points, double each time
+        rho_ = np.real(densityComplex(F, S, g, Emin, mu, N1, T=0))
+        dP = max(np.abs(rho_ - rho).flatten())
+        print(N1, dP)
         rho = rho_
         counter += 1
-    if counter == maxcycles:
-        print(f'Warning: dE still not within tolerance after {maxcycles} cycles')
-    print(f'Final N: {N}') 
-    return Emin, N
+    if N1 >  maxcycles:
+        print(f'Warning: N1 still not within tolerance')
+    print(f'Final N1: {N1}') 
+    #Determine grid using dP
+    counter = 0
+    N2 = 8
+    dP = 100
+    rho = np.ones(np.shape(F))
+    while dP > tol and N2 < maxcycles:
+        N2 *= 2 # Start with 16 points, double each time
+        rho_ = np.real(densityReal(F, S, g, Eminf, Emin, N2, T=0))
+        dP = max(np.abs(rho_ - rho).flatten())
+        print(N2, dP)
+        rho = rho_
+        counter += 1
+    if N2 >  maxcycles:
+        print(f'Warning: N2 still not within tolerance')
+    print(f'Final N2: {N2}') 
+
+    return Emin, N1, N2

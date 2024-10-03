@@ -51,6 +51,8 @@ class NEGF(object):
         self.bar = qcb.BinAr(debug=False,lenint=8,inputfile=self.ifile)
         self.bar.write('debug.baf')
         self.runDFT(fullSCF)
+        self.nae = int(self.bar.ne/2 + (self.bar.multip-1)/2)
+        self.nbe = int(self.bar.ne/2 - (self.bar.multip-1)/2)
 
         # Prepare self.F, Density, self.S, and TF matrices
         self.P = getDen(self.bar, spin)
@@ -116,6 +118,15 @@ class NEGF(object):
     def setFock(self, F_):
         self.F = F_ 
 
+    def getHOMOLUMO(self):
+        orbs = LA.eigh(self.X@self.F@self.X, eigvals_only=True)
+        orbs = np.sort(orbs)*har_to_eV
+        if self.spin=='r':
+            homo_lumo = orbs[self.nae-1:self.nae+1]
+        else:
+            homo_lumo = orbs[self.nae+self.nbe-1:self.nae+self.nbe+1]
+        return homo_lumo
+                
     # Set voltage and fermi energy, update electric field applied and integral limits
     def setVoltage(self, qV, fermi=np.nan, Emin=None, Eminf=None):
         # Set Fermi Energy
@@ -123,17 +134,10 @@ class NEGF(object):
             self.updFermi = True
             if self.fSearch is None:
                 # Set initial fermi energy as (HOMO + LUMO)/2
-                orbs = LA.eigh(self.X@self.F@self.X, eigvals_only=True)
-                orbs = np.sort(orbs)*har_to_eV
-                nae = int(self.bar.ne/2 + (self.bar.multip-1)/2)
-                nbe = int(self.bar.ne/2 - (self.bar.multip-1)/2)
-                if self.spin=='r':
-                    homo_lumo = orbs[nae-1:nae+1]
-                else:
-                    homo_lumo = orbs[nae+nbe-1:nae+nbe+1]
+                homo_lumo = self.getHOMOLUMO()
                 print(f'Setting initial Fermi energy between HOMO ({homo_lumo[0]:.2f} eV) and LUMO ({homo_lumo[1]:.2f} eV)')
                 fermi = sum(homo_lumo)/2
-                self.fSearch = DOSFermiSearch(fermi, nae+nbe)#,numpoints=1)
+                self.fSearch = DOSFermiSearch(fermi, self.nae+self.nbe)#,numpoints=1)
             else:
                 n_curr = self.updateN()
                 dosFunc = lambda E: DOS([E], self.F*har_to_eV, self.S, self.getSigma(E)[0], self.getSigma(E)[1])[0][0]
