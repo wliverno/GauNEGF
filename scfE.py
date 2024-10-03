@@ -44,28 +44,28 @@ class NEGFE(NEGF):
         self.rInd = inds[1]
         self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eps)
         self.figures = []
+        self.N1 = 100
+        self.N2 = 50
         return inds
+    
+    def integralCheck(self, tol=1e-4, cycles=10):
+        print(f'RUNNING SCF FOR {cycles} CYCLES USING DEFAULT GRID: ')
+        self.SCF(1e-10,0.1,cycles)
+        print('SETTING INTEGRATION LIMITS... ')
+        self.Emin, self.N1, self.N2 = integralFit(self.F*har_to_eV, self.S, self.g, sum(self.getHOMOLUMO())/2, self.Eminf, tol)
+        print('INTEGRATION LIMITS SET!')
+        print('#############################')
     
     # Get left and right contact self-energies at specified energy
     def getSigma(self, E):
         return (self.g.sigma(E, 0), self.g.sigma(E, 1))
 
     # Updated to use energy-dependent contour integral from surfG()
-    def FockToP(self, T=300):
+    def FockToP(self, T=300, N=100):
         # Density contribution from below self.Emin
-        sigWVal = -0.00001j #Based on Damle Code
-        self.sigmaW1 = formSigma(self.lInd, sigWVal, self.nsto, self.S)
-        self.sigmaW2 = formSigma(self.rInd, sigWVal, self.nsto, self.S)
-        self.sigmaW12 = self.sigmaW1+self.sigmaW2
-    
-        self.GamW1 = (self.sigmaW1 - self.sigmaW1.conj().T)*1j
-        self.GamW2 = (self.sigmaW2 - self.sigmaW2.conj().T)*1j
-        
-        FbarW = self.X@(self.F*har_to_eV + self.sigmaW12)@self.X
-        GamBarW1 = self.X@self.GamW1@self.X
-        GamBarW2 = self.X@self.GamW2@self.X
-        Dw,Vw = LA.eig(np.array(FbarW))
-        Pw = density(Vw, Dw, GamBarW1+GamBarW2, self.Eminf, self.Emin)#def densityGrid(F, S, g, Emin, mu, ind=None, N=100, T=300):
+        Pw = densityReal(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N1, T=0)
+        #print(np.diag(Pw)[:6])
+        #print(np.diag(Pw)) 
         
         # DEBUG: 
         #Pwalt = self.g.densityComplex(self.Emin=Eminf, Emax=Emin, dE=(Emin-Eminf)/400)
@@ -75,34 +75,28 @@ class NEGFE(NEGF):
         #print("--------------------------")
         
         # Density contribution from above self.Emin
-        # If fermi energies are equivalent, don't need any pole information 
-        if self.mu1 == self.mu2:
-            #P1 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=10, T=T)
-            #P2 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=50, T=T)
-            P3 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=100, T=T)
-            #P4 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=1000, T=T)
-            
-            #print(np.diag(P1)[:6])
-            #print(np.diag(P2)[:6])
-            #print(np.diag(P3))
-            #print(np.diag(P4)[:6])
-            P = P3
-        # Otherwise will need to use residue theorem
-        else:
-            upperLim1 = self.mu1 + (5*kB*T)
-            upperLim2 = self.mu2 + (5*kB*T)
-            print('Calculating Density for left contact:')
-            #P1 = self.g.densityComplex(self.Emin, self.mu1, 0)
-            P = self.g.densityComplex(Emin = self.Emin, Emax = upperLim1, ind=0, mu=self.mu1, T=T)
-            print('Calculating Density for right contact:')
-            #P2 = self.g.densityComplex(self.Emin, self.mu2, 1)
-            P += self.g.densityComplex(Emin = self.Emin, Emax = upperLim2, ind=1, mu=self.mu2, T=T)
-        P+= Pw
+        print('Calculating equilibrium density matrix:') 
+        #P1 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=10, T=T)
+        #P2 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=50, T=T)
+        P = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=self.N2, T=T)
+        #P4 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=1000, T=T)
         
+        #print(np.diag(P1)[:6])
+        #print(np.diag(P2)[:6])
+        ###print(np.diag(P))
+        #print(np.diag(P4)[:6])
+        
+        # If bias applied, need to integrate G<
+        if self.mu1 != self.mu2:
+            print('Calculating non-equilibrium density matrix:')
+            P += densityGrid(self.F*har_to_eV, self.S, self.g, self.mu1, self.mu2, N=self.N2, T=T)
+            #P2 = self.g.densityComplex(self.Emin, self.mu2, 1)
+        P+= Pw
+
         # Calculate Level Occupation, Lowdin TF,  Return
-        D,V = LA.eig(self.X@(self.F*har_to_eV)@self.X)
+        D,V = LA.eig(self.F*har_to_eV, self.S)
         pshift = V.conj().T @ P @ V
-        self.P = self.X@P@self.X
+        self.P = P
         occList = np.diag(np.real(pshift)) 
         EList = np.array(np.real(D)).flatten()
         inds = np.argsort(EList)        
@@ -175,3 +169,5 @@ class NEGFE(NEGF):
         # Empty the list of figures
         self.figures = []
         print('Figures stack cleared!')
+    
+
