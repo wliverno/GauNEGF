@@ -44,13 +44,16 @@ class NEGFE(NEGF):
         self.rInd = inds[1]
         self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eps)
         self.figures = []
-        self.N1 = 100
-        self.N2 = 50
+        self.setIntegralLimits(100, 50)
         return inds
     
-    def integralCheck(self, tol=1e-4, cycles=10):
+    def setIntegralLimits(self, N1, N2):
+        self.N1 = N1
+        self.N2 = N2
+ 
+    def integralCheck(self, tol=1e-4, cycles=10, damp=0.1):
         print(f'RUNNING SCF FOR {cycles} CYCLES USING DEFAULT GRID: ')
-        self.SCF(1e-10,0.1,cycles)
+        self.SCF(1e-10,damp,cycles)
         print('SETTING INTEGRATION LIMITS... ')
         self.Emin, self.N1, self.N2 = integralFit(self.F*har_to_eV, self.S, self.g, sum(self.getHOMOLUMO())/2, self.Eminf, tol)
         print('INTEGRATION LIMITS SET!')
@@ -63,8 +66,8 @@ class NEGFE(NEGF):
     # Updated to use energy-dependent contour integral from surfG()
     def FockToP(self, T=300, N=100):
         # Density contribution from below self.Emin
-        Pw = densityReal(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N1, T=0)
-        #print(np.diag(Pw)[:6])
+        Pw = densityReal(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
+        print(np.diag(Pw)[:6])
         #print(np.diag(Pw)) 
         
         # DEBUG: 
@@ -78,8 +81,9 @@ class NEGFE(NEGF):
         print('Calculating equilibrium density matrix:') 
         #P1 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=10, T=T)
         #P2 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=50, T=T)
-        P = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=self.N2, T=T)
+        P = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=self.N1, T=T)
         #P4 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=1000, T=T)
+        print(np.diag(P)[:6])
         
         #print(np.diag(P1)[:6])
         #print(np.diag(P2)[:6])
@@ -89,7 +93,7 @@ class NEGFE(NEGF):
         # If bias applied, need to integrate G<
         if self.mu1 != self.mu2:
             print('Calculating non-equilibrium density matrix:')
-            P += densityGrid(self.F*har_to_eV, self.S, self.g, self.mu1, self.mu2, N=self.N2, T=T)
+            P += densityGrid(self.F*har_to_eV, self.S, self.g, self.mu1, self.mu2, N=self.N1, T=T)
             #P2 = self.g.densityComplex(self.Emin, self.mu2, 1)
         P+= Pw
 

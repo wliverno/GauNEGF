@@ -43,6 +43,7 @@ class NEGF(object):
         self.Eminf = -1e5
         self.dE = 0.1
         self.fSearch = None
+        self.fermi = None
         self.updFermi = False
     
         # Start calculation: Load Initial Matrices from Gaussian
@@ -133,10 +134,13 @@ class NEGF(object):
         if np.isnan(fermi):
             self.updFermi = True
             if self.fSearch is None:
-                # Set initial fermi energy as (HOMO + LUMO)/2
-                homo_lumo = self.getHOMOLUMO()
-                print(f'Setting initial Fermi energy between HOMO ({homo_lumo[0]:.2f} eV) and LUMO ({homo_lumo[1]:.2f} eV)')
-                fermi = sum(homo_lumo)/2
+                if self.fermi is None:
+                    # Set initial fermi energy as (HOMO + LUMO)/2
+                    homo_lumo = self.getHOMOLUMO()
+                    print(f'Setting initial Fermi energy between HOMO ({homo_lumo[0]:.2f} eV) and LUMO ({homo_lumo[1]:.2f} eV)')
+                    fermi = sum(homo_lumo)/2
+                else:
+                    fermi = self.fermi
                 self.fSearch = DOSFermiSearch(fermi, self.nae+self.nbe)#,numpoints=1)
             else:
                 n_curr = self.updateN()

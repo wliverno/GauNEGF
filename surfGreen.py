@@ -107,8 +107,8 @@ class surfG:
     
     def setF(self, F):
         self.F = F
-        taus = self.tauInds
         if self.tauFromFock:
+            taus = self.tauInds
             self.F[np.ix_(taus[0], taus[0])] = self.F[np.ix_(taus[1], taus[1])].copy()
             self.tauList = [self.F[np.ix_(taus[0], taus[1])], self.F[np.ix_(taus[1], taus[0])]]
             self.stauList = [self.S[np.ix_(taus[0], taus[1])], self.S[np.ix_(taus[1], taus[0])]]

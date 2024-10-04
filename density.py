@@ -76,10 +76,6 @@ def densityReal(F, S, g, Emin, mu, N=100, T=300):
         defInt += mid*w[i]*Gr(F, S, g, E)*fermi(E, mu, T)
     print('Integration done!')
     
-    # Inverse Lowdin TF
-    TF = fractional_matrix_power(S, 0.5)
-    defInt = TF@defInt@TF
-    
     return (-1+0j)*np.imag(defInt)/(np.pi)
 
 # Get non-equilibrium density at a single contact (ind) using a real energy grid
@@ -193,41 +189,41 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
     while dP>tol and counter<maxcycles:
         Emin -= 0.1
         dP = DOS(F,S,g,Emin)
-        print(Emin, dP)
+        #print(Emin, dP)
         counter += 1
     if counter == maxcycles:
-        print(f'Warning: Emin still not within tolerance after {maxcycles} energy samples')
+        print(f'Warning: Emin still not within tolerance (final value = {dP}) after {maxcycles} energy samples')
     print(f'Final Emin: {Emin} eV') 
     
     #Determine grid using dP
     counter = 0
-    N1 = 8
+    Ncomplex = 8
     dP = 100
     rho = np.zeros(np.shape(F))
-    while dP > tol and N1 < maxcycles:
-        N1 *= 2 # Start with 16 points, double each time
-        rho_ = np.real(densityComplex(F, S, g, Emin, mu, N1, T=0))
+    while dP > tol and Ncomplex < maxcycles:
+        Ncomplex *= 2 # Start with 16 points, double each time
+        rho_ = np.real(densityComplex(F, S, g, Emin, mu, Ncomplex, T=0))
         dP = max(np.abs(rho_ - rho).flatten())
-        print(N1, dP)
+        #print(Ncomplex, dP)
         rho = rho_
         counter += 1
-    if N1 >  maxcycles:
-        print(f'Warning: N1 still not within tolerance')
-    print(f'Final N1: {N1}') 
+    if Ncomplex >  maxcycles:
+        print(f'Warning: Ncomplex still not within tolerance (final value = {dP})')
+    print(f'Final Ncomplex: {Ncomplex}') 
     #Determine grid using dP
     counter = 0
-    N2 = 8
+    Nreal = 8
     dP = 100
     rho = np.ones(np.shape(F))
-    while dP > tol and N2 < maxcycles:
-        N2 *= 2 # Start with 16 points, double each time
-        rho_ = np.real(densityReal(F, S, g, Eminf, Emin, N2, T=0))
+    while dP > tol and Nreal < maxcycles:
+        Nreal *= 2 # Start with 16 points, double each time
+        rho_ = np.real(densityReal(F, S, g, Eminf, Emin, Nreal, T=0))
         dP = max(np.abs(rho_ - rho).flatten())
-        print(N2, dP)
+        #print(Nreal, dP)
         rho = rho_
         counter += 1
-    if N2 >  maxcycles:
-        print(f'Warning: N2 still not within tolerance')
-    print(f'Final N2: {N2}') 
+    if Nreal >  maxcycles:
+        print(f'Warning: Nreal still not within tolerance (final value = {dP})')
+    print(f'Final Nreal: {Nreal}') 
 
-    return Emin, N1, N2
+    return Emin, Ncomplex, Nreal

@@ -58,7 +58,7 @@ class DOSFermiSearch:
         derivatives = np.linalg.solve(A, b)
         return derivatives
 
-    def step(self, dos_func, N_curr):
+    def step(self, dos_func, N_curr, stepLim=1e2):
         """
         Perform one step of the Fermi energy search.
 
@@ -87,7 +87,12 @@ class DOSFermiSearch:
             print('Final solver roots:', roots)
 
         # Select the root with the smallest absolute value
-        self.delta_Ef = min(roots, key=abs).real
-        new_Ef = self.Ef + self.delta_Ef
-        self.Ef = new_Ef
+        root = min(roots, key=abs).real
+        if np.abs(root)>stepLim:
+            print('WARNING: delta_Ef too big! Fermi energy not updated')
+            new_Ef = self.Ef
+        else:
+            self.delta_Ef = root
+            new_Ef = self.Ef + self.delta_Ef
+            self.Ef = new_Ef
         return new_Ef
