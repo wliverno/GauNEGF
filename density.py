@@ -13,6 +13,8 @@ from gauopen import QCOpMat as qco
 from gauopen import QCBinAr as qcb
 from gauopen import QCUtil as qcu
 
+from fermiSearch import DOSFermiSearch
+from surfGreen import surfG
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
@@ -227,3 +229,31 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
     print(f'Final Nreal: {Nreal}') 
 
     return Emin, Ncomplex, Nreal
+
+def getFermi(gSys, ne, ind=0, tol=1e-4, Eminf=-1e5, maxcycles=1000):
+    
+    # Set up infinite system from contact
+    F = gSys.aList[ind]
+    S = gSys.aSList[ind]
+    tau = gSys.bList[ind]
+    stau = gSys.bSList[ind]
+    inds = np.arange(len(F))
+    g = surfG(F, S, [inds], [tau], [stau])
+
+    # Initial guess: middle of HOMO/LUMO gap
+    orbs = LA.eigh(F, S, eigvals_only=True)
+    fermi = (orbs[ne-1] + orbs[ne])/2
+    Emin, N1, N2 = integralFit(F, S, g, fermi, Eminf, tol)
+    p = lambda E: densityReal(F, S, g, Eminf, Emin, N2, T=0) + \
+                densityComplex(F, S, g, Emin, E, N1, T=0)
+    DOS = lambda E: DOSg(F, S, g, E)
+    fsearch = DOSFermiSearch(fermi, ne)
+    Ncurr = -1
+    counter = 0 
+    while abs(ne - Ncurr) > tol and counter < 1000:
+        Ncurr = np.trace(p(fermi)@g.S)
+        fermi = fsearch.step(DOS, Ncurr)
+        print(Ncurr)
+    if abs(ne - Ncurr) > tol and counter > 1000:
+        print(f'Warning: Fermi energy still not within tolerance! Ef = {fermi:.2f} eV, N = {Ncurr:.2f})')
+    return fermi, Emin, N1, N2
