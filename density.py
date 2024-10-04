@@ -33,7 +33,7 @@ def fermi(E, mu, T):
     else:
         return 1/(np.exp((np.real(E) - mu)/kT)+1)
 
-def DOS(F, S, g, E):
+def DOSg(F, S, g, E):
     return -np.trace(np.imag(Gr(F,S, g, E)))/np.pi
 
 ## DENSITY FUNCTIONS
@@ -107,7 +107,7 @@ def densityGrid(F, S, g, mu1, mu2, ind=None, N=100, T=300):
     return den/(2*np.pi)
 
 # Get non-equilibrium density at a single contact (ind) using a real energy grid
-def densityGridTrap(F, S, g, Emin, mu, ind=None, N=100, T=300):
+def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=300):
     kT = kB*T
     muLo = min(mu1, mu2)
     muHi = max(mu1, mu2)
@@ -185,10 +185,10 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
     D = LA.eigh(F, S, eigvals_only=True)
     Emin = min(D.real.flatten())
     counter = 0
-    dP = DOS(F,S,g,Emin)
+    dP = DOSg(F,S,g,Emin)
     while dP>tol and counter<maxcycles:
         Emin -= 0.1
-        dP = DOS(F,S,g,Emin)
+        dP = DOSg(F,S,g,Emin)
         #print(Emin, dP)
         counter += 1
     if counter == maxcycles:
@@ -207,7 +207,7 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
         #print(Ncomplex, dP)
         rho = rho_
         counter += 1
-    if Ncomplex >  maxcycles:
+    if Ncomplex >  maxcycles and dP > tol:
         print(f'Warning: Ncomplex still not within tolerance (final value = {dP})')
     print(f'Final Ncomplex: {Ncomplex}') 
     #Determine grid using dP
@@ -222,7 +222,7 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
         #print(Nreal, dP)
         rho = rho_
         counter += 1
-    if Nreal >  maxcycles:
+    if Nreal >  maxcycles and dP > tol:
         print(f'Warning: Nreal still not within tolerance (final value = {dP})')
     print(f'Final Nreal: {Nreal}') 
 

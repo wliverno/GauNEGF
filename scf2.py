@@ -14,7 +14,7 @@ from gauopen import QCUtil as qcu
 from matTools import *
 from transport import DOS
 from fermiSearch import DOSFermiSearch
-from density import integralFit
+from density import * 
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
