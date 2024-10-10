@@ -101,6 +101,8 @@ class surfG:
             g = g*relFactor + g_*(1-relFactor)
             diff = dg.max()
             count = count+1
+        if count>maxIter:
+            print(f'Warning: exceeded max iterations! Conv: {diff}')
         #print(f'g generated in {count} iterations with convergence {diff}')
         self.gPrev[i] = g
         return g

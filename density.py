@@ -189,9 +189,9 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
     counter = 0
     dP = DOSg(F,S,g,Emin)
     while dP>tol and counter<maxcycles:
-        Emin -= 0.1
+        Emin -= 1
         dP = DOSg(F,S,g,Emin)
-        #print(Emin, dP)
+        print(Emin, dP)
         counter += 1
     if counter == maxcycles:
         print(f'Warning: Emin still not within tolerance (final value = {dP}) after {maxcycles} energy samples')
@@ -238,22 +238,30 @@ def getFermi(gSys, ne, ind=0, tol=1e-4, Eminf=-1e5, maxcycles=1000):
     tau = gSys.bList[ind]
     stau = gSys.bSList[ind]
     inds = np.arange(len(F))
+    #print(S.shape, S.shape, inds.shape, tau.shape, stau.shape)
     g = surfG(F, S, [inds], [tau], [stau])
 
-    # Initial guess: middle of HOMO/LUMO gap
-    orbs = LA.eigh(F, S, eigvals_only=True)
-    fermi = (orbs[ne-1] + orbs[ne])/2
-    Emin, N1, N2 = integralFit(F, S, g, fermi, Eminf, tol)
+    # Initial guess and integral setup using two layers
+    Forbs = np.block([[F, tau], [tau.conj().T, F]])
+    Sorbs = np.block([[S, stau], [stau.T, S]])
+    gorbs = surfG(Forbs, Sorbs, [inds], [tau], [stau])
+    orbs = LA.eigh(Forbs, Sorbs, eigvals_only=True)
+    orbs = np.sort(np.real(orbs))
+    fermi = (orbs[2*ne-1] + orbs[2*ne])/2
+    #print(orbs, fermi)
+    Emin, N1, N2 = integralFit(Forbs, Sorbs, gorbs, fermi, Eminf, tol, maxcycles)
+
+    # Fermi Energy search using full contact
     p = lambda E: densityReal(F, S, g, Eminf, Emin, N2, T=0) + \
                 densityComplex(F, S, g, Emin, E, N1, T=0)
     DOS = lambda E: DOSg(F, S, g, E)
-    fsearch = DOSFermiSearch(fermi, ne)
+    fsearch = DOSFermiSearch(fermi, ne, debug=True)
     Ncurr = -1
     counter = 0 
-    while abs(ne - Ncurr) > tol and counter < 1000:
+    while abs(ne - Ncurr) > tol and counter < maxcycles:
         Ncurr = np.trace(p(fermi)@g.S)
-        fermi = fsearch.step(DOS, Ncurr)
-        print(Ncurr)
-    if abs(ne - Ncurr) > tol and counter > 1000:
+        fermi = fsearch.step(DOS, Ncurr, stepLim=1e3)
+        #print(Ncurr, fermi)
+    if abs(ne - Ncurr) > tol and counter > maxcycles:
         print(f'Warning: Fermi energy still not within tolerance! Ef = {fermi:.2f} eV, N = {Ncurr:.2f})')
     return fermi, Emin, N1, N2

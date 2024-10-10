@@ -67,7 +67,7 @@ def cohTransSpin(Elist, F, S, sig1, sig2, spin='u'):
     Tspin = []
     for E in Elist:
         T = 0
-        Ts = [0, 0, 0, 0]
+        Ts = np.zeros(4)
         # Case: sigmas are NxN Matrices
         if sig1.shape == (N, N) and sig2.shape == (N, N):
             if spin == 'g':
@@ -101,10 +101,11 @@ def cohTransSpin(Elist, F, S, sig1, sig2, spin='u'):
         else:
             raise Exception('Sigma size mismatch!')
         for i in range(N):
-            Ttot =  0
             for j in range(4):
-                T_ = np.dot(gam1Gr[j][i,:],gam2Ga[j][:,i])
+                #T_ = np.dot(gam1Gr[j][i,:],gam2Ga[j][:,i])
+                T_ = np.einsum('i,i->',gam1Gr[j][i,:],gam2Ga[j][:,i])
                 Ts[j] += T_
+                print(i, j, Ts)
                 T+= T_
         T = np.real(T)
         Ts = np.real(Ts)
@@ -153,11 +154,11 @@ def cohTransSpinE(Elist, F, S, g, spin='u'):
     F = np.array(F)
     N = int(len(F)/2)
     S = np.array(S)
-    Tr = []
-    Tspin = []
-    for E in Elist:
+    Tr = np.zeros(len(Elist))
+    Tspin = np.zeros((len(Elist),4))
+    for ind, E in enumerate(Elist):
         T = 0
-        Ts = [0, 0, 0, 0]
+        Ts = np.zeros(4)
         sig1 = g.sigma(E, 0)
         sig2 = g.sigma(E, 1)
         gamma1 = -1j*(sig1 - np.conj(sig1).T)
@@ -169,28 +170,31 @@ def cohTransSpinE(Elist, F, S, g, spin='u'):
             bInds = np.arange(1, 2*N, 2)
             GrQuad = [Gr[np.ix_(aInds, aInds)], Gr[np.ix_(aInds, bInds)],
                       Gr[np.ix_(bInds, aInds)], Gr[np.ix_(bInds, bInds)]]
-            g1Quad = [gamma1[np.ix_(aInds, aInds)], gamma1[np.ix_(aInds, bInds)],
-                      gamma1[np.ix_(bInds, aInds)], gamma1[np.ix_(bInds, bInds)]]
-            g2Quad = [gamma2[np.ix_(aInds, aInds)], gamma2[np.ix_(aInds, bInds)],
-                      gamma2[np.ix_(bInds, aInds)], gamma2[np.ix_(bInds, bInds)]]
+            # Use only main diagonal gamma, ordering from 10.1021/acs.jctc.9b01078
+            g1Quad = [gamma1[np.ix_(aInds, aInds)], gamma1[np.ix_(aInds, aInds)],
+                      gamma1[np.ix_(bInds, bInds)], gamma1[np.ix_(bInds, bInds)]]
+            g2Quad = [gamma2[np.ix_(aInds, aInds)], gamma2[np.ix_(bInds, bInds)],
+                      gamma2[np.ix_(aInds, aInds)], gamma2[np.ix_(bInds, bInds)]]
         else:
             GrQuad = [Gr[:N, :N], Gr[:N, N:], Gr[N:, :N], Gr[N:, N:]]
-            g1Quad = [gamma1[:N,:N], gamma1[:N,N:], gamma1[N:, :N], gamma1[N:,N:]]
-            g2Quad = [gamma2[:N,:N], gamma2[:N,N:], gamma2[N:, :N], gamma2[N:,N:]]
+            # Use only main diagonal gamma, ordering from 10.1021/acs.jctc.9b01078
+            g1Quad = [gamma1[:N,:N], gamma1[:N,:N], gamma1[N:, N:], gamma1[N:,N:]]
+            g2Quad = [gamma2[:N,:N], gamma2[N:,N:], gamma2[:N, :N], gamma2[N:,N:]]
         gam1Gr = [g1Quad[i]@GrQuad[i] for i in range(4)]     #Full Matrix Multiplication
         gam2Ga = [g2Quad[i]@GrQuad[i].conj().T for i in range(4)]
         for i in range(N):
             Ttot =  0
             for j in range(4):
-                T_ = np.dot(gam1Gr[j][i,:],gam2Ga[j][:,i])
+                #T_ = np.dot(gam1Gr[j][i,:],gam2Ga[j][:,i])
+                T_ = np.einsum('i,i->',gam1Gr[j][i,:],gam2Ga[j][:,i])
                 Ts[j] += T_
                 T+= T_
         T = np.real(T)
         Ts = np.real(Ts)
         print("Energy:",E, "eV, Transmission=", T, ", Tspin=", Ts)
-        Tr.append(T)
-        Tspin.append(Ts)
-    return (Tr, np.array(Tspin))
+        Tr[ind] = T
+        Tspin[ind, :] = Ts
+    return Tr, Tspin
 
                    
 # F,S are NxN matrices, g is a surfGreen() object
