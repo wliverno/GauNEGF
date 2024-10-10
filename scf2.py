@@ -39,7 +39,6 @@ class NEGF(object):
         self.Total_E_Old=9999.0;
         
         #Default Integration Limits
-        self.Emin = -1*har_to_eV
         self.Eminf = -1e5
         self.dE = 0.1
         self.fSearch = None
@@ -65,6 +64,10 @@ class NEGF(object):
         else:
             self.S = Omat
         self.X = np.array(fractional_matrix_power(self.S, -0.5))
+        
+        # Set Emin from orbitals
+        orbs = LA.eigh(self.F*har_to_eV, self.S, eigvals_only=True)
+        self.Emin = min(orbs) - 5
 
         # Pulay Mixing Initialization
         nPulay = 6

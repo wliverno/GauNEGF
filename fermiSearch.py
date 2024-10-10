@@ -8,7 +8,7 @@ class DOSFermiSearch:
     It uses a Taylor series expansion and finite difference methods to estimate the Fermi energy.
     """
 
-    def __init__(self, initial_Ef, N_target, delta_E=0.01, numpoints=3, debug=False):
+    def __init__(self, initial_Ef, N_target, delta_E=0.01, numpoints=2, debug=False):
         """
         Initialize the Fermi energy search object.
 
@@ -58,7 +58,7 @@ class DOSFermiSearch:
         derivatives = np.linalg.solve(A, b)
         return derivatives
 
-    def step(self, dos_func, N_curr, stepLim=1e2):
+    def step(self, dos_func, N_curr, stepLim=5e2):
         """
         Perform one step of the Fermi energy search.
 
@@ -76,21 +76,31 @@ class DOSFermiSearch:
             print('DOS Derivatives list: ', dos_derivatives)
 
         # Solve the Taylor series equation
-        coeffs = [0] * self.numpoints
+        coeffs = [0] * (self.numpoints+1)
         coeffs[0] = -delta_N
-        for n in range(1, self.numpoints):
-            coeffs[n] = dos_derivatives[n-1] / factorial(n)
+        for n in range(0, self.numpoints):
+            coeffs[n+1] = dos_derivatives[n] / factorial(n+1)
 
         # Find the root of the polynomial
         roots = np.roots(coeffs[::-1])
         if self.debug:
             print('Final solver roots:', roots)
-
-        # Select the root with the smallest absolute value
-        root = min(roots, key=abs).real
+        
+         # Check if there are any real roots
+        real_roots = roots[np.isreal(roots)].real
+        root = 0 
+        if len(real_roots) > 0:
+            # If there are real roots, return the minimum absolute value
+            root = real_roots[np.argmin(np.abs(real_roots))]
+        else:
+            # If there are no real roots, print a warning and return the smallest real part
+            if self.debug:
+                print("Warning: No real roots found, using real part of roots")
+            root = roots.real[np.argmin(roots.real)]
+        
         if np.abs(root)>stepLim:
-            print('WARNING: delta_Ef too big! Fermi energy not updated')
-            new_Ef = self.Ef
+            print(f'WARNING: delta_Ef cutoff reached! Incrementing by {stepLim} eV')
+            new_Ef = self.Ef + np.sign(root)*stepLim
         else:
             self.delta_Ef = root
             new_Ef = self.Ef + self.delta_Ef
