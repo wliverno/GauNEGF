@@ -40,7 +40,6 @@ class NEGF(object):
         
         #Default Integration Limits
         self.Eminf = -1e5
-        self.dE = 0.1
         self.fSearch = None
         self.fermi = None
         self.updFermi = False
@@ -121,6 +120,9 @@ class NEGF(object):
 
     def setFock(self, F_):
         self.F = F_ 
+
+    def setDen(self, P_):
+        self.P = P_ 
 
     def getHOMOLUMO(self):
         orbs = LA.eigh(self.X@self.F@self.X, eigvals_only=True)
