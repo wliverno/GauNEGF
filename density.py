@@ -184,7 +184,7 @@ def densityComplexTrap(F, S, g, Emin, mu, N, T=300):
 def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
 
     # Calculate Emin using DOS
-    D = LA.eigh(F, S, eigvals_only=True)
+    D,_ = LA.eig(F, S)
     Emin = min(D.real.flatten())
     counter = 0
     dP = DOSg(F,S,g,Emin)
@@ -230,7 +230,7 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
 
     return Emin, Ncomplex, Nreal
 
-def getFermi(gSys, ne, ind=0, tol=1e-4, Eminf=-1e5, maxcycles=1000):
+def getFermi(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
     
     # Set up infinite system from contact
     F = gSys.aList[ind]
@@ -239,29 +239,35 @@ def getFermi(gSys, ne, ind=0, tol=1e-4, Eminf=-1e5, maxcycles=1000):
     stau = gSys.bSList[ind]
     inds = np.arange(len(F))
     #print(S.shape, S.shape, inds.shape, tau.shape, stau.shape)
-    g = surfG(F, S, [inds], [tau], [stau])
+    g = surfG(F, S, [inds], [tau], [stau], eps=1e-6)
 
     # Initial guess and integral setup using two layers
     Forbs = np.block([[F, tau], [tau.conj().T, F]])
     Sorbs = np.block([[S, stau], [stau.T, S]])
-    gorbs = surfG(Forbs, Sorbs, [inds], [tau], [stau])
-    orbs = LA.eigh(Forbs, Sorbs, eigvals_only=True)
+    gorbs = surfG(Forbs, Sorbs, [inds], [tau], [stau], eps=1e-6)
+    orbs, _ = LA.eig(Forbs, Sorbs)
     orbs = np.sort(np.real(orbs))
-    fermi = (orbs[2*ne-1] + orbs[2*ne])/2
+    fermi = (orbs[2*int(ne)-1] + orbs[2*int(ne)])/2
     #print(orbs, fermi)
     Emin, N1, N2 = integralFit(Forbs, Sorbs, gorbs, fermi, Eminf, tol, maxcycles)
 
     # Fermi Energy search using full contact
-    p = lambda E: densityReal(F, S, g, Eminf, Emin, N2, T=0) + \
-                densityComplex(F, S, g, Emin, E, N1, T=0)
+    print(f'Eminf DOS = {DOSg(F,S,g,Eminf)}')
+    pLow = densityReal(F, S, g, Eminf, Emin, N2, T=0)
+    nELow = np.trace(pLow@S)
+    print(f'Electrons below lowest onsite energy: {nELow}')
+    if nELow >= ne:
+        raise Exception('Calculated Fermi energy is below lowest orbital energy!')
+    pMu = lambda E: densityComplex(F, S, g, Emin, E, N1, T=0)
     DOS = lambda E: DOSg(F, S, g, E)
     fsearch = DOSFermiSearch(fermi, ne, debug=True)
     Ncurr = -1
     counter = 0 
     while abs(ne - Ncurr) > tol and counter < maxcycles:
-        Ncurr = np.trace(p(fermi)@g.S)
-        fermi = fsearch.step(DOS, Ncurr, stepLim=1e3)
-        #print(Ncurr, fermi)
+        p_ = pLow+pMu(fermi)
+        Ncurr = np.trace(p_@S)
+        fermi = fsearch.step(DOS, Ncurr)
+        print(Ncurr, fermi)
     if abs(ne - Ncurr) > tol and counter > maxcycles:
         print(f'Warning: Fermi energy still not within tolerance! Ef = {fermi:.2f} eV, N = {Ncurr:.2f})')
     return fermi, Emin, N1, N2
