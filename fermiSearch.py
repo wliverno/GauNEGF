@@ -43,13 +43,7 @@ class DOSFermiSearch:
         :param numpoints: Number of points to use in finite difference
         :return: Array of derivatives
         """
-        left_points = (numpoints - 1) // 2
-        right_points = numpoints - 1 - left_points
-        points = np.concatenate([
-            np.arange(-left_points, 0) * h,
-            [0],
-            np.arange(1, right_points + 1) * h
-        ])
+        points = np.linspace(-h, h, numpoints)
         A = np.zeros((numpoints, numpoints))
         for i in range(numpoints):
             for j in range(numpoints):
@@ -58,7 +52,7 @@ class DOSFermiSearch:
         derivatives = np.linalg.solve(A, b)
         return derivatives
 
-    def step(self, dos_func, N_curr, stepLim=5e2):
+    def step(self, dos_func, N_curr, stepLim=10):
         """
         Perform one step of the Fermi energy search.
 
@@ -66,6 +60,7 @@ class DOSFermiSearch:
         :param N_curr: Current number of electrons
         :return: New Fermi energy estimate
         """
+
         delta_N = self.N_target - N_curr
         if self.debug:
             print(self.N_target, " <-- ", N_curr)
@@ -87,7 +82,7 @@ class DOSFermiSearch:
             print('Final solver roots:', roots)
         
          # Check if there are any real roots
-        real_roots = roots[np.isreal(roots)].real
+        real_roots = roots[np.abs(roots.imag)<1e-9].real
         root = 0 
         if len(real_roots) > 0:
             # If there are real roots, return the minimum absolute value
@@ -98,11 +93,17 @@ class DOSFermiSearch:
                 print("Warning: No real roots found, using real part of roots")
             root = roots.real[np.argmin(roots.real)]
         
+        # Relaxation 
+        #root *= 0.5 
+
         if np.abs(root)>stepLim:
             print(f'WARNING: delta_Ef cutoff reached! Incrementing by {stepLim} eV')
-            new_Ef = self.Ef + np.sign(root)*stepLim
+            if self.delta_Ef == -np.sign(root)*stepLim:
+                self.delta_Ef = np.sign(root)*stepLim*0.5
+            else:
+                self.delta_Ef = np.sign(root)*stepLim
         else:
             self.delta_Ef = root
-            new_Ef = self.Ef + self.delta_Ef
-            self.Ef = new_Ef
+        new_Ef = self.Ef + self.delta_Ef
+        self.Ef = new_Ef
         return new_Ef
