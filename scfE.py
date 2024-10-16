@@ -53,7 +53,12 @@ class NEGFE(NEGF):
  
     def integralCheck(self, tol=1e-4, cycles=10, damp=0.1):
         print(f'RUNNING SCF FOR {cycles} CYCLES USING DEFAULT GRID: ')
-        self.SCF(1e-10,damp,cycles)
+        if self.updFermi:
+            self.updFermi=False
+            self.SCF(1e-10,damp,cycles)
+            self.updFermi=True
+        else:
+            self.SCF(1e-10,damp,cycles)
         print('SETTING INTEGRATION LIMITS... ')
         self.Emin, self.N1, self.N2 = integralFit(self.F*har_to_eV, self.S, self.g, sum(self.getHOMOLUMO())/2, self.Eminf, tol)
         print('INTEGRATION LIMITS SET!')

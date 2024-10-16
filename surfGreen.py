@@ -30,7 +30,7 @@ kB = 8.617e-5           # eV/Kelvin
 
 
 class surfG:
-    def __init__(self, Fock, Overlap, indsList, taus=-1, staus=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eps=1e-6):
+    def __init__(self, Fock, Overlap, indsList, taus=-1, staus=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eps=1e-9):
         
         # Set up system
         self.F = np.array(Fock)
@@ -92,7 +92,7 @@ class surfG:
         B = (E+1j*self.eps)*Sbeta - beta
         g = self.gPrev[i].copy()
         count = 0
-        maxIter = int(1/conv)
+        maxIter = int(1/(conv*relFactor))*10
         diff = conv+1
         while diff>conv and count<maxIter:
             g_ = g.copy()
@@ -101,7 +101,7 @@ class surfG:
             g = g*relFactor + g_*(1-relFactor)
             diff = dg.max()
             count = count+1
-        if count>maxIter:
+        if count==maxIter:
             print(f'Warning: exceeded max iterations! Conv: {diff}')
         #print(f'g generated in {count} iterations with convergence {diff}')
         self.gPrev[i] = g
@@ -117,7 +117,7 @@ class surfG:
         if self.contactFromFock:
             self.setContacts()
     
-    def sigma(self, E, i, conv=1e-3):
+    def sigma(self, E, i, conv=1e-5):
         sigma = np.array(np.zeros(np.shape(self.F)), dtype=complex)
         inds = self.indsList[i]
         stau = self.stauList[i]
@@ -127,7 +127,7 @@ class surfG:
         sigma[np.ix_(inds, inds)] += sig
         return sigma
     
-    def sigmaTot(self, E, conv=1e-3):
+    def sigmaTot(self, E, conv=1e-5):
         sigma = np.array(np.zeros(np.shape(self.F)), dtype=complex)
         for i, inds in enumerate(self.indsList):
             stau = self.stauList[i]
@@ -249,9 +249,10 @@ class surfG:
                 Gambar /= (np.exp((np.real(E)-mu)/kT)+1)
             
             # Calculate Ga
-            Fbar = self.X@(self.F + sigTot)@self.X
-            D, V_lhp = LA.eig(Fbar)
-            V_uhp = LA.inv(V_lhp).conj().T
+            FbarL = self.X@(self.F + sigTot)@self.X
+            FbarU = self.X@(self.F - sigTot)@self.X
+            D, V_lhp = LA.eig(FbarL)
+            D2, V_uhp = LA.eig(FbarU)
             Ga = np.zeros(np.shape(Fbar), dtype=complex)
             for i in range(len(D)):
                 vl = V_lhp[:, i].reshape(-1, 1)
