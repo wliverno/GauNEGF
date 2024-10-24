@@ -8,7 +8,7 @@ class DOSFermiSearch:
     It uses a Taylor series expansion and finite difference methods to estimate the Fermi energy.
     """
 
-    def __init__(self, initial_Ef, N_target, delta_E=0.01, numpoints=2, debug=False):
+    def __init__(self, initial_Ef, N_target, delta_E=0.01, numpoints=3, debug=False):
         """
         Initialize the Fermi energy search object.
 
@@ -90,20 +90,24 @@ class DOSFermiSearch:
         else:
             # If there are no real roots, print a warning and return the smallest real part
             if self.debug:
-                print("Warning: No real roots found, using real part of roots")
-            root = roots.real[np.argmin(roots.real)]
+                print("Warning: No real roots found, using Newton's method...")
+            root = delta_N/dos_derivatives[0]
         
         # Relaxation 
         #root *= 0.5 
 
         if np.abs(root)>stepLim:
-            print(f'WARNING: delta_Ef cutoff reached! Incrementing by {stepLim} eV')
+            print(f'Warning: delta_Ef cutoff reached! Incrementing by {stepLim} eV')
             if self.delta_Ef == -np.sign(root)*stepLim:
                 self.delta_Ef = np.sign(root)*stepLim*0.5
             else:
                 self.delta_Ef = np.sign(root)*stepLim
         else:
             self.delta_Ef = root
+        if np.sign(delta_N.real) != np.sign(self.delta_Ef.real):
+            print('Warning: delta_Ef sign error corrected')
+            self.delta_Ef *= -1
         new_Ef = self.Ef + self.delta_Ef
         self.Ef = new_Ef
         return new_Ef
+

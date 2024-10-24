@@ -231,7 +231,6 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
     return Emin, Ncomplex, Nreal
 
 def getFermi(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
-    
     # Set up infinite system from contact
     F = gSys.aList[ind]
     S = gSys.aSList[ind]
@@ -259,15 +258,22 @@ def getFermi(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
     if nELow >= ne:
         raise Exception('Calculated Fermi energy is below lowest orbital energy!')
     pMu = lambda E: densityComplex(F, S, g, Emin, E, N1, T=0)
-    DOS = lambda E: DOSg(F, S, g, E)
-    fsearch = DOSFermiSearch(fermi, ne, debug=True)
+    
+    # Fermi search using bisection method (F not changing, highly stable)
     Ncurr = -1
     counter = 0 
+    lBound = Emin
+    uBound = max(orbs)
     while abs(ne - Ncurr) > tol and counter < maxcycles:
         p_ = pLow+pMu(fermi)
         Ncurr = np.trace(p_@S)
-        fermi = fsearch.step(DOS, Ncurr)
-        print(Ncurr, fermi)
+        dN = (ne-Ncurr)
+        if dN > 0 and fermi > lBound:
+            lBound = fermi
+        elif dN < 0 and fermi < uBound:
+            uBound = fermi
+        fermi = (uBound+lBound)/2 #Bisect step!
+        print(dN, fermi, lBound, uBound)
     if abs(ne - Ncurr) > tol and counter > maxcycles:
         print(f'Warning: Fermi energy still not within tolerance! Ef = {fermi:.2f} eV, N = {Ncurr:.2f})')
     return fermi, Emin, N1, N2
