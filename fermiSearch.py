@@ -8,7 +8,7 @@ class DOSFermiSearch:
     It uses a Taylor series expansion and finite difference methods to estimate the Fermi energy.
     """
 
-    def __init__(self, initial_Ef, N_target, delta_E=0.01, numpoints=3, debug=False):
+    def __init__(self, initial_Ef, N_target, delta_E=0.01, numpoints=5, debug=False):
         """
         Initialize the Fermi energy search object.
 
@@ -22,7 +22,7 @@ class DOSFermiSearch:
         self.N_target = N_target
         self.delta_E = delta_E
         self.numpoints = numpoints
-        self.delta_Ef = None
+        self.delta_Ef = initial_Ef
         self.debug = debug
 
     def get_accuracy(self):
@@ -66,7 +66,8 @@ class DOSFermiSearch:
             print(self.N_target, " <-- ", N_curr)
 
         # Get DOS and its derivatives
-        dos_derivatives = self.matrix_finite_difference(dos_func, self.Ef, self.delta_E, self.numpoints)
+        h = min(self.delta_E, np.abs(self.delta_Ef/10))
+        dos_derivatives = self.matrix_finite_difference(dos_func, self.Ef, h, self.numpoints)
         if self.debug:
             print('DOS Derivatives list: ', dos_derivatives)
 

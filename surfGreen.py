@@ -1,5 +1,5 @@
 import numpy as np
-from scipy import linalg as LA
+from numpy import linalg as LA
 from scipy.linalg import fractional_matrix_power
 import scipy.io as io
 import sys
