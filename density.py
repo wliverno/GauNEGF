@@ -1,5 +1,5 @@
 import numpy as np
-from scipy import linalg as LA
+from numpy import linalg as LA
 from scipy.linalg import fractional_matrix_power
 from scipy.special import roots_legendre
 import scipy.io as io
@@ -184,7 +184,7 @@ def densityComplexTrap(F, S, g, Emin, mu, N, T=300):
 def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
 
     # Calculate Emin using DOS
-    D,_ = LA.eig(F, S)
+    D,_ = LA.eig(LA.inv(S)@F)
     Emin = min(D.real.flatten())
     counter = 0
     dP = DOSg(F,S,g,Emin)
@@ -230,7 +230,7 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
 
     return Emin, Ncomplex, Nreal
 
-def getFermi(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
+def getFermiContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
     # Set up infinite system from contact
     F = gSys.aList[ind]
     S = gSys.aSList[ind]
@@ -244,36 +244,46 @@ def getFermi(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
     Forbs = np.block([[F, tau], [tau.conj().T, F]])
     Sorbs = np.block([[S, stau], [stau.T, S]])
     gorbs = surfG(Forbs, Sorbs, [inds], [tau], [stau], eps=1e-6)
-    orbs, _ = LA.eig(Forbs, Sorbs)
+    orbs, _ = LA.eig(LA.inv(Sorbs)@Forbs)
     orbs = np.sort(np.real(orbs))
     fermi = (orbs[2*int(ne)-1] + orbs[2*int(ne)])/2
     #print(orbs, fermi)
     Emin, N1, N2 = integralFit(Forbs, Sorbs, gorbs, fermi, Eminf, tol, maxcycles)
+    Emax = max(orbs)
+    return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, Eminf, tol, maxcycles)
 
+def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e-4, maxcycles=1000):
     # Fermi Energy search using full contact
-    print(f'Eminf DOS = {DOSg(F,S,g,Eminf)}')
-    pLow = densityReal(F, S, g, Eminf, Emin, N2, T=0)
-    nELow = np.trace(pLow@S)
+    print(f'Eminf DOS = {DOSg(g.F,g.S,g,Eminf)}')
+    fermi = fermiGuess
+    pLow = densityReal(g.F, g.S, g, Eminf, Emin, N2, T=0)
+    nELow = np.trace(pLow@g.S)
     print(f'Electrons below lowest onsite energy: {nELow}')
-    if nELow >= ne:
-        raise Exception('Calculated Fermi energy is below lowest orbital energy!')
-    pMu = lambda E: densityComplex(F, S, g, Emin, E, N1, T=0)
+    #if nELow >= ne:
+    #    raise Exception('Calculated Fermi energy is below lowest orbital energy!')
+    pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, N1, T=0)
     
     # Fermi search using bisection method (F not changing, highly stable)
     Ncurr = -1
     counter = 0 
     lBound = Emin
-    uBound = max(orbs)
+    uBound = Emax
+    lBoundVal = ne - nELow
+    uBoundVal = -lBoundVal
     while abs(ne - Ncurr) > tol and counter < maxcycles:
         p_ = pLow+pMu(fermi)
-        Ncurr = np.trace(p_@S)
+        Ncurr = np.trace(p_@g.S)
         dN = (ne-Ncurr)
         if dN > 0 and fermi > lBound:
             lBound = fermi
+            lBoundVal = dN
         elif dN < 0 and fermi < uBound:
             uBound = fermi
-        fermi = (uBound+lBound)/2 #Bisect step!
-        print(dN, fermi, lBound, uBound)
+            uBoundVal = dN
+        # Weight bisection based on value at endpoints
+        weight = -lBoundVal/(uBoundVal - lBoundVal)
+        fermi = lBound + (uBound-lBound)*weight
+        print("DN:",dN, "Fermi:", fermi, "Bounds:", lBound, uBound)
     if abs(ne - Ncurr) > tol and counter > maxcycles:
         print(f'Warning: Fermi energy still not within tolerance! Ef = {fermi:.2f} eV, N = {Ncurr:.2f})')
     return fermi, Emin, N1, N2

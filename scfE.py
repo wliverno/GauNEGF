@@ -103,9 +103,10 @@ class NEGFE(NEGF):
         P+= Pw
 
         # Calculate Level Occupation, Lowdin TF,  Return
-        D,V = LA.eig(self.F*har_to_eV, self.S)
-        pshift = V.conj().T @ P @ V
-        self.P = P
+        D,V = LA.eig(self.X@(self.F*har_to_eV)@self.X)
+        self.Xi = LA.inv(self.X)
+        pshift = V.conj().T @ (self.Xi@P@self.Xi) @ V
+        self.P = np.abs(P.real) + 1j*P.imag
         occList = np.diag(np.real(pshift)) 
         EList = np.array(np.real(D)).flatten()
         inds = np.argsort(EList)        

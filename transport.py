@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.sparse import linalg as LA
+from numpy import linalg as LA
 import scipy.io as io
 from matTools import *
 
@@ -106,7 +106,7 @@ def cohTransSpin(Elist, F, S, sig1, sig2, spin='u'):
                 T_ = sum(gam1Gr[j][i,:]*gam2Ga[j][:,i])
                 #T_ = np.einsum('i,i->',gam1Gr[j][i,:],gam2Ga[j][:,i])
                 Ts[j] += T_
-                print(i, j, Ts)
+                #print(i, j, Ts)
                 T+= T_
         T = np.real(T)
         Ts = np.real(Ts)
