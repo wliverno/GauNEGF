@@ -16,6 +16,7 @@ from transport import DOS
 from fermiSearch import DOSFermiSearch
 from density import * 
 
+
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
 eoverh = 3.874e-5       # A/eV
@@ -65,11 +66,11 @@ class NEGF(object):
         self.X = np.array(fractional_matrix_power(self.S, -0.5))
         
         # Set Emin from orbitals
-        orbs = LA.eigh(self.F*har_to_eV, self.S, eigvals_only=True)
-        self.Emin = min(orbs) - 5
+        orbs, _ = LA.eig(self.X@self.F@self.X)
+        self.Emin = min(orbs)*har_to_eV - 5
 
         # Pulay Mixing Initialization
-        nPulay = 6
+        nPulay = 10
         self.pList = np.array([self.P for i in range(nPulay)], dtype=complex)
         self.DPList = np.ones((nPulay, self.nsto, self.nsto))*1e4
         self.pMat = np.ones((nPulay+1, nPulay+1))*-1
@@ -119,13 +120,17 @@ class NEGF(object):
         return self.nelec
 
     def setFock(self, F_):
-        self.F = F_ 
+        self.F = np.array(F_)/har_to_eV
 
     def setDen(self, P_):
         self.P = P_ 
+        storeDen(self.bar, self.P, self.spin)
+        self.updateN() 
+        print(f'Density matrix loaded, nelec = {self.nelec:.2f} electrons')
+        self.PToFock(1)
 
     def getHOMOLUMO(self):
-        orbs = LA.eigh(self.X@self.F@self.X, eigvals_only=True)
+        orbs, _ = LA.eig(self.X@self.F@self.X)
         orbs = np.sort(orbs)*har_to_eV
         if self.spin=='r':
             homo_lumo = orbs[self.nae-1:self.nae+1]
@@ -187,9 +192,15 @@ class NEGF(object):
             print("E-field set to "+str(LA.norm(field))+" au")
     
     # Set contacts based on atom orbital locations
-    def setContacts(self, lContact, rContact):
-        self.lContact=np.array(lContact)
-        self.rContact=np.array(rContact)
+    def setContacts(self, lContact=-1, rContact=-1):
+        if lContact == -1:
+            self.lContact = np.arange(self.nsto)
+        else:
+            self.lContact=np.array(lContact)
+        if rContact == -1:
+            self.rContact = np.arange(self.nsto)
+        else:
+            self.rContact=np.array(rContact)
         lInd = np.where(np.isin(abs(self.locs), self.lContact))[0]
         rInd = np.where(np.isin(abs(self.locs), self.rContact))[0]
         return lInd, rInd
@@ -279,12 +290,12 @@ class NEGF(object):
         # Calculate each integral
         #P1 = densityGrid(Fbar, GamBar2, self.Emin, self.mu1)
         #P2 = densityGrid(Fbar, GamBar2, self.Emin, self.mu2)
-        P1 = density(V, D, GamBar1, self.Emin, self.mu1)
-        P2 = density(V, D, GamBar2, self.Emin, self.mu2)
-        Pw = density(Vw, Dw, GamBarW1+GamBarW2, self.Eminf, self.Emin)
-        
-        # Sum them up 
-        P = P1 + P2 + Pw
+        if self.mu1 == self.mu2:
+            P = density(V, D, GamBar1+GamBar2, self.Eminf, self.mu1)
+        else:
+            P1 = density(V, D, GamBar1, self.Eminf, self.mu1)
+            P2 = density(V, D, GamBar2, self.Eminf, self.mu2)
+            P = P1 + P2 #+ Pw
         
         # Calculate Level Occupation, Lowdin TF,  Return
         pshift = V.conj().T @ P @ V
@@ -307,11 +318,10 @@ class NEGF(object):
         Pback = getDen(self.bar, self.spin)
         Dense_old = np.diagonal(Pback)
         Dense_diff = abs(np.diagonal(self.P) - Dense_old)
-        self.DPList[1:, :, :] = self.DPList[:-1, :, :]
-        self.DPList[0,  :] = np.abs(np.real(self.P - Pback))
         self.pList[1:, :, :] = self.pList[:-1, :, :]
         self.pList[0,  :, :] = self.P.copy()
-        beta = 0.1
+        self.DPList[1:, :, :] = self.DPList[:-1, :, :]
+        self.DPList[0,  :] = np.real(self.P - Pback)
         
         ##DEBUG
         #print('DEBUG: Compare Density')
@@ -321,14 +331,14 @@ class NEGF(object):
         # Pulay Mixing
         for i, v1 in enumerate(self.DPList):
             for j, v2 in enumerate(self.DPList):
-                self.pMat[i,j] = np.sum(abs(v1*v2))
+                self.pMat[i,j] = np.sum(v1*v2)
        
         #print(self.pMat) 
         # Apply Damping, store to Gaussian matrix
         if Pulay:
             coeff = LA.solve(self.pMat, self.pB)[:-1]
             print("Applying Pulay Coeff: ", coeff)
-            self.P = sum([(self.pList[i, :, :]+ beta*self.DPList[i, :, :])*coeff[i] for i in range(len(coeff))])
+            self.P = sum([self.pList[i, :, :]*coeff[i] for i in range(len(coeff))])
         else:
             print("Applying Damping value=", damping)
             self.P = Pback + damping*(self.P - Pback)
@@ -367,10 +377,10 @@ class NEGF(object):
             print()
             print('Iteration '+str(Niter)+':')
             # Fock --> P --> Fock
-            if self.updFermi and Niter > 0:
+            if self.updFermi and Niter > 10:
                 self.setVoltage(self.qV)
             EList, occList = self.FockToP()
-            dE, RMSDP, MaxDP = self.PToFock(damping)# (Niter+1)%10 == 0)
+            dE, RMSDP, MaxDP = self.PToFock(damping)# (Niter+1)%len(self.pList)==0)
             
             # Write monitor variables
             TotalE.append(self.Total_E)
