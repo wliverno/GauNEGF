@@ -65,14 +65,14 @@ class NEGF(object):
             self.S = Omat
         self.X = np.array(fractional_matrix_power(self.S, -0.5))
         
-        # Set Emin from orbitals
+        # Set Emin/Emax from orbitals
         orbs, _ = LA.eig(self.X@self.F@self.X)
         self.Emin = min(orbs)*har_to_eV - 5
 
         # Pulay Mixing Initialization
-        nPulay = 10
+        nPulay = 4
         self.pList = np.array([self.P for i in range(nPulay)], dtype=complex)
-        self.DPList = np.ones((nPulay, self.nsto, self.nsto))*1e4
+        self.DPList = np.ones((nPulay, self.nsto))*1e4
         self.pMat = np.ones((nPulay+1, nPulay+1))*-1
         self.pMat[-1, -1] = 0
         self.pB = np.zeros(nPulay+1)
@@ -319,9 +319,9 @@ class NEGF(object):
         Dense_old = np.diagonal(Pback)
         Dense_diff = abs(np.diagonal(self.P) - Dense_old)
         self.pList[1:, :, :] = self.pList[:-1, :, :]
-        self.pList[0,  :, :] = self.P.copy()
-        self.DPList[1:, :, :] = self.DPList[:-1, :, :]
-        self.DPList[0,  :] = np.real(self.P - Pback)
+        self.pList[0,  :, :] = Pback + damping*(self.P - Pback)
+        self.DPList[1:, :] = self.DPList[:-1, :]
+        self.DPList[0,  :] = np.diag(np.real(self.P - Pback))
         
         ##DEBUG
         #print('DEBUG: Compare Density')
@@ -339,15 +339,21 @@ class NEGF(object):
             coeff = LA.solve(self.pMat, self.pB)[:-1]
             print("Applying Pulay Coeff: ", coeff)
             self.P = sum([self.pList[i, :, :]*coeff[i] for i in range(len(coeff))])
+            self.pList[0, :, :] = self.P
         else:
             print("Applying Damping value=", damping)
-            self.P = Pback + damping*(self.P - Pback)
+            self.P = self.pList[0, :, :]
         storeDen(self.bar, self.P, self.spin)
         self.updateN() 
         print(f'Total number of electrons (NEGF): {self.nelec:.2f}')
         
         # Run Gaussian, update SCF Energy
-        self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="DENSITY", miscroute=self.otherRoute)
+        try:
+            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="DENSITY", miscroute=self.otherRoute)
+        except Exception as e:
+            print("WARNING: DFT METHOD HAD AN ERROR, CYCLE INVALID:")
+            print(e)
+            print("CONTINUING TO NEXT CYCLE...")
         self.Total_E_Old = self.Total_E.copy()
         self.Total_E  = self.bar.scalar("escf")
         print("SCF energy: ", self.Total_E)
@@ -362,7 +368,7 @@ class NEGF(object):
 
     # Main SCF loop, runs Fock <-> Density cycle until convergence reached
     # Convergence criteria: dE, RMSDP, and MaxDP < conv, or maxcycles reached
-    def SCF(self, conv=1e-5, damping=0.1, maxcycles=100, plot=False):
+    def SCF(self, conv=1e-5, damping=0.1, maxcycles=100, plot=False, pulay=True):
         #Determin integral info:
         #self.dE, self.Emin = integralFit(self.F*har_to_eV, self.S, self.g, self.fermi)
 
@@ -376,17 +382,24 @@ class NEGF(object):
         while Loop:
             print()
             print('Iteration '+str(Niter)+':')
-            # Fock --> P --> Fock
+            # Run Pulay Kick every nPulay+1 iterations, if turned on
+            isPulay = pulay*((Niter+1)%(len(self.pList)+1)==0)
+            
+            # Update fermi after 10 iterations if not set
             if self.updFermi and Niter > 10:
                 self.setVoltage(self.qV)
+                isPulay=False
+
+            # Fock --> P --> Fock
             EList, occList = self.FockToP()
-            dE, RMSDP, MaxDP = self.PToFock(damping)# (Niter+1)%len(self.pList)==0)
+            dE, RMSDP, MaxDP = self.PToFock(damping, isPulay)
             
             # Write monitor variables
             TotalE.append(self.Total_E)
             count.append(Niter)
             PP.append(self.nelec)
-
+            
+            # Check 3 convergence criteria
             if RMSDP<conv and MaxDP<conv and abs(dE)<conv:
                 print('##########################################')
                 print('Convergence achieved after '+str(Niter)+' iterations!')
