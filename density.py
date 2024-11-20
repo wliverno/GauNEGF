@@ -19,7 +19,6 @@ from surfGreen import surfG
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
 eoverh = 3.874e-5       # A/eV
-kT = 0.025              # eV @ 20degC
 V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 kB = 8.617e-5           # eV/Kelvin
 
@@ -33,7 +32,7 @@ def fermi(E, mu, T):
     if kT==0:
         return (E<mu)*1
     else:
-        return 1/(np.exp((np.real(E) - mu)/kT)+1)
+        return 1/(np.exp((E - mu)/kT)+1)
 
 def DOSg(F, S, g, E):
     return -np.trace(np.imag(Gr(F,S, g, E)))/np.pi
@@ -138,11 +137,12 @@ def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=300):
 # Get equilibrium density using a complex contour and a Gaussian quadrature
 def densityComplex(F, S, g, Emin, mu, N=100, T=300):
     #Construct circular contour
-    kT = kB*T
-    Emax = mu+(5*kT)
+    nKT= 5
+    broadening = nKT*kB*T
+    Emax = mu-broadening
     center = (Emin+Emax)/2
     r = (Emax-Emin)/2
-
+    
     #Integrate along contour
     print(f'Integrating over {N} points...')
     lineInt = np.array(np.zeros(np.shape(F)), dtype=complex)
@@ -153,10 +153,20 @@ def densityComplex(F, S, g, Emin, mu, N=100, T=300):
         z = center + r*np.exp(1j*theta)
         dz = 1j * r * np.exp(1j*theta)
         lineInt += (np.pi/2)*w[i]*Gr(F, S, g, z)*fermi(z, mu, T)*dz
+    
+    #Add integration points for Fermi Broadening
+    if T>0:
+        print('Integrating Fermi Broadening')
+        x,w = roots_legendre(N//10)
+        x = np.real(x)
+        for i, val in enumerate(x):
+            E = broadening * (val) + mu
+            lineInt += broadening*w[i]*Gr(F, S, g, E)*fermi(E, mu, T)
     print('Integration done!')
+
     
     #Return -Im(Integral)/pi, Equation 19 in 10.1103/PhysRevB.63.245407
-    return (1+0j)*np.imag(lineInt)/np.pi
+    return (1+0j)*np.abs(np.imag(lineInt))/np.pi
 
 
 # Get density using a complex contour and trapezoidal integration
@@ -204,7 +214,7 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
     rho = np.zeros(np.shape(F))
     while dP > tol and Ncomplex < maxcycles:
         Ncomplex *= 2 # Start with 16 points, double each time
-        rho_ = np.real(densityComplex(F, S, g, Emin, mu, Ncomplex, T=0))
+        rho_ = np.real(densityComplex(F, S, g, Emin,  mu, Ncomplex, T=300))
         dP = max(np.abs(rho_ - rho).flatten())
         #print(Ncomplex, dP)
         rho = rho_
