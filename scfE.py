@@ -72,7 +72,7 @@ class NEGFE(NEGF):
     def FockToP(self, T=300, N=100):
         # Density contribution from below self.Emin
         Pw = densityReal(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
-        print(np.diag(Pw)[:6])
+        print(np.diag(Pw)[:6].real)
         #print(np.diag(Pw)) 
         
         # DEBUG: 
@@ -81,19 +81,16 @@ class NEGFE(NEGF):
         #print(np.diag(Pw)[:10])
         #print(np.diag(Pwalt)[:10])
         #print("--------------------------")
-        
         # Density contribution from above self.Emin
         print('Calculating equilibrium density matrix:') 
         #P1 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=10, T=T)
         #P2 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=50, T=T)
         P = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=self.N1, T=T)
-        #P4 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=1000, T=T)
-        print(np.diag(P)[:6])
-        
-        #print(np.diag(P1)[:6])
-        #print(np.diag(P2)[:6])
-        ###print(np.diag(P))
-        #print(np.diag(P4)[:6])
+        print(np.diag(P)[:6].real)
+        #P2 = densityReal(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=100, T=T)
+        #print(np.diag(P2)[:6].real)
+        #P3 = densityReal(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=1000, T=T)
+        #print(np.diag(P3)[:6].real)
         
         # If bias applied, need to integrate G<
         if self.mu1 != self.mu2:
