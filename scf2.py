@@ -26,7 +26,7 @@ V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 
 
 class NEGF(object):
-    def __init__(self, fn, basis="lanl2dz", func="b3pw91", spin="r", fullSCF=True, route=""):
+    def __init__(self, fn, basis="lanl2dz", func="b3pw91", spin="r", fullSCF=True, route="", nPulay=4):
         # Set up variables
         self.ifile = fn + ".gjf"
         self.chkfile = fn + ".chk"
@@ -68,9 +68,9 @@ class NEGF(object):
         # Set Emin/Emax from orbitals
         orbs, _ = LA.eig(self.X@self.F@self.X)
         self.Emin = min(orbs)*har_to_eV - 5
+        self.convLevel = -1 #Indicates no SCF run yet
 
         # Pulay Mixing Initialization
-        nPulay = 4
         self.pList = np.array([self.P for i in range(nPulay)], dtype=complex)
         self.DPList = np.ones((nPulay, self.nsto))*1e4
         self.pMat = np.ones((nPulay+1, nPulay+1))*-1
@@ -243,6 +243,9 @@ class NEGF(object):
         else:
             raise Exception('Sigma matrix dimension mismatch!')
         
+        # Store Variables
+        self.rInd = rInd
+        self.lInd = lInd 
         self.sigma1 = formSigma(lInd, sig, self.nsto, self.S)
         self.sigma2 = formSigma(rInd, sig2, self.nsto, self.S)
         
@@ -255,15 +258,7 @@ class NEGF(object):
         print('Max imag sigma:', str(np.max(np.abs(np.imag(self.sigma12)))));
         self.Gam1 = (self.sigma1 - self.sigma1.conj().T)*1j
         self.Gam2 = (self.sigma2 - self.sigma2.conj().T)*1j
-    
-        sigWVal = -0.00001j #Based on Damle Code
-        self.sigmaW1 = formSigma(lInd, sigWVal, self.nsto, self.S)
-        self.sigmaW2 = formSigma(rInd, sigWVal, self.nsto, self.S)
-        self.sigmaW12 = self.sigmaW1+self.sigmaW2
-    
-        self.GamW1 = (self.sigmaW1 - self.sigmaW1.conj().T)*1j
-        self.GamW2 = (self.sigmaW2 - self.sigmaW2.conj().T)*1j
-    
+        
     def getSigma(self, E=0): #E only used by NEGFE() object, function inherited
         return (self.sigma1, self.sigma2)
 
@@ -275,17 +270,13 @@ class NEGF(object):
         Fbar = X @ (self.F*har_to_eV + self.sigma12) @ X
         GamBar1 = X @ self.Gam1 @ X
         GamBar2 = X @ self.Gam2 @ X
-
+        
+        
         D,V = LA.eig(np.array(Fbar))
            
         err =  np.float_(sum(np.imag(D)))
         if  err > 0:
             print('Imaginary elements on diagonal of D are positive ------->  ', err)
-
-        FbarW = X@(self.F*har_to_eV + self.sigmaW12)@X
-        GamBarW1 = X@self.GamW1@X
-        GamBarW2 = X@self.GamW2@X
-        Dw,Vw = LA.eig(np.array(FbarW))
         
         # Calculate each integral
         #P1 = densityGrid(Fbar, GamBar2, self.Emin, self.mu1)
@@ -310,10 +301,7 @@ class NEGF(object):
 
         return EList[inds], occList[inds]
 
-    
-    # Use Gaussian to calculate the Density Matrix, apply damping factor
-    # Edamp - when True, add multiple additional 0.1 damp when energy increases
-    def PToFock(self, damping, Pulay=False):
+    def PMix(self, damping, Pulay=False):
         # Store Old Density Info
         Pback = getDen(self.bar, self.spin)
         Dense_old = np.diagonal(Pback)
@@ -323,17 +311,11 @@ class NEGF(object):
         self.DPList[1:, :] = self.DPList[:-1, :]
         self.DPList[0,  :] = np.diag(np.real(self.P - Pback))
         
-        ##DEBUG
-        #print('DEBUG: Compare Density')
-        #print(np.real(np.diag(self.P)[:10]))
-        #print(np.real(np.diag(Pback)[:10]))
-        
         # Pulay Mixing
         for i, v1 in enumerate(self.DPList):
             for j, v2 in enumerate(self.DPList):
                 self.pMat[i,j] = np.sum(v1*v2)
        
-        #print(self.pMat) 
         # Apply Damping, store to Gaussian matrix
         if Pulay:
             coeff = LA.solve(self.pMat, self.pB)[:-1]
@@ -344,9 +326,18 @@ class NEGF(object):
             print("Applying Damping value=", damping)
             self.P = self.pList[0, :, :]
         storeDen(self.bar, self.P, self.spin)
+        
+        # Update counters, print data
         self.updateN() 
         print(f'Total number of electrons (NEGF): {self.nelec:.2f}')
-        
+        MaxDP = max(Dense_diff)
+        RMSDP = np.sqrt(np.mean(Dense_diff**2))
+        print(f'MaxDP: {MaxDP:.2E} | RMSDP: {RMSDP:.2E}')
+        return RMSDP, MaxDP
+
+    # Use Gaussian to calculate the Density Matrix, apply damping factor
+    # Edamp - when True, add multiple additional 0.1 damp when energy increases
+    def PToFock(self):
         # Run Gaussian, update SCF Energy
         try:
             self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="DENSITY", miscroute=self.otherRoute)
@@ -360,18 +351,17 @@ class NEGF(object):
 
         # Convergence variables: dE, RMSDP and MaxDP
         dE = self.Total_E-self.Total_E_Old
-        MaxDP = max(Dense_diff)
-        RMSDP = np.sqrt(np.mean(Dense_diff**2))
         print('Energy difference is: ', dE)
-        print(f'MaxDP: {MaxDP:.2E} | RMSDP: {RMSDP:.2E}')
-        return dE, RMSDP, MaxDP
+        return dE
 
     # Main SCF loop, runs Fock <-> Density cycle until convergence reached
     # Convergence criteria: dE, RMSDP, and MaxDP < conv, or maxcycles reached
     def SCF(self, conv=1e-5, damping=0.1, maxcycles=100, plot=False, pulay=True):
-        #Determin integral info:
-        #self.dE, self.Emin = integralFit(self.F*har_to_eV, self.S, self.g, self.fermi)
+        # Check to make sure contacts and voltage set 
+        assert hasattr(self, 'mu1') and hasattr(self, 'mu2'), "Voltage not set!"
+        assert hasattr(self, 'rInd') and hasattr(self,'lInd'), "Contacts not set!"
 
+        #Main SCF Loop
         Loop = True
         Niter = 0
         PP=[]
@@ -379,20 +369,25 @@ class NEGF(object):
         TotalE=[]
         print('Entering NEGF-SCF loop at: '+str(time.asctime()))
         print('###################################')
+        MaxDP = 1e3
+        nFermiUpd = 0
         while Loop:
             print()
             print('Iteration '+str(Niter)+':')
             # Run Pulay Kick every nPulay+1 iterations, if turned on
             isPulay = pulay*((Niter+1)%(len(self.pList)+1)==0)
             
-            # Update fermi after 10 iterations if not set
-            if self.updFermi and Niter > 10:
+            # Update fermi if MaxDP below threshold or at least once every 20 iterations
+            if self.updFermi and (MaxDP<1e-2 or nFermiUpd>=20):
                 self.setVoltage(self.qV)
-                isPulay=False
+                nFermiUpd = 0
+            else:
+                nFermiUpd += 1
 
             # Fock --> P --> Fock
             EList, occList = self.FockToP()
-            dE, RMSDP, MaxDP = self.PToFock(damping, isPulay)
+            RMSDP, MaxDP = self.PMix(damping, isPulay)
+            dE = self.PToFock()
             
             # Write monitor variables
             TotalE.append(self.Total_E)
@@ -400,7 +395,8 @@ class NEGF(object):
             PP.append(self.nelec)
             
             # Check 3 convergence criteria
-            if RMSDP<conv and MaxDP<conv and abs(dE)<conv:
+            self.convLevel = max(RMSDP, MaxDP, abs(dE))
+            if self.convLevel<conv:
                 print('##########################################')
                 print('Convergence achieved after '+str(Niter)+' iterations!')
                 Loop = False
@@ -434,6 +430,9 @@ class NEGF(object):
         print('')
         print('SCF Loop exited at', time.asctime())
         
+        homo_lumo = self.getHOMOLUMO()
+        print(f'Predicted HOMO: {homo_lumo[0]:.2f} eV , Predicted LUMO {homo_lumo[1]:.2f} eV, Fermi: {self.fermi:0.2f}')
+ 
         print('=========================')
         print('ENERGY LEVEL OCCUPATION:')
         print('=========================')
@@ -451,7 +450,7 @@ class NEGF(object):
     def saveMAT(self, matfile="out.mat"):
         (sigma1, sigma2) = self.getSigma(self.fermi)
         # Save data in MATLAB .mat file
-        matdict = {"F":self.F*har_to_eV, "sig1": sigma1, "sig2": sigma2, "S": self.S, "fermi": self.fermi, "qV": self.qV, "spin" : self.spin, "den" : self.P}
+        matdict = {"F":self.F*har_to_eV, "sig1": sigma1, "sig2": sigma2, "S": self.S, "fermi": self.fermi, "qV": self.qV, "spin" : self.spin, "den" : self.P, "conv": self.convLevel}
         io.savemat(matfile, matdict)
         return self.X@self.F@self.X
 

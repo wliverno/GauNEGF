@@ -215,7 +215,7 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
     while dP > tol and Ncomplex < maxcycles:
         Ncomplex *= 2 # Start with 16 points, double each time
         rho_ = np.real(densityComplex(F, S, g, Emin,  mu, Ncomplex, T=300))
-        dP = max(np.abs(rho_ - rho).flatten())
+        dP = max(np.diag(rho_ - rho))
         #print(Ncomplex, dP)
         rho = rho_
         counter += 1
@@ -230,7 +230,7 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
     while dP > tol and Nreal < maxcycles:
         Nreal *= 2 # Start with 16 points, double each time
         rho_ = np.real(densityReal(F, S, g, Eminf, Emin, Nreal, T=0))
-        dP = max(np.abs(rho_ - rho).flatten())
+        dP = max(np.diag(rho_ - rho))
         #print(Nreal, dP)
         rho = rho_
         counter += 1

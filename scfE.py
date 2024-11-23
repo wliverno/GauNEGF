@@ -116,9 +116,9 @@ class NEGFE(NEGF):
 
     
     # Updated to update surfG() Fock matrix and plot integral and residues
-    def PToFock(self, damping, Edamp=False, debug=False):
+    def PToFock(self, debug=False):
         Fock_old = self.F.copy()
-        dE, RMSDP, MaxDP = super().PToFock(damping, Edamp)
+        dE = super().PToFock()
         self.F, self.locs = getFock(self.bar, self.spin)
         self.g.setF(self.F*har_to_eV)
         
@@ -148,7 +148,7 @@ class NEGFE(NEGF):
         #for pair in zip(EListBefore, EList):                       
         #    print("Energy Before =", str(pair[0]), ", Energy After =", str(pair[1]))
          
-        return dE, RMSDP, MaxDP
+        return dE
     
     # Save integration plots as frame in animated gif
     def plotAnimation(self, gif_path='output.gif'):
