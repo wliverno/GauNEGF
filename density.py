@@ -37,9 +37,10 @@ def fermi(E, mu, T):
 def DOSg(F, S, g, E):
     return -np.trace(np.imag(Gr(F,S, g, E)))/np.pi
 
-## DENSITY FUNCTIONS
+## ENERGY INDEPENDENT DENSITY FUNCTIONS
+# Requires D, V = eig(H - sigma) and Gam = X@(sigma - sigma.conj().T)@X
 # Get density using analytical integration
-def density(V, D, Gam, Emin, mu):
+def density(V, Vc, D, Gam, Emin, mu):
     Nd = len(V)
     DD = np.array([D for i in range(Nd)]).T
     
@@ -55,7 +56,6 @@ def density(V, D, Gam, Emin, mu):
     prefactor = np.multiply(invmat,(pref2-pref3))
 
     #Convert Gamma into Fbar eigenbasis, element-wise multiplication
-    Vc = LA.inv(V.conj().T)
     Gammam = Vc.conj().T@Gam@Vc
     prefactor = np.multiply(prefactor,Gammam)
     
@@ -63,6 +63,25 @@ def density(V, D, Gam, Emin, mu):
     den = V@ prefactor @ V.conj().T
     return den
 
+# Locate the fermi energy using bisection
+def bisectFermi(V, Vc, D, Gam, Nexp, conv=1e-3, Eminf=-1e6):
+    Emin = min(D.real)
+    Emax = max(D.real)
+    dN = Nexp
+    Niter = 0
+    while abs(dN) > conv:
+        fermi = (Emin + Emax)/2
+        P = density(V, Vc, D, Gam, Eminf, fermi)
+        dN = np.trace(P).real - Nexp
+        if dN>0:
+            Emax = fermi
+        else:
+            Emin = fermi
+        Niter += 1
+    print(f'Bisection fermi search converged to {dN:.2E} in {Niter} iterations.')
+    return fermi
+
+## ENERGY DEPENDENT DENSITY FUNCTIONS
 # Get equilibrium density at a single contact (ind) using a real energy grid
 def densityReal(F, S, g, Emin, mu, N=100, T=300):
     kT = kB*T
@@ -191,6 +210,9 @@ def densityComplexTrap(F, S, g, Emin, mu, N, T=300):
     #Return -Im(Integral)/pi, Equation 19 in 10.1103/PhysRevB.63.245407
     return (1+0j)*np.imag(lineInt)/np.pi
 
+
+## INTEGRATION LIMIT FUNCTIONS
+# A simple fitting algorithm for Emin, N1, N2
 def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
 
     # Calculate Emin using DOS
@@ -214,7 +236,7 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
     rho = np.zeros(np.shape(F))
     while dP > tol and Ncomplex < maxcycles:
         Ncomplex *= 2 # Start with 16 points, double each time
-        rho_ = np.real(densityComplex(F, S, g, Emin,  mu, Ncomplex, T=300))
+        rho_ = np.real(densityComplex(F, S, g, Emin,  mu, Ncomplex, T=0))
         dP = max(np.diag(rho_ - rho))
         #print(Ncomplex, dP)
         rho = rho_
@@ -240,6 +262,7 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
 
     return Emin, Ncomplex, Nreal
 
+# Get the fermi energy of a 1D contact
 def getFermiContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
     # Set up infinite system from contact
     F = gSys.aList[ind]
@@ -262,6 +285,7 @@ def getFermiContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
     Emax = max(orbs)
     return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, Eminf, tol, maxcycles)
 
+# Calculat the fermi energy of the surfG() object
 def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e-4, maxcycles=1000):
     # Fermi Energy search using full contact
     print(f'Eminf DOS = {DOSg(g.F,g.S,g,Eminf)}')
