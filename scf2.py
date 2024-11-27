@@ -65,10 +65,11 @@ class NEGF(object):
             self.S = Omat
         self.X = np.array(fractional_matrix_power(self.S, -0.5))
         
-        # Set Emin/Emax from orbitals
+        # Set Emin from orbitals
         orbs, _ = LA.eig(self.X@self.F@self.X)
         self.Emin = min(orbs)*har_to_eV - 5
-        self.convLevel = -1 #Indicates no SCF run yet
+        self.convLevel = 9999
+        self.MaxDP = 9999 
 
         # Pulay Mixing Initialization
         self.pList = np.array([self.P for i in range(nPulay)], dtype=complex)
@@ -156,7 +157,6 @@ class NEGF(object):
                 n_curr = self.updateN()
                 dosFunc = lambda E: DOS([E], self.F*har_to_eV, self.S, self.getSigma(E)[0], self.getSigma(E)[1])[0][0]
                 fermi = self.fSearch.step(dosFunc, n_curr)
-                print(f'Updating fermi level with accuracy {self.fSearch.get_accuracy():.2E} eV...')
         else:
             self.updFermi = False
             # Set Integration limits
@@ -165,7 +165,6 @@ class NEGF(object):
         if Eminf!=None:
             self.Eminf = Eminf
 
-        print(f'Fermi Energy set to {fermi:.2f} eV')
         self.fermi = fermi
         self.qV = qV
         self.mu1 =  fermi + (qV/2)
@@ -273,19 +272,27 @@ class NEGF(object):
         
         
         D,V = LA.eig(np.array(Fbar))
+        Vc = LA.inv(V.conj().T)
            
         err =  np.float_(sum(np.imag(D)))
         if  err > 0:
             print('Imaginary elements on diagonal of D are positive ------->  ', err)
         
-        # Calculate each integral
-        #P1 = densityGrid(Fbar, GamBar2, self.Emin, self.mu1)
-        #P2 = densityGrid(Fbar, GamBar2, self.Emin, self.mu2)
-        if self.mu1 == self.mu2:
-            P = density(V, D, GamBar1+GamBar2, self.Eminf, self.mu1)
+        #Update Fermi Energy (if not constant)
+        if self.updFermi:
+            Nexp = self.bar.ne
+            conv = min(self.convLevel, 1e-3)
+            if self.spin=='r':
+                Nexp/=2
+            self.fermi = bisectFermi(V,Vc,D,GamBar1+GamBar2,Nexp,conv, self.Eminf)
+            print(f'Fermi Energy set to {self.fermi:.2f} eV')
+
+        #Integrate to get density matrix
+        if self.qV == 0:
+            P = density(V, Vc, D, GamBar1+GamBar2, self.Eminf, self.fermi)
         else:
-            P1 = density(V, D, GamBar1, self.Eminf, self.mu1)
-            P2 = density(V, D, GamBar2, self.Eminf, self.mu2)
+            P1 = density(V, Vc, D, GamBar1, self.Eminf, self.mu1)
+            P2 = density(V, Vc, D, GamBar2, self.Eminf, self.mu2)
             P = P1 + P2 #+ Pw
         
         # Calculate Level Occupation, Lowdin TF,  Return
@@ -330,10 +337,10 @@ class NEGF(object):
         # Update counters, print data
         self.updateN() 
         print(f'Total number of electrons (NEGF): {self.nelec:.2f}')
-        MaxDP = max(Dense_diff)
+        self.MaxDP = max(Dense_diff)
         RMSDP = np.sqrt(np.mean(Dense_diff**2))
-        print(f'MaxDP: {MaxDP:.2E} | RMSDP: {RMSDP:.2E}')
-        return RMSDP, MaxDP
+        print(f'MaxDP: {self.MaxDP:.2E} | RMSDP: {RMSDP:.2E}')
+        return RMSDP, self.MaxDP
 
     # Use Gaussian to calculate the Density Matrix, apply damping factor
     # Edamp - when True, add multiple additional 0.1 damp when energy increases
@@ -351,7 +358,7 @@ class NEGF(object):
 
         # Convergence variables: dE, RMSDP and MaxDP
         dE = self.Total_E-self.Total_E_Old
-        print('Energy difference is: ', dE)
+        print(f'Energy difference is: {dE:.3E}')
         return dE
 
     # Main SCF loop, runs Fock <-> Density cycle until convergence reached
@@ -369,21 +376,12 @@ class NEGF(object):
         TotalE=[]
         print('Entering NEGF-SCF loop at: '+str(time.asctime()))
         print('###################################')
-        MaxDP = 1e3
-        nFermiUpd = 0
         while Loop:
             print()
             print('Iteration '+str(Niter)+':')
-            # Run Pulay Kick every nPulay+1 iterations, if turned on
-            isPulay = pulay*((Niter+1)%(len(self.pList)+1)==0)
-            
-            # Update fermi if MaxDP below threshold or at least once every 20 iterations
-            if self.updFermi and (MaxDP<1e-2 or nFermiUpd>=20):
-                self.setVoltage(self.qV)
-                nFermiUpd = 0
-            else:
-                nFermiUpd += 1
-
+            # Run Pulay Kick every nPulay iterations, if turned on
+            isPulay = pulay*((Niter+1)%(len(self.pList))==0)
+           
             # Fock --> P --> Fock
             EList, occList = self.FockToP()
             RMSDP, MaxDP = self.PMix(damping, isPulay)

@@ -45,6 +45,7 @@ class NEGFE(NEGF):
         self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eps)
         self.figures = []
         self.setIntegralLimits(100, 50)
+        self.nFermiUpd = 0 
         return inds
     
     def setIntegralLimits(self, N1, N2):
@@ -53,12 +54,15 @@ class NEGFE(NEGF):
  
     def integralCheck(self, tol=1e-4, cycles=10, damp=0.1):
         print(f'RUNNING SCF FOR {cycles} CYCLES USING DEFAULT GRID: ')
+        eps_ = self.g.eps
+        self.g.eps = 1e-2
         if self.updFermi:
             self.updFermi=False
             self.SCF(1e-10,damp,cycles)
             self.updFermi=True
         else:
             self.SCF(1e-10,damp,cycles)
+        self.g.eps = eps_
         print('SETTING INTEGRATION LIMITS... ')
         self.Emin, self.N1, self.N2 = integralFit(self.F*har_to_eV, self.S, self.g, sum(self.getHOMOLUMO())/2, self.Eminf, tol)
         print('INTEGRATION LIMITS SET!')
@@ -69,11 +73,21 @@ class NEGFE(NEGF):
         return (self.g.sigma(E, 0), self.g.sigma(E, 1))
 
     # Updated to use energy-dependent contour integral from surfG()
-    def FockToP(self, T=300, N=100):
+    def FockToP(self, T=300):
         # Density contribution from below self.Emin
         Pw = densityReal(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
         print(np.diag(Pw)[:6].real)
         #print(np.diag(Pw)) 
+        
+        # Update fermi if MaxDP below threshold or at least once every 20 iterations
+        if self.updFermi and (self.MaxDP<1e-2 or self.nFermiUpd>=20):
+            self.setVoltage(self.qV)
+            print(f'Updating fermi level with accuracy {self.fSearch.get_accuracy():.2E} eV...')
+            print(f'Fermi Energy set to {self.fermi:.2f} eV')
+            self.nFermiUpd = 0
+        else:
+            self.nFermiUpd += 1
+
         
         # DEBUG: 
         #Pwalt = self.g.densityComplex(self.Emin=Eminf, Emax=Emin, dE=(Emin-Eminf)/400)
