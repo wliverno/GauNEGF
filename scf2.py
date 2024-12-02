@@ -128,7 +128,7 @@ class NEGF(object):
         storeDen(self.bar, self.P, self.spin)
         self.updateN() 
         print(f'Density matrix loaded, nelec = {self.nelec:.2f} electrons')
-        self.PToFock(1)
+        self.PToFock()
 
     def getHOMOLUMO(self):
         orbs, _ = LA.eig(self.X@self.F@self.X)
@@ -380,7 +380,7 @@ class NEGF(object):
             print()
             print('Iteration '+str(Niter)+':')
             # Run Pulay Kick every nPulay iterations, if turned on
-            isPulay = pulay*((Niter+1)%(len(self.pList))==0)
+            isPulay = pulay*((Niter+1)%(len(self.pList)+1)==0)
            
             # Fock --> P --> Fock
             EList, occList = self.FockToP()

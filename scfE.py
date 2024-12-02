@@ -43,7 +43,6 @@ class NEGFE(NEGF):
         self.lInd = inds[0]
         self.rInd = inds[1]
         self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eps)
-        self.figures = []
         self.setIntegralLimits(100, 50)
         self.nFermiUpd = 0 
         return inds
@@ -55,7 +54,7 @@ class NEGFE(NEGF):
     def integralCheck(self, tol=1e-4, cycles=10, damp=0.1):
         print(f'RUNNING SCF FOR {cycles} CYCLES USING DEFAULT GRID: ')
         eps_ = self.g.eps
-        self.g.eps = 1e-2
+        #self.g.eps = 1e-2
         if self.updFermi:
             self.updFermi=False
             self.SCF(1e-10,damp,cycles)
@@ -79,16 +78,7 @@ class NEGFE(NEGF):
         print(np.diag(Pw)[:6].real)
         #print(np.diag(Pw)) 
         
-        # Update fermi if MaxDP below threshold or at least once every 20 iterations
-        if self.updFermi and (self.MaxDP<1e-2 or self.nFermiUpd>=20):
-            self.setVoltage(self.qV)
-            print(f'Updating fermi level with accuracy {self.fSearch.get_accuracy():.2E} eV...')
-            print(f'Fermi Energy set to {self.fermi:.2f} eV')
-            self.nFermiUpd = 0
-        else:
-            self.nFermiUpd += 1
-
-        
+                
         # DEBUG: 
         #Pwalt = self.g.densityComplex(self.Emin=Eminf, Emax=Emin, dE=(Emin-Eminf)/400)
         #print("Comparing Densities:")
@@ -122,6 +112,15 @@ class NEGFE(NEGF):
         EList = np.array(np.real(D)).flatten()
         inds = np.argsort(EList)        
         
+        # Update fermi if MaxDP below threshold or at least once every 20 iterations
+        if self.updFermi and (self.MaxDP<1e-2 or self.nFermiUpd>=20):
+            self.setVoltage(self.qV)
+            print(f'Updating fermi level with accuracy {self.fSearch.get_accuracy():.2E} eV...')
+            print(f'Fermi Energy set to {self.fermi:.2f} eV')
+            self.nFermiUpd = 0
+        else:
+            self.nFermiUpd += 1
+
         #DEBUG:
         #for pair in zip(occList[inds], EList[inds]):                       
         #    print("Energy=", str(pair[1]), ", Occ=", str(pair[0]))
@@ -129,31 +128,14 @@ class NEGFE(NEGF):
         return EList[inds], occList[inds]
 
     
-    # Updated to update surfG() Fock matrix and plot integral and residues
-    def PToFock(self, debug=False):
+    # Updated to update surfG() Fock matrix
+    def PToFock(self):
         Fock_old = self.F.copy()
         dE = super().PToFock()
         self.F, self.locs = getFock(self.bar, self.spin)
         self.g.setF(self.F*har_to_eV)
         
-        # Plot integral path and poles
-        if debug==True:
-            fig, ax = plt.subplots()
-            ax.plot(self.g.Egrid[0].real, self.g.Egrid[0].imag, '-r')
-            ax.plot(self.g.poleList[0].real, self.g.poleList[0].imag, 'xr')
-            ax.axvline(self.mu1, c = 'r', ls='-')
-            ax.plot(self.g.Egrid[1].real, self.g.Egrid[1].imag, '--b')
-            ax.plot(self.g.poleList[1].real, self.g.poleList[1].imag,'+b')
-            ax.axvline(self.mu2, c = 'b', ls='--')
-            ax.set_xlabel('Re(Z) eV')
-            ax.set_ylabel('Imag(Z) eV')
-            ax.set_title(f'Frame {len(self.figures)}: RMSDP - {RMSDP:.2E}, MaxDP - {MaxDP:.2E}')
-            lowBnd = self.Emin - 5*kT
-            upBnd = max(self.mu1, self.mu2)+5*kT
-            ax.set_xlim(lowBnd, upBnd)
-            ax.set_ylim(-1, upBnd-lowBnd)
-            self.figures.append(fig)
-
+       
         # Debug:
         #D,V = LA.eig(self.X@(Fock_old*har_to_eV)@self.X) 
         #EListBefore = np.sort(np.array(np.real(D)).flatten())
@@ -164,31 +146,4 @@ class NEGFE(NEGF):
          
         return dE
     
-    # Save integration plots as frame in animated gif
-    def plotAnimation(self, gif_path='output.gif'):
-        images = []
-
-        for fig in self.figures:
-            # Save the figure to a temporary file
-            fig_path = f'temp_frame_{self.figures.index(fig)}.png'
-            fig.savefig(fig_path)
-            plt.close(fig)
-            
-            # Open the image and append to the list
-            images.append(Image.open(fig_path))
-            
-            # Remove the temporary file
-            os.remove(fig_path)
-
-        # Save all frames as a new or updated GIF
-        if images:
-            images[0].save(gif_path, format='GIF', append_images=images[1:], save_all=True, duration=len(images)*10, loop=0)
-            print(f'Saved GIF as {gif_path}')
-        else:
-            print('No frames to save.')
-        
-        # Empty the list of figures
-        self.figures = []
-        print('Figures stack cleared!')
     
-
