@@ -42,12 +42,12 @@ class surfG:
         
         # Set Contact Coupling
         if isinstance(taus, int):
-            taus = indsList[-1:]+indsList[:-1]
+            taus = [indsList[-1],indsList[0]]
         if len(np.shape(taus[0])) == 1:
            self.tauFromFock = True
            self.tauInds = taus
-           self.tauList = [self.F[np.ix_(taus[0], taus[1])], self.F[np.ix_(taus[1], taus[0])]]
-           self.stauList = [self.S[np.ix_(taus[0], taus[1])], self.S[np.ix_(taus[1], taus[0])]]
+           self.tauList = [self.F[np.ix_(taus[0],indsList[0])], self.F[np.ix_(taus[1],indsList[-1])]]
+           self.stauList = [self.S[np.ix_(taus[0],indsList[0])], self.S[np.ix_(taus[1],indsList[-1])]]
         else:
            self.tauFromFock = False
            self.tauList = taus
@@ -111,9 +111,11 @@ class surfG:
         self.F = F
         if self.tauFromFock:
             taus = self.tauInds
-            self.F[np.ix_(taus[0], taus[0])] = self.F[np.ix_(taus[1], taus[1])].copy()
-            self.tauList = [self.F[np.ix_(taus[0], taus[1])], self.F[np.ix_(taus[1], taus[0])]]
-            self.stauList = [self.S[np.ix_(taus[0], taus[1])], self.S[np.ix_(taus[1], taus[0])]]
+            indsList = self.indsList
+            self.F[np.ix_(indsList[0], indsList[0])] = self.F[np.ix_(taus[0], taus[0])].copy()
+            self.F[np.ix_(indsList[-1], indsList[-1])] = self.F[np.ix_(taus[1], taus[1])].copy()
+            self.tauList = [self.F[np.ix_(taus[0],indsList[0])], self.F[np.ix_(taus[1],indsList[-1])]]
+            self.stauList = [self.S[np.ix_(taus[0],indsList[0])], self.S[np.ix_(taus[1],indsList[-1])]]
         if self.contactFromFock:
             self.setContacts()
     
