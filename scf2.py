@@ -1,7 +1,7 @@
+# Python packages
 import numpy as np
 from scipy import linalg as LA
 from scipy.linalg import fractional_matrix_power
-import sys
 import time
 import matplotlib.pyplot as plt
 
@@ -10,10 +10,8 @@ from gauopen import QCOpMat as qco
 from gauopen import QCBinAr as qcb
 from gauopen import QCUtil as qcu
 
-# Other packages
+# Developed packages
 from matTools import *
-from transport import DOS
-from fermiSearch import DOSFermiSearch
 from density import * 
 
 
@@ -65,9 +63,10 @@ class NEGF(object):
             self.S = Omat
         self.X = np.array(fractional_matrix_power(self.S, -0.5))
         
-        # Set Emin from orbitals
+        # Set Emin/Emax from orbitals
         orbs, _ = LA.eig(self.X@self.F@self.X)
-        self.Emin = min(orbs)*har_to_eV - 5
+        self.Emin = min(orbs.real)*har_to_eV - 5
+        self.Emax = max(orbs.real)*har_to_eV
         self.convLevel = 9999
         self.MaxDP = 9999 
 
@@ -144,19 +143,13 @@ class NEGF(object):
         # Set Fermi Energy
         if np.isnan(fermi):
             self.updFermi = True
-            if self.fSearch is None:
-                if self.fermi is None:
-                    # Set initial fermi energy as (HOMO + LUMO)/2
-                    homo_lumo = self.getHOMOLUMO()
-                    print(f'Setting initial Fermi energy between HOMO ({homo_lumo[0]:.2f} eV) and LUMO ({homo_lumo[1]:.2f} eV)')
-                    fermi = sum(homo_lumo)/2
-                else:
-                    fermi = self.fermi
-                self.fSearch = DOSFermiSearch(fermi, self.nae+self.nbe)#,numpoints=1)
+            if self.fermi is None:
+                # Set initial fermi energy as (HOMO + LUMO)/2
+                homo_lumo = self.getHOMOLUMO()
+                print(f'Setting initial Fermi energy between HOMO ({homo_lumo[0]:.2f} eV) and LUMO ({homo_lumo[1]:.2f} eV)')
+                fermi = sum(homo_lumo)/2
             else:
-                n_curr = self.updateN()
-                dosFunc = lambda E: DOS([E], self.F*har_to_eV, self.S, self.getSigma(E)[0], self.getSigma(E)[1])[0][0]
-                fermi = self.fSearch.step(dosFunc, n_curr)
+                fermi = self.fermi
         else:
             self.updFermi = False
             # Set Integration limits
@@ -285,6 +278,7 @@ class NEGF(object):
             if self.spin=='r':
                 Nexp/=2
             self.fermi = bisectFermi(V,Vc,D,GamBar1+GamBar2,Nexp,conv, self.Eminf)
+            self.setVoltage(self.qV)
             print(f'Fermi Energy set to {self.fermi:.2f} eV')
 
         #Integrate to get density matrix

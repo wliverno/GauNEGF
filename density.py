@@ -90,7 +90,7 @@ def densityReal(F, S, g, Emin, mu, N=100, T=300):
     defInt = np.array(np.zeros(np.shape(F)), dtype=complex)
     x,w = roots_legendre(N)
     x = np.real(x)
-    print(f'Integrating over {N} points...')
+    print(f'Real integration over {N} points...')
     for i, val in enumerate(x):
         E = mid*(val + 1) + Emin
         defInt += mid*w[i]*Gr(F, S, g, E)*fermi(E, mu, T)
@@ -110,7 +110,7 @@ def densityGrid(F, S, g, mu1, mu2, ind=None, N=100, T=300):
     den = np.array(np.zeros(np.shape(F)), dtype=complex)
     x,w = roots_legendre(N)
     x = np.real(x)
-    print(f'Integrating over {N} points...')
+    print(f'Real integration over {N} points...')
     for i, val in enumerate(x):
         E = mid*(val + 1) + Emin
         GrE = Gr(F, S, g, E)
@@ -136,7 +136,7 @@ def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=300):
     Emin = muLo - 5*kT
     Egrid = np.linspace(Emin, Emax, N)
     den = np.array(np.zeros(np.shape(F)), dtype=complex)
-    print(f'Integrating over {N} points...')
+    print(f'Real integration over {N} points...')
     for i in range(1,N):
         E = (Egrid[i] + Egrid[i-1])/2
         dE = Egrid[i] - Egrid[i-1]
@@ -163,7 +163,7 @@ def densityComplex(F, S, g, Emin, mu, N=100, T=300):
     r = (Emax-Emin)/2
     
     #Integrate along contour
-    print(f'Integrating over {N} points...')
+    print(f'Complex integration over {N} points...')
     lineInt = np.array(np.zeros(np.shape(F)), dtype=complex)
     x,w = roots_legendre(N)
     x = np.real(x)
@@ -191,22 +191,32 @@ def densityComplex(F, S, g, Emin, mu, N=100, T=300):
 # Get density using a complex contour and trapezoidal integration
 def densityComplexTrap(F, S, g, Emin, mu, N, T=300):
     #Construct circular contour
-    kT = kB*T
-    Emax = mu+(5*kT)
+    nKT= 5
+    broadening = nKT*kB*T
+    Emax = mu-broadening
     center = (Emin+Emax)/2
     r = (Emax-Emin)/2
     theta = np.linspace(0, np.pi, N)
     Egrid = r*np.exp(1j*theta)+center
 
     #Integrate along contour
-    print(f'Integrating over {N} points...')
+    print(f'Complex Integration over {N} points...')
     lineInt = np.array(np.zeros(np.shape(F)), dtype=complex)
     for i in range(1,N):
         E = (Egrid[i]+Egrid[i-1])/2
         dS = Egrid[i]-Egrid[i-1]
         lineInt += Gr(F, S, g, E)*fermi(E, mu, T)*dS
-    print('Integration done!')
     
+    #Add integration points for Fermi Broadening
+    if T>0:
+        print('Integrating Fermi Broadening')
+        Egrid2 = np.linspace(Emax, Emax+2*broadening, N//10)
+        for i in range(1, N//10):
+            E = (Egrid2[i]+Egrid2[i-1])/2
+            dS = Egrid2[i]-Egrid2[i-1]
+            lineInt += Gr(F, S, g, E)*fermi(E, mu, T)*dS
+    print('Integration done!')
+
     #Return -Im(Integral)/pi, Equation 19 in 10.1103/PhysRevB.63.245407
     return (1+0j)*np.imag(lineInt)/np.pi
 
@@ -307,7 +317,7 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e
     while abs(ne - Ncurr) > tol and counter < maxcycles:
         p_ = pLow+pMu(fermi)
         Ncurr = np.trace(p_@g.S)
-        dN = (ne-Ncurr)
+        dN = ne-Ncurr
         if dN > 0 and fermi > lBound:
             lBound = fermi
             lBoundVal = dN
@@ -316,7 +326,7 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e
             uBoundVal = dN
         # Weight bisection based on value at endpoints
         weight = -lBoundVal/(uBoundVal - lBoundVal)
-        fermi = lBound + (uBound-lBound)*weight
+        fermi = np.real(lBound + (uBound-lBound)*weight)
         print("DN:",dN, "Fermi:", fermi, "Bounds:", lBound, uBound)
     if abs(ne - Ncurr) > tol and counter > maxcycles:
         print(f'Warning: Fermi energy still not within tolerance! Ef = {fermi:.2f} eV, N = {Ncurr:.2f})')

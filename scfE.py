@@ -1,19 +1,17 @@
+# Python Packages
 import numpy as np
-from scipy import linalg as LA
-import sys
-import time
-import matplotlib.pyplot as plt
-from PIL import Image
-import os
+from numpy import linalg as LA
 
-
+# Gaussian interface packages
 from gauopen import QCOpMat as qco
 from gauopen import QCBinAr as qcb
 from gauopen import QCUtil as qcu
 
+# Developed Packages 
 from matTools import *
 from density import *
-
+from transport import DOS
+from fermiSearch import DOSFermiSearch
 from scf2 import NEGF
 from surfGreen import surfG
 
@@ -38,14 +36,28 @@ V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 
 class NEGFE(NEGF):
     # Set contact as surfG() object
-    def setContactE(self, contactList, tauList=-1, stauList=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eps=1e-9):
-        inds = super().setContacts(contactList[0], contactList[1])
+    def setContactE(self, contactList, tauList=-1, stauList=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eps=1e-9, T=300):
+        # Set L/R contacts based on atom numbers, use orbital inds for surfG() object
+        inds = super().setContacts(contactList[0], contactList[-1])
         self.lInd = inds[0]
         self.rInd = inds[1]
+        # if tauList is a list of atom numbers (rather than a matrix), generate orbital indices
+        if len(np.shape(tauList[0])) == 1: 
+            ind1 = np.where(np.isin(abs(self.locs), tauList[0]))[0]
+            ind2 = np.where(np.isin(abs(self.locs), tauList[-1]))[0]
+            tauList = (ind1, ind2)
+        # Generate surfG() object for the molecule + contacts and initialize variables
         self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eps)
         self.setIntegralLimits(100, 50)
-        self.nFermiUpd = 0 
+        self.T = T
         return inds
+    
+    # Set up Fermi Search algorithm after setting system Fermi energies
+    def setVoltage(self, qV, fermi=np.nan, Emin=None, Eminf=None):
+        super().setVoltage(qV, fermi, Emin, Eminf)
+        if self.updFermi:
+            self.fSearch = DOSFermiSearch(self.fermi, self.nae+self.nbe)
+        self.nFermiUpd = 0 
     
     def setIntegralLimits(self, N1, N2):
         self.N1 = N1
@@ -53,17 +65,22 @@ class NEGFE(NEGF):
  
     def integralCheck(self, tol=1e-4, cycles=10, damp=0.1):
         print(f'RUNNING SCF FOR {cycles} CYCLES USING DEFAULT GRID: ')
-        eps_ = self.g.eps
-        #self.g.eps = 1e-2
         if self.updFermi:
             self.updFermi=False
             self.SCF(1e-10,damp,cycles)
             self.updFermi=True
         else:
             self.SCF(1e-10,damp,cycles)
-        self.g.eps = eps_
         print('SETTING INTEGRATION LIMITS... ')
         self.Emin, self.N1, self.N2 = integralFit(self.F*har_to_eV, self.S, self.g, sum(self.getHOMOLUMO())/2, self.Eminf, tol)
+        if self.updFermi:
+                print('CALCULATING FERMI ENERGY')
+                ne = self.nae if self.spin is 'r' else self.nae+self.nbe
+                self.fermi = calcFermi(self.g, ne, self.Emin, self.Emax, self.fermi, 
+                                       self.N1, self.N2, self.Eminf, tol)[0]
+                self.nFermiUpd=0
+                self.setVoltage(self.qV)
+                self.fSearch.Ef=self.fermi
         print('INTEGRATION LIMITS SET!')
         print('#############################')
     
@@ -72,37 +89,17 @@ class NEGFE(NEGF):
         return (self.g.sigma(E, 0), self.g.sigma(E, 1))
 
     # Updated to use energy-dependent contour integral from surfG()
-    def FockToP(self, T=300):
-        # Density contribution from below self.Emin
-        Pw = densityReal(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
-        print(np.diag(Pw)[:6].real)
-        #print(np.diag(Pw)) 
-        
-                
-        # DEBUG: 
-        #Pwalt = self.g.densityComplex(self.Emin=Eminf, Emax=Emin, dE=(Emin-Eminf)/400)
-        #print("Comparing Densities:")
-        #print(np.diag(Pw)[:10])
-        #print(np.diag(Pwalt)[:10])
-        #print("--------------------------")
-        # Density contribution from above self.Emin
+    def FockToP(self):
         print('Calculating equilibrium density matrix:') 
-        #P1 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=10, T=T)
-        #P2 = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=50, T=T)
-        P = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=self.N1, T=T)
-        print(np.diag(P)[:6].real)
-        #P2 = densityReal(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=100, T=T)
-        #print(np.diag(P2)[:6].real)
-        #P3 = densityReal(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=1000, T=T)
-        #print(np.diag(P3)[:6].real)
-        
+        P = densityReal(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
+        P += densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=self.N1, T=self.T)
+                
         # If bias applied, need to integrate G<
         if self.mu1 != self.mu2:
             print('Calculating non-equilibrium density matrix:')
-            P += densityGrid(self.F*har_to_eV, self.S, self.g, self.mu1, self.mu2, N=self.N1, T=T)
+            P += densityGrid(self.F*har_to_eV, self.S, self.g, self.mu1, self.mu2, N=self.N1, T=self.T)
             #P2 = self.g.densityComplex(self.Emin, self.mu2, 1)
-        P+= Pw
-
+       
         # Calculate Level Occupation, Lowdin TF,  Return
         D,V = LA.eig(self.X@(self.F*har_to_eV)@self.X)
         self.Xi = LA.inv(self.X)
@@ -112,15 +109,7 @@ class NEGFE(NEGF):
         EList = np.array(np.real(D)).flatten()
         inds = np.argsort(EList)        
         
-        # Update fermi if MaxDP below threshold or at least once every 20 iterations
-        if self.updFermi and (self.MaxDP<1e-2 or self.nFermiUpd>=20):
-            self.setVoltage(self.qV)
-            print(f'Updating fermi level with accuracy {self.fSearch.get_accuracy():.2E} eV...')
-            print(f'Fermi Energy set to {self.fermi:.2f} eV')
-            self.nFermiUpd = 0
-        else:
-            self.nFermiUpd += 1
-
+        
         #DEBUG:
         #for pair in zip(occList[inds], EList[inds]):                       
         #    print("Energy=", str(pair[1]), ", Occ=", str(pair[0]))
@@ -134,7 +123,6 @@ class NEGFE(NEGF):
         dE = super().PToFock()
         self.F, self.locs = getFock(self.bar, self.spin)
         self.g.setF(self.F*har_to_eV)
-        
        
         # Debug:
         #D,V = LA.eig(self.X@(Fock_old*har_to_eV)@self.X) 
@@ -143,7 +131,19 @@ class NEGFE(NEGF):
         #EList = np.sort(np.array(np.real(D)).flatten())
         #for pair in zip(EListBefore, EList):                       
         #    print("Energy Before =", str(pair[0]), ", Energy After =", str(pair[1]))
-         
+        
+        # Update fermi if MaxDP below threshold or at least once every 20 iterations
+        if self.updFermi and (self.MaxDP<1e-2 or self.nFermiUpd>=20):
+            dosFunc = lambda E: DOS([E], self.F*har_to_eV, self.S, 
+                                    self.getSigma(E)[0], self.getSigma(E)[1])[0][0]
+            self.fermi = self.fSearch.step(dosFunc, self.updateN())
+            acc = self.fSearch.get_accuracy()
+            print(f'Fermi Energy set to {self.fermi:.2f} eV, Accuracy = +/- {acc:.2E} eV')
+            self.setVoltage(self.qV)
+            self.nFermiUpd = 0
+        else:
+            self.nFermiUpd += 1
+
         return dE
     
     
