@@ -1,25 +1,15 @@
+# Python packages
 import numpy as np
 from numpy import linalg as LA
 from scipy.linalg import fractional_matrix_power
 from scipy.special import roots_legendre
-import scipy.io as io
-import sys
-import time
-import matplotlib.pyplot as plt
-from numpy import savetxt
 
-
-from gauopen import QCOpMat as qco
-from gauopen import QCBinAr as qcb
-from gauopen import QCUtil as qcu
-
+# Developed Packages:
 from fermiSearch import DOSFermiSearch
-from surfGreen import surfG
+from surfG1D import surfG
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
-eoverh = 3.874e-5       # A/eV
-V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 kB = 8.617e-5           # eV/Kelvin
 
 
@@ -295,7 +285,7 @@ def getFermiContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
     Emax = max(orbs)
     return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, Eminf, tol, maxcycles)
 
-# Calculat the fermi energy of the surfG() object
+# Calculate the fermi energy of the surfG() object
 def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e-4, maxcycles=1000):
     # Fermi Energy search using full contact
     print(f'Eminf DOS = {DOSg(g.F,g.S,g,Eminf)}')
@@ -303,8 +293,8 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e
     pLow = densityReal(g.F, g.S, g, Eminf, Emin, N2, T=0)
     nELow = np.trace(pLow@g.S)
     print(f'Electrons below lowest onsite energy: {nELow}')
-    #if nELow >= ne:
-    #    raise Exception('Calculated Fermi energy is below lowest orbital energy!')
+    if nELow >= ne:
+        raise Exception('Calculated Fermi energy is below lowest orbital energy!')
     pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, N1, T=0)
     
     # Fermi search using bisection method (F not changing, highly stable)
@@ -312,21 +302,15 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e
     counter = 0 
     lBound = Emin
     uBound = Emax
-    lBoundVal = ne - nELow
-    uBoundVal = -lBoundVal
     while abs(ne - Ncurr) > tol and counter < maxcycles:
-        p_ = pLow+pMu(fermi)
+        p_ = np.real(pLow+pMu(fermi))
         Ncurr = np.trace(p_@g.S)
         dN = ne-Ncurr
         if dN > 0 and fermi > lBound:
             lBound = fermi
-            lBoundVal = dN
         elif dN < 0 and fermi < uBound:
             uBound = fermi
-            uBoundVal = dN
-        # Weight bisection based on value at endpoints
-        weight = -lBoundVal/(uBoundVal - lBoundVal)
-        fermi = np.real(lBound + (uBound-lBound)*weight)
+        fermi = (uBound + lBound)/2
         print("DN:",dN, "Fermi:", fermi, "Bounds:", lBound, uBound)
     if abs(ne - Ncurr) > tol and counter > maxcycles:
         print(f'Warning: Fermi energy still not within tolerance! Ef = {fermi:.2f} eV, N = {Ncurr:.2f})')

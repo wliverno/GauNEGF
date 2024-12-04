@@ -12,8 +12,8 @@ from matTools import *
 from density import *
 from transport import DOS
 from fermiSearch import DOSFermiSearch
-from scf2 import NEGF
-from surfGreen import surfG
+from scf import NEGF
+from surfG1D import surfG
 
 # Matrix Headers
 AlphaDen = "ALPHA DENSITY MATRIX"
@@ -42,7 +42,9 @@ class NEGFE(NEGF):
         self.lInd = inds[0]
         self.rInd = inds[1]
         # if tauList is a list of atom numbers (rather than a matrix), generate orbital indices
-        if len(np.shape(tauList[0])) == 1: 
+        if isinstance(tauList, int):
+            pass
+        elif len(np.shape(tauList[0])) == 1: 
             ind1 = np.where(np.isin(abs(self.locs), tauList[0]))[0]
             ind2 = np.where(np.isin(abs(self.locs), tauList[-1]))[0]
             tauList = (ind1, ind2)
@@ -59,9 +61,11 @@ class NEGFE(NEGF):
             self.fSearch = DOSFermiSearch(self.fermi, self.nae+self.nbe)
         self.nFermiUpd = 0 
     
-    def setIntegralLimits(self, N1, N2):
+    def setIntegralLimits(self, N1, N2, Emin=False):
         self.N1 = N1
         self.N2 = N2
+        if Emin:
+            self.Emin=Emin
  
     def integralCheck(self, tol=1e-4, cycles=10, damp=0.1):
         print(f'RUNNING SCF FOR {cycles} CYCLES USING DEFAULT GRID: ')

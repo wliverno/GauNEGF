@@ -1,37 +1,21 @@
+# Python packages
 import numpy as np
 from numpy import linalg as LA
 from scipy.linalg import fractional_matrix_power
-import scipy.io as io
-import sys
 import time
 import matplotlib.pyplot as plt
 from numpy import savetxt
 
-
+# Gaussian interface packages
 from gauopen import QCOpMat as qco
 from gauopen import QCBinAr as qcb
 from gauopen import QCUtil as qcu
 
-
-# Matrix Headers
-AlphaDen = "ALPHA DENSITY MATRIX"
-BetaDen = "BETA DENSITY MATRIX"
-AlphaSCFDen = "ALPHA SCF DENSITY MATRIX"
-BetaSCFDen = "BETA SCF DENSITY MATRIX"
-AlphaFock = "ALPHA FOCK MATRIX"
-BetaFock = "BETA FOCK MATRIX"
-AlphaMOs = "ALPHA MO COEFFICIENTS"
-BetaMOs = "BETA MO COEFFICIENTS"
-AlphaEnergies = "ALPHA ORBITAL ENERGIES"
-BetaEnergies = "BETA ORBITAL ENERGIES"
-
 #Constants
 kB = 8.617e-5           # eV/Kelvin
 
-
 class surfG:
     def __init__(self, Fock, Overlap, indsList, taus=-1, staus=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eps=1e-9):
-        
         # Set up system
         self.F = np.array(Fock)
         self.S = np.array(Overlap)

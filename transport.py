@@ -134,7 +134,7 @@ def DOS(Elist, F, S, sig1, sig2):
 
 ## ENERGY DEPENDENT SIGMA:
 
-# F,S are NxN matrices, g is a surfGreen() object
+# F,S are NxN matrices, g is a surfG() object
 def cohTransE(Elist, F, S, g):
     F = np.array(F)
     S = np.array(S)
@@ -150,7 +150,7 @@ def cohTransE(Elist, F, S, g):
         Tr.append(T)
     return Tr
 
-# F,S are 2Nx2N matrices, g is a surfGreen() object size 2Nx2N
+# F,S are 2Nx2N matrices, g is a surfG() object size 2Nx2N
 def cohTransSpinE(Elist, F, S, g, spin='u'):
     F = np.array(F)
     N = int(len(F)/2)
@@ -199,7 +199,7 @@ def cohTransSpinE(Elist, F, S, g, spin='u'):
     return Tr, Tspin
 
                    
-# F,S are NxN matrices, g is a surfGreen() object
+# F,S are NxN matrices, g is a surfG() object
 def DOSE(Elist, F, S, g):
     F = np.array(F)
     S = np.array(S)
