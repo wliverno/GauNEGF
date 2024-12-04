@@ -1,16 +1,9 @@
+# Python Packages
 import numpy as np
-from scipy import linalg as LA
-from scipy.linalg import fractional_matrix_power
-import scipy.io as io
-import sys
-import time
-import matplotlib.pyplot as plt
-from numpy import savetxt
 
-
-from gauopen import QCOpMat as qco
+# Gaussian interface packages
 from gauopen import QCBinAr as qcb
-from gauopen import QCUtil as qcu
+from gauopen import QCOpMat as qco
 
 
 # Matrix Headers
@@ -20,17 +13,9 @@ AlphaSCFDen = "ALPHA SCF DENSITY MATRIX"
 BetaSCFDen = "BETA SCF DENSITY MATRIX"
 AlphaFock = "ALPHA FOCK MATRIX"
 BetaFock = "BETA FOCK MATRIX"
-AlphaMOs = "ALPHA MO COEFFICIENTS"
-BetaMOs = "BETA MO COEFFICIENTS"
-AlphaEnergies = "ALPHA ORBITAL ENERGIES"
-BetaEnergies = "BETA ORBITAL ENERGIES"
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
-eoverh = 3.874e-5       # A/eV
-kT = 0.025              # eV @ 20degC
-V_to_au = 0.03675       # Volts to Hartree/elementary Charge
-kB = 8.617e-5           # eV/Kelvin
 
 #### HELPER FUNCTIONS ####
 # Form Sigma matrix given self-energy matrix or value (V) and orbital indices (inds)

@@ -2,13 +2,12 @@
 import numpy as np
 from scipy import linalg as LA
 from scipy.linalg import fractional_matrix_power
+from scipy import io
 import time
 import matplotlib.pyplot as plt
 
 # Gaussian interface packages
-from gauopen import QCOpMat as qco
 from gauopen import QCBinAr as qcb
-from gauopen import QCUtil as qcu
 
 # Developed packages
 from matTools import *
@@ -17,11 +16,7 @@ from density import *
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
-eoverh = 3.874e-5       # A/eV
-kT = 0.025              # eV @ 20degC
 V_to_au = 0.03675       # Volts to Hartree/elementary Charge
-
-
 
 class NEGF(object):
     def __init__(self, fn, basis="lanl2dz", func="b3pw91", spin="r", fullSCF=True, route="", nPulay=4):
