@@ -7,7 +7,7 @@ from scipy.linalg import fractional_matrix_power
 kB = 8.617e-5           # eV/Kelvin
 dim = 9                 # size of single atom matrix: 1s + 3p + 5d
 class surfGB:
-    def __init__(self, contacts, bar, file='Au', eta=1e-9):
+    def __init__(self, F, S, contacts, bar, file='Au', eta=1e-9):
         #Read contact/orbital information and store
         self.cVecs = []
         self.indsLists = []
@@ -59,7 +59,9 @@ class surfGB:
             self.Slists.append(Slist)
             self.Vlists.append(Vlist)
         
-        # Store eta broadening term
+        # Store other variables
+        self.F = F
+        self.S = S
         self.eta = eta
 
     # Read parameters from filename.bethe file, check values, store into dicts
@@ -196,4 +198,7 @@ class surfGB:
         for i in range(len(self.indsLists)):
             sig+= self.sigma(E, i, conv)
         return sig
-    
+   
+    # Required to use with other linked packages
+    def setF(self,F):
+        self.F = F
