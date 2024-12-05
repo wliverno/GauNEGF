@@ -15,7 +15,7 @@ from gauopen import QCUtil as qcu
 kB = 8.617e-5           # eV/Kelvin
 
 class surfG:
-    def __init__(self, Fock, Overlap, indsList, taus=-1, staus=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eps=1e-9):
+    def __init__(self, Fock, Overlap, indsList, taus=-1, staus=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eta=1e-9):
         # Set up system
         self.F = np.array(Fock)
         self.S = np.array(Overlap)
@@ -46,7 +46,7 @@ class surfG:
             self.setContacts(alphas, aOverlaps, betas, bOverlaps)
 
         # Set up broadening for retarded/advanced Green's function, initialize g
-        self.eps = eps
+        self.eta = eta
         self.gPrev = [np.zeros(np.shape(alpha)) for alpha in self.aList]
     
     def setContacts(self, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1):
@@ -72,8 +72,8 @@ class surfG:
         Salpha = self.aSList[i]
         beta = self.bList[i]
         Sbeta = self.bSList[i]
-        A = (E+1j*self.eps)*Salpha - alpha
-        B = (E+1j*self.eps)*Sbeta - beta
+        A = (E+1j*self.eta)*Salpha - alpha
+        B = (E+1j*self.eta)*Sbeta - beta
         g = self.gPrev[i].copy()
         count = 0
         maxIter = int(1/(conv*relFactor))*10
@@ -85,8 +85,8 @@ class surfG:
             g = g*relFactor + g_*(1-relFactor)
             diff = dg.max()
             count = count+1
-        if count==maxIter:
-            print(f'Warning: exceeded max iterations! Conv: {diff}')
+        if diff>conv:
+            print(f'Warning: exceeded max iterations! E: {E}, Conv: {diff}')
         #print(f'g generated in {count} iterations with convergence {diff}')
         self.gPrev[i] = g
         return g

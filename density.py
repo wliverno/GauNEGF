@@ -271,12 +271,12 @@ def getFermiContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
     stau = gSys.bSList[ind]
     inds = np.arange(len(F))
     #print(S.shape, S.shape, inds.shape, tau.shape, stau.shape)
-    g = surfG(F, S, [inds], [tau], [stau], eps=1e-6)
+    g = surfG(F, S, [inds], [tau], [stau], eta=1e-6)
 
     # Initial guess and integral setup using two layers
     Forbs = np.block([[F, tau], [tau.conj().T, F]])
     Sorbs = np.block([[S, stau], [stau.T, S]])
-    gorbs = surfG(Forbs, Sorbs, [inds], [tau], [stau], eps=1e-6)
+    gorbs = surfG(Forbs, Sorbs, [inds], [tau], [stau], eta=1e-6)
     orbs, _ = LA.eig(LA.inv(Sorbs)@Forbs)
     orbs = np.sort(np.real(orbs))
     fermi = (orbs[2*int(ne)-1] + orbs[2*int(ne)])/2
