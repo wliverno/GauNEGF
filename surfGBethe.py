@@ -10,7 +10,9 @@ class surfGB:
     def __init__(self, F, S, contacts, bar, file='Au', eta=1e-9):
         #Read contact/orbital information and store
         self.cVecs = []
+        self.latVecs = []
         self.indsLists = []
+        self.dirLists = []
         self.N = bar.nbasis
         for contact in contacts:
             indsList = []
@@ -19,37 +21,27 @@ class surfGB:
                 inds = np.where(np.isin(bar.ibfatm, atom))[0]
                 cList.append(bar.c[(atom-1)*3:atom*3])
                 assert len(inds) == 9, f'Error: Atom {atom} has {len(inds)} basis functions, expecting 9'
+                inds = inds[np.argsort(abs(bar.ibftyp[inds])//1000)]
                 indsList.append(inds)
+            self.indsLists.append(indsList)
             # Calculate plane direction using SVD
             centeredCoords = cList-np.mean(cList, axis=0)
             _, _, Vt = LA.svd(centeredCoords)
             self.cVecs.append(Vt[-1])
-            self.indsLists.append(indsList)
+            # Calculate one lattice direction for lining up atoms
+            vInd = np.argmin([LA.norm(v - cList[0]) for v in cList[1:]])+1
+            latVec = cList[vInd]-cList[0]
+            self.latVecs.append(latVec/LA.norm(latVec))
+            # Calculate rest of lattice directions
+            nVecs = self.genNeighbors(Vt[-1], latVec)
+            self.dirLists.append(nVecs)
+
         
         # Read Bethe lattice parameters and generate hopping/overlap matrices
         self.read_bethe_params('Au')
         self.Slists = []
         self.Vlists = []
-        for cvec in self.cVecs:
-            refDir = np.array([1,1,1])/np.sqrt(3)
-            rotAxis = np.cross(refDir, cvec)
-            dirListOrig = np.array([
-                [1,0,0], [-1,0,0],
-                [0,1,0], [0,-1,0],
-                [0,0,1], [0,0,-1]
-            ])
-
-            # Rotate hopping directions to line up with contact plane vector
-            if np.allclose(rotAxis, 0):
-                dirList = dirListOrig
-            else:
-                rotAxis/= LA.norm(rotAxis)
-                theta = np.arccos(np.clip(np.dot(rotAxis, refDir), -1.0, 1.0))
-                dirList = []
-                for v in dirListOrig:
-                    dirList.append(v*np.cos(theta) + np.cross(rotAxis,v)*np.sin(theta)+\
-                            rotAxis*np.dot(rotAxis, v)*(1-np.cos(theta)))
-
+        for dirList in self.dirLists: 
             # Construct hopping matrices and store to contact
             Slist = []
             Vlist = []
@@ -59,10 +51,74 @@ class surfGB:
             self.Slists.append(Slist)
             self.Vlists.append(Vlist)
         
-        # Store other variables
+        # Store variables
+        self.cList = cList #Used for testing
         self.F = F
         self.S = S
         self.eta = eta
+
+    def genNeighbors(self, plane_normal, first_neighbor):
+        """
+        Generate all 12 nearest neighbor unit vectors:
+        - 6 in the plane forming a hexagonal pattern
+        - 6 in the following plane forming a similar hexagonal pattern
+        
+        Args:
+            plane_normal: Vector normal to the crystal plane (will be normalized)
+            first_neighbor: Vector to one nearest neighbor (will be normalized)
+            
+        Returns:
+            Tuple containing:
+                - Array of 6 in-plane unit vectors
+                - Array of 6 out-of-plane unit vectors
+        """
+        
+        # Project first_neighbor onto plane perpendicular to plane_normal
+        proj = first_neighbor - np.dot(first_neighbor, plane_normal) * plane_normal
+        first_neighbor = proj / np.linalg.norm(proj)
+        
+        # Generate in-plane vectors using 60-degree rotations
+        in_plane_vectors = []
+        rotation_angle = np.pi / 3  # 60 degrees
+        
+        for i in range(6):
+            angle = i * rotation_angle
+            # Rodrigues rotation formula
+            cos_theta = np.cos(angle)
+            sin_theta = np.sin(angle)
+            
+            K = np.array([[0, -plane_normal[2], plane_normal[1]],
+                         [plane_normal[2], 0, -plane_normal[0]],
+                         [-plane_normal[1], plane_normal[0], 0]])
+            
+            R = np.eye(3) + sin_theta * K + (1 - cos_theta) * np.matmul(K, K)
+            rotated_vector = np.dot(R, first_neighbor)
+            in_plane_vectors.append(rotated_vector / np.linalg.norm(rotated_vector))
+        
+        # Generate out-of-plane vectors
+        # We'll use a 45-degree angle for the out-of-plane component
+        out_of_plane_angle = np.pi / 4  # 45 degrees
+        
+        # Create base vector for out-of-plane components
+        out_of_plane_base = np.cos(out_of_plane_angle) * first_neighbor + \
+                           np.sin(out_of_plane_angle) * plane_normal
+        
+        # Generate 6 vectors in the next plane using the same 60-degree rotations
+        out_of_plane_vectors = []
+        for i in range(6):
+            angle = i * rotation_angle
+            cos_theta = np.cos(angle)
+            sin_theta = np.sin(angle)
+            
+            K = np.array([[0, -plane_normal[2], plane_normal[1]],
+                         [plane_normal[2], 0, -plane_normal[0]],
+                         [-plane_normal[1], plane_normal[0], 0]])
+            
+            R = np.eye(3) + sin_theta * K + (1 - cos_theta) * np.matmul(K, K)
+            rotated_vector = np.dot(R, out_of_plane_base)
+            out_of_plane_vectors.append(rotated_vector / np.linalg.norm(rotated_vector))
+        
+        return np.array(in_plane_vectors + out_of_plane_vectors)
 
     # Read parameters from filename.bethe file, check values, store into dicts
     def read_bethe_params(self, filename):
@@ -92,7 +148,7 @@ class surfGB:
         self.Sdict = {k[1:]:params[k] for k in params if k.startswith('S')}
         self.Vdict = {k:params[k] for k in params if not k.startswith('e') and not k.startswith('S')}
         
-    def gAtom(self, E, i, conv=1e-5, relFactor=0.1):
+    def gAtom(self, E, i, conv=1e-5, relFactor=0.9):
         Slist = self.Slists[i]
         Vlist = self.Vlists[i]
         #Construct matrices for Dyson equation
