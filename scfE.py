@@ -36,7 +36,7 @@ V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 
 class NEGFE(NEGF):
     # Set contact as surfG() object
-    def setContactE(self, contactList, tauList=-1, stauList=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eps=1e-9, T=300):
+    def setContactE(self, contactList, tauList=-1, stauList=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eta=1e-9, T=300):
         # Set L/R contacts based on atom numbers, use orbital inds for surfG() object
         inds = super().setContacts(contactList[0], contactList[-1])
         self.lInd = inds[0]
@@ -49,7 +49,7 @@ class NEGFE(NEGF):
             ind2 = np.where(np.isin(abs(self.locs), tauList[-1]))[0]
             tauList = (ind1, ind2)
         # Generate surfG() object for the molecule + contacts and initialize variables
-        self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eps)
+        self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eta)
         self.setIntegralLimits(100, 50)
         self.T = T
         return inds
