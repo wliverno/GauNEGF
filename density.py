@@ -73,18 +73,20 @@ def bisectFermi(V, Vc, D, Gam, Nexp, conv=1e-3, Eminf=-1e6):
 
 ## ENERGY DEPENDENT DENSITY FUNCTIONS
 # Get equilibrium density at a single contact (ind) using a real energy grid
-def densityReal(F, S, g, Emin, mu, N=100, T=300):
+def densityReal(F, S, g, Emin, mu, N=100, T=300, showText=True):
     kT = kB*T
     Emax = mu + 5*kT
     mid = (Emax-Emin)/2
     defInt = np.array(np.zeros(np.shape(F)), dtype=complex)
     x,w = roots_legendre(N)
     x = np.real(x)
-    print(f'Real integration over {N} points...')
+    if showText:
+        print(f'Real integration over {N} points...')
     for i, val in enumerate(x):
         E = mid*(val + 1) + Emin
         defInt += mid*w[i]*Gr(F, S, g, E)*fermi(E, mu, T)
-    print('Integration done!')
+    if showText:
+        print('Integration done!')
     
     return (-1+0j)*np.imag(defInt)/(np.pi)
 
@@ -144,7 +146,7 @@ def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=300):
     return den/(2*np.pi)
 
 # Get equilibrium density using a complex contour and a Gaussian quadrature
-def densityComplex(F, S, g, Emin, mu, N=100, T=300):
+def densityComplex(F, S, g, Emin, mu, N=100, T=300, showText=True):
     #Construct circular contour
     nKT= 5
     broadening = nKT*kB*T
@@ -153,7 +155,8 @@ def densityComplex(F, S, g, Emin, mu, N=100, T=300):
     r = (Emax-Emin)/2
     
     #Integrate along contour
-    print(f'Complex integration over {N} points...')
+    if showText:
+       print(f'Complex integration over {N} points...')
     lineInt = np.array(np.zeros(np.shape(F)), dtype=complex)
     x,w = roots_legendre(N)
     x = np.real(x)
@@ -165,13 +168,15 @@ def densityComplex(F, S, g, Emin, mu, N=100, T=300):
     
     #Add integration points for Fermi Broadening
     if T>0:
-        print('Integrating Fermi Broadening')
+        if showText:
+            print('Integrating Fermi Broadening')
         x,w = roots_legendre(N//10)
         x = np.real(x)
         for i, val in enumerate(x):
             E = broadening * (val) + mu
             lineInt += broadening*w[i]*Gr(F, S, g, E)*fermi(E, mu, T)
-    print('Integration done!')
+    if showText:
+        print('Integration done!')
 
     
     #Return -Im(Integral)/pi, Equation 19 in 10.1103/PhysRevB.63.245407
@@ -217,7 +222,7 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
 
     # Calculate Emin using DOS
     D,_ = LA.eig(LA.inv(S)@F)
-    Emin = min(D.real.flatten())
+    Emin = min(D.real.flatten())-1
     counter = 0
     dP = DOSg(F,S,g,Emin)
     while dP>tol and counter<maxcycles:
@@ -248,7 +253,7 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
     counter = 0
     Nreal = 8
     dP = 100
-    rho = np.ones(np.shape(F))
+    rho = np.zeros(np.shape(F))
     while dP > tol and Nreal < maxcycles:
         Nreal *= 2 # Start with 16 points, double each time
         rho_ = np.real(densityReal(F, S, g, Eminf, Emin, Nreal, T=0))
@@ -290,18 +295,19 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e
     # Fermi Energy search using full contact
     print(f'Eminf DOS = {DOSg(g.F,g.S,g,Eminf)}')
     fermi = fermiGuess
-    pLow = densityReal(g.F, g.S, g, Eminf, Emin, N2, T=0)
+    pLow = densityReal(g.F, g.S, g, Eminf, Emin, N2, T=0, showText=False)
     nELow = np.trace(pLow@g.S)
     print(f'Electrons below lowest onsite energy: {nELow}')
     if nELow >= ne:
         raise Exception('Calculated Fermi energy is below lowest orbital energy!')
-    pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, N1, T=0)
+    pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, N1, T=0, showText=False)
     
     # Fermi search using bisection method (F not changing, highly stable)
     Ncurr = -1
     counter = 0 
     lBound = Emin
     uBound = Emax
+    print('Calculating Fermi energy using bisection:')
     while abs(ne - Ncurr) > tol and counter < maxcycles:
         p_ = np.real(pLow+pMu(fermi))
         Ncurr = np.trace(p_@g.S)
@@ -312,6 +318,8 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e
             uBound = fermi
         fermi = (uBound + lBound)/2
         print("DN:",dN, "Fermi:", fermi, "Bounds:", lBound, uBound)
+        counter += 1
     if abs(ne - Ncurr) > tol and counter > maxcycles:
         print(f'Warning: Fermi energy still not within tolerance! Ef = {fermi:.2f} eV, N = {Ncurr:.2f})')
+    print(f'Finished after {counter} iterations, Ef = {fermi:.2f}')
     return fermi, Emin, N1, N2

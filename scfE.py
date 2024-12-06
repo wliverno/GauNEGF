@@ -41,7 +41,7 @@ class NEGFE(NEGF):
         inds = super().setContacts(contactList[0], contactList[-1])
         self.lInd = inds[0]
         self.rInd = inds[1]
-        self.g = surfGB(self.F, self.S, contactList, self.bar, file, eta)
+        self.g = surfGB(self.F, self.S, contactList, self.bar, file, self.spin, eta)
         self.setIntegralLimits(100, 50)
         self.T = T
         return inds
@@ -137,7 +137,7 @@ class NEGFE(NEGF):
         Fock_old = self.F.copy()
         dE = super().PToFock()
         self.F, self.locs = getFock(self.bar, self.spin)
-        self.g.setF(self.F*har_to_eV)
+        self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
        
         # Debug:
         #D,V = LA.eig(self.X@(Fock_old*har_to_eV)@self.X) 

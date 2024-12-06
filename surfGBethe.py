@@ -3,17 +3,24 @@ import numpy as np
 from numpy import linalg as LA
 from scipy.linalg import fractional_matrix_power
 
+# Developed packages
+from density import *
+
 #Constants
 kB = 8.617e-5           # eV/Kelvin
 dim = 9                 # size of single atom matrix: 1s + 3p + 5d
+har_to_eV = 27.211386   # eV/Hartree
+Eminf = -1e6            # Setting lower bound to -1e6 eV
+
 class surfGB:
-    def __init__(self, F, S, contacts, bar, file='Au', eta=1e-9):
+    def __init__(self, F, S, contacts, bar,  file='Au', spin='r', eta=1e-9):
         #Read contact/orbital information and store
         self.cVecs = []
         self.latVecs = []
         self.indsLists = []
         self.dirLists = []
-        self.N = bar.nbasis
+        self.N = len(F)
+        self.spin = spin
         for contact in contacts:
             indsList = []
             cList = []
@@ -50,9 +57,14 @@ class surfGB:
                 Vlist.append(self.construct_mat(self.Vdict, d))
             self.Slists.append(Slist)
             self.Vlists.append(Vlist)
+        # Use surfGBAt() object to store the atomic Bethe lattice green's function for each contact
+        self.gList = [surfGBAt(H, Slist, Vlist, eta) for H, Slist, Vlist in zip(self.Hlist, self.Slists, self.Vlists)]
         
+        for g in self.gList:
+            g.calcFermi(self.ne)
+
         # Store variables
-        self.cList = cList #Used for testing
+        self.cList = cList #first contact coords, used for testing
         self.F = F
         self.S = S
         self.eta = eta
@@ -137,47 +149,25 @@ class surfGB:
         
         # Check to make sure parameters are all specified
         # Note: set up only for minimal basis with single s, p, and d orbital
-        expected_keys = ['es', 'ep', 'edd', 'edt', 'sss', 'sps', 'pps', 'ppp',
+        expected_keys = ['ne', 'es', 'ep', 'edd', 'edt', 'sss', 'sps', 'pps', 'ppp',
                         'sds', 'pds', 'pdp', 'dds', 'ddp', 'ddd', 'Ssss', 'Ssps',
                         'Spps', 'Sppp', 'Ssds', 'Spds', 'Spdp', 'Sdds', 'Sddp', 'Sddd']
         assert len(params.keys()) == len(expected_keys) and set(params.keys()) == set(expected_keys), \
              f"Error reading file: Found Bethe parameters: {list(params.keys())}, expected: {expected_keys}"
         
-        # sort parameters and return values 
-        self.Edict = {k[1:]:params[k] for k in params if k.startswith('e')}
+        # sort parameters and convert Hartrees to eV 
+        self.ne = params['ne']
+        if self.spin=='r':
+            print('Restricted --> Halving ne')
+            self.ne *= 0.5
+        self.Edict = {k[1:]:params[k]*har_to_eV for k in params if k.startswith('e')}
         self.Sdict = {k[1:]:params[k] for k in params if k.startswith('S')}
-        self.Vdict = {k:params[k] for k in params if not k.startswith('e') and not k.startswith('S')}
-        
-    def gAtom(self, E, i, conv=1e-5, relFactor=0.9):
-        Slist = self.Slists[i]
-        Vlist = self.Vlists[i]
-        #Construct matrices for Dyson equation
+        self.Vdict = {k:params[k]*har_to_eV for k in params if not k.startswith('e') and not k.startswith('S')}
+        # Setup onsite H0 matrix before Fermi level shifting
         H0 = np.diag([self.Edict['s']]+ [self.Edict['p']]*3 + \
                      [self.Edict['dt']]*3 + [self.Edict['dd']]*2)
-        A = (E - self.eta*1j)*np.eye(dim) - H0
-        B = np.zeros((dim, dim), dtype=complex)
-        #Sum up hopping contributions from each neighbor
-        for k in range(len(Slist)): 
-            B += (E - self.eta*1j)*Slist[k] - Vlist[k]
-        g = LA.inv(A) #Initial guess
-        
-        #Self-consistency loop 
-        count = 0
-        maxIter = int(1/(conv*relFactor))*10
-        diff = conv+1
-        while diff>conv and count<maxIter:
-            g_ = g.copy()
-            g = LA.inv(A - B@g@B.conj().T) #Dyson equation
-            dg = abs(g-g_)/(abs(g).max())
-            g = g*relFactor + g_*(1-relFactor)
-            diff = dg.max()
-            count = count+1
-        if diff>conv:
-            print(f'Warning: exceeded max iterations! E: {E}, Conv: {diff}')
-        #DEBUG:
-        #print(f'gAtom converged in {count} iterations: {diff}')
-        return g
-            
+        self.Hlist = [H0 for indsList in self.indsLists]
+
     def construct_mat(self, Mdict, dirCosines):
         """
         Construct hopping matrix for octahedral direction (l,m,n)
@@ -236,15 +226,8 @@ class surfGB:
         return M
     
     def sigma(self, E, i, conv=1e-5):
-        Slist = self.Slists[i]
-        Vlist = self.Vlists[i]
-        #Sum up hopping contributions from each neighbor
-        gAt = self.gAtom(E, i, conv)
-        sigAtom = np.zeros((dim, dim), dtype=complex)
-        for k in range(len(Slist)): 
-            B = (E - self.eta*1j)*Slist[k] - Vlist[k]
-            sigAtom += B.conj().T@gAt@B
         sig = np.zeros((self.N, self.N), dtype=complex)
+        sigAtom = self.gList[i].sigmaTot(E, conv)
         for inds in self.indsLists[i]:
             sig[np.ix_(inds, inds)] = sigAtom
         return sig
@@ -254,7 +237,124 @@ class surfGB:
         for i in range(len(self.indsLists)):
             sig+= self.sigma(E, i, conv)
         return sig
-   
-    # Required to use with other linked packages
-    def setF(self,F):
+    
+    # Update contact i with a new fermi energy (Ef) by shifting all onsite energies
+    def updateFermi(self, i, Ef):
+        fermiPrev = self.gList[i].fermi
+        print(f'Changing contact {i+1} fermi energy: {fermiPrev} --> {Ef}')
+        dFermi = Ef - fermiPrev
+        dH = np.eye(dim)*dFermi
+        self.gList[i].H += dH 
+        self.gList[i].fermi = Ef
+    
+    # Fermi levels used to update onsite energies, Fock matrix unused 
+    def setF(self,F, muL, muR):
         self.F = F
+        if self.gList[0].fermi != muL:
+            self.updateFermi(0, muL)
+        if self.gList[-1].fermi != muR:
+            self.updateFermi(-1, muR) 
+
+# Bethe lattice surface Green's function for a single atom
+class surfGBAt:
+    def __init__(self, H, Slist, Vlist, eta):
+        assert np.shape(H) == (dim,dim), f"Error with H dim, should be {dim}x{dim}"
+        for S,V in zip(Slist, Vlist):
+            assert np.shape(S) == (dim,dim), f"Error with S dim, should be {dim}x{dim}"
+            assert np.shape(V) == (dim,dim), f"Error with F dim, should be {dim}x{dim}"
+        self.H = H
+        self.Slist = Slist
+        self.Vlist = Vlist
+        self.eta = eta
+        self.Eprev = None
+        self.gprev = None
+
+        # For compatibility with density methods:
+        self.F = self.H
+        self.S = np.eye(dim)
+    
+    # Calculate surface Green's function, i is a dummy variable for compatibility
+    def g(self, E, i, conv=1e-5, mix=0.5):
+        #Construct matrices for Dyson equation
+        A = (E - self.eta*1j)*np.eye(dim) - self.H
+        B = np.zeros((dim, dim), dtype=complex)
+        #Sum up hopping contributions from each neighbor
+        for S, V in zip(self.Slist,self.Vlist):
+            B += (E - self.eta*1j)*S - V
+        
+        # Use previous solution if available and close in energy
+        if self.gprev is not None and self.Eprev is not None:
+            if abs(E - self.Eprev) < 1: 
+                g = self.gprev
+            else:                   # Otherwise generate guess with 1 cycle
+                g = LA.inv(A)
+                g = LA.inv(A - B@g@B.conj().T)
+                
+        else:
+            g = LA.inv(A)
+            g = LA.inv(A - B@g@B.conj().T)
+        self.Eprev= E
+        
+        #Self-consistency loop 
+        count = 0
+        maxIter = int(1/(conv*mix))*10
+        diff = np.inf
+        while diff > conv and count < maxIter:
+            g_ = g.copy()
+            g_new = LA.inv(A - B@g@B.conj().T) #Dyson Equation
+            dg = abs(g_new - g_)/(abs(g_).max())
+            diff = dg.max()
+            g = g_new * mix + g_ * (1-mix)
+            count += 1
+        if diff>conv:
+            print(f'Warning: exceeded max iterations! E: {E}, Conv: {diff}')
+        #DEBUG:
+        if count>1000:
+            print(f'gAtom at {E:.2e} converged in {count} iterations: {diff}')
+        return g
+    
+    # Return self-energy matrix associated with single atom
+    def sigmaTot(self, E, conv=1e-5):
+        sig = np.zeros((dim,dim), dtype=complex)
+        g = self.g(E, 0, conv)
+        for S, V in zip(self.Slist,self.Vlist):
+            B = (E - self.eta*1j)*S - V
+            sig += B.conj().T@g@B
+        return sig
+    
+    # Adding this function for compatibility
+    def sigma(self, E, i, conv=1e-5):
+        return self.sigmaTot(E, conv=1e-5)
+   
+    # Calculate fermi energy using bisection (to specified tolerance)
+    def calcFermi(self, ne, fGuess=5, tol=1e-3):
+        Emin = min(np.diag(self.H))
+        Emax = max(np.diag(self.H))
+        maxCycles = 1000
+        cycles = 0
+        calcN = 0
+        Nint = 200
+        calcN_ = np.inf
+        # Main loop for calculating Emin/Emax integration limits
+        while abs(calcN - calcN_) > tol and cycles < maxCycles:
+            calcN_ = calcN +0.0
+            Emin -= 10
+            Emax += 10
+            # recalculate integration limits each iteration to ensure accuracy
+            Nint = 8
+            MaxDP = np.inf
+            rho = np.eye(dim)
+            while MaxDP > tol and Nint < 1e3:
+                Nint *= 2
+                rho_ = rho.copy()
+                rho = np.real(densityComplex(self.H, np.eye(dim), self, Emin, Emax, Nint, T=0, showText=False))
+                MaxDP = max(np.diag(abs(rho_ - rho)))
+            if Nint > 1e3:
+                print(f'Warning: MaxDP above tolerance (val = {MaxDP:.3E})')
+            calcN = sum(np.diag(rho))
+            print(f"Range: {Emin}, {Emax} - Err = {calcN - calcN_}")
+        if cycles == maxCycles:
+            print(f"Warning: Energy range ({Emin}, {Emax}) not converged (val = {calcN - dim})")
+        self.fermi = calcFermi(self, ne, Emin, Emax, fGuess, Nint, 1, Eminf, tol)[0]
+        return self.fermi
+

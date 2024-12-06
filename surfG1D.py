@@ -91,7 +91,7 @@ class surfG:
         self.gPrev[i] = g
         return g
     
-    def setF(self, F):
+    def setF(self, F, mu1, mu2):
         self.F = F
         if self.tauFromFock:
             taus = self.tauInds
@@ -100,7 +100,7 @@ class surfG:
             self.F[np.ix_(indsList[-1], indsList[-1])] = self.F[np.ix_(taus[1], taus[1])].copy()
             self.tauList = [self.F[np.ix_(taus[0],indsList[0])], self.F[np.ix_(taus[1],indsList[-1])]]
             self.stauList = [self.S[np.ix_(taus[0],indsList[0])], self.S[np.ix_(taus[1],indsList[-1])]]
-        if self.contactFromFock:
+        if self.contactFromFock: #TODO: fermi level shifting
             self.setContacts()
     
     def sigma(self, E, i, conv=1e-5):
