@@ -19,16 +19,22 @@ class surfGB:
         self.latVecs = []
         self.indsLists = []
         self.dirLists = []
-        self.N = len(F)
+        
+        # Spin independent implementation, add generate spin terms during sigma generation
         self.spin = spin
+        orbMap = bar.ibfatm[bar.ibfatm>0] 
+        orbTyp = bar.ibftyp[bar.ibfatm>0]
+        self.N = len(orbMap)
+
+        # Collect contact information
         for contact in contacts:
             indsList = []
             cList = []
             for atom in contact:
-                inds = np.where(np.isin(bar.ibfatm, atom))[0]
+                inds = np.where(np.isin(orbMap, atom))[0]
                 cList.append(bar.c[(atom-1)*3:atom*3])
                 assert len(inds) == 9, f'Error: Atom {atom} has {len(inds)} basis functions, expecting 9'
-                inds = inds[np.argsort(abs(bar.ibftyp[inds])//1000)]
+                inds = inds[np.argsort(abs(orbTyp[inds])//1000)]
                 indsList.append(inds)
             self.indsLists.append(indsList)
             # Calculate plane direction using SVD
@@ -61,7 +67,7 @@ class surfGB:
         self.gList = [surfGBAt(H, Slist, Vlist, eta) for H, Slist, Vlist in zip(self.Hlist, self.Slists, self.Vlists)]
         
         for g in self.gList:
-            g.calcFermi(self.ne)
+            g.calcFermi(self.ne/2)
 
         # Store variables
         self.cList = cList #first contact coords, used for testing
@@ -157,9 +163,6 @@ class surfGB:
         
         # sort parameters and convert Hartrees to eV 
         self.ne = params['ne']
-        if self.spin=='r':
-            print('Restricted --> Halving ne')
-            self.ne *= 0.5
         self.Edict = {k[1:]:params[k]*har_to_eV for k in params if k.startswith('e')}
         self.Sdict = {k[1:]:params[k] for k in params if k.startswith('S')}
         self.Vdict = {k:params[k]*har_to_eV for k in params if not k.startswith('e') and not k.startswith('S')}
@@ -181,6 +184,7 @@ class surfGB:
         # s-p --  o-8 vs o-∞
         for i in range(3):
             M[0,i+1] = Mdict['sps'] * dirCosines[i]
+            M[i+1, 0] = -M[0, i+1]
         
         # p-p  -- 8-8 vs ∞-∞ vs ∞-8
         for i in range(3):
@@ -219,9 +223,16 @@ class surfGB:
             d_i = dFuncs[i]
             for j in range(5):  # second d orbital
                 d_j = dFuncs[j]
-                M[4+i,4+j] = Mdict['dds'] * (d_i * d_j) + \
-                             Mdict['ddp'] * (1 - (d_i*d_j)) + \
-                             Mdict['ddd'] * (1-(d_i**2))*(1-(d_j**2))
+                sigma = d_i * d_j
+                pi = 0
+                for k in range(3):
+                    if dirCosines[k] != 0:
+                        pi += (d_i * dirCosines[k]) * (d_j * dirCosines[k])
+                pi = sigma - pi
+                delta = 1 - sigma - pi
+                M[4+i,4+j] = Mdict['dds'] * sigma+ \
+                             Mdict['ddp'] * pi + \
+                             Mdict['ddd'] * delta
                 
         return M
     
@@ -230,18 +241,25 @@ class surfGB:
         sigAtom = self.gList[i].sigmaTot(E, conv)
         for inds in self.indsLists[i]:
             sig[np.ix_(inds, inds)] = sigAtom
+        if self.spin == 'u' or self.spin == 'ro':
+            sig = np.kron(np.eye(2), sig)
+        elif self.spin =='g':
+            sig = np.kron(sig, np.eye(2))
         return sig
     
     def sigmaTot(self, E, conv=1e-5):
-        sig = np.zeros((self.N, self.N), dtype=complex)
-        for i in range(len(self.indsLists)):
-            sig+= self.sigma(E, i, conv)
-        return sig
+        sigs = [self.sigma(E, i, conv) for i in range(len(self.indsLists))]
+        return sum(sigs)
     
     # Update contact i with a new fermi energy (Ef) by shifting all onsite energies
     def updateFermi(self, i, Ef):
         fermiPrev = self.gList[i].fermi
-        print(f'Changing contact {i+1} fermi energy: {fermiPrev} --> {Ef}')
+        if i==-1:
+            print(f'Changing right contact fermi energy: {fermiPrev} --> {Ef}')
+        elif i==0:
+            print(f'Changing left contact fermi energy: {fermiPrev} --> {Ef}')
+        else:
+            print(f'Changing contact {i+1} fermi energy: {fermiPrev} --> {Ef}')
         dFermi = Ef - fermiPrev
         dH = np.eye(dim)*dFermi
         self.gList[i].H += dH 
@@ -265,9 +283,10 @@ class surfGBAt:
         self.H = H
         self.Slist = Slist
         self.Vlist = Vlist
+        self.NN = len(Slist)
         self.eta = eta
-        self.Eprev = None
-        self.gprev = None
+        self.sigmaKprev = None
+        self.Eprev = Eminf
 
         # For compatibility with density methods:
         self.F = self.H
@@ -275,51 +294,46 @@ class surfGBAt:
     
     # Calculate surface Green's function, i is a dummy variable for compatibility
     def g(self, E, i, conv=1e-5, mix=0.5):
-        #Construct matrices for Dyson equation
-        A = (E - self.eta*1j)*np.eye(dim) - self.H
-        B = np.zeros((dim, dim), dtype=complex)
-        #Sum up hopping contributions from each neighbor
-        for S, V in zip(self.Slist,self.Vlist):
-            B += (E - self.eta*1j)*S - V
-        
-        # Use previous solution if available and close in energy
-        if self.gprev is not None and self.Eprev is not None:
-            if abs(E - self.Eprev) < 1: 
-                g = self.gprev
-            else:                   # Otherwise generate guess with 1 cycle
-                g = LA.inv(A)
-                g = LA.inv(A - B@g@B.conj().T)
-                
+        #Initialize sigmaK and A matrices for Dyson equation
+        if self.sigmaKprev is not None and self.Eprev != Eminf and abs(self.Eprev - E) <1:
+            sigmaK = self.sigmaKprev.copy()
         else:
-            g = LA.inv(A)
-            g = LA.inv(A - B@g@B.conj().T)
-        self.Eprev= E
+            sigmaK = np.array([np.eye(dim)*(1*self.eta) for k in range(self.NN)], dtype=complex)
+        A = (E + self.eta*1j)*np.eye(dim) - self.H
+        
         
         #Self-consistency loop 
         count = 0
         maxIter = int(1/(conv*mix))*10
         diff = np.inf
         while diff > conv and count < maxIter:
-            g_ = g.copy()
-            g_new = LA.inv(A - B@g@B.conj().T) #Dyson Equation
-            dg = abs(g_new - g_)/(abs(g_).max())
-            diff = dg.max()
-            g = g_new * mix + g_ * (1-mix)
+            sigmaK_ = sigmaK.copy()
+            for k in range(self.NN):
+                sigTot = np.sum(sigmaK, axis=0) - sigmaK[k]
+                gK = LA.inv(A - sigTot)
+                B = (E + self.eta*1j)*self.Slist[k] - self.Vlist[k]
+                sigmaK[k] = B.conj().T@gK@B
+            sigmaK = mix*sigmaK + (1-mix)*sigmaK_
+            diff = np.max(np.abs(sigmaK - sigmaK_))/np.max(np.abs(sigmaK_))
             count += 1
         if diff>conv:
             print(f'Warning: exceeded max iterations! E: {E}, Conv: {diff}')
+        
         #DEBUG:
         if count>1000:
             print(f'gAtom at {E:.2e} converged in {count} iterations: {diff}')
-        return g
+        
+        self.sigmaKprev = sigmaK
+        self.Eprev= E
+        return LA.inv(A -  np.sum(sigmaK, axis=0))
     
     # Return self-energy matrix associated with single atom
     def sigmaTot(self, E, conv=1e-5):
         sig = np.zeros((dim,dim), dtype=complex)
-        g = self.g(E, 0, conv)
+        gSurf = self.g(E, 0, conv)
         for S, V in zip(self.Slist,self.Vlist):
-            B = (E - self.eta*1j)*S - V
-            sig += B.conj().T@g@B
+            B = (E + self.eta*1j)*S - V
+            sig += B.conj().T@gSurf@B
         return sig
     
     # Adding this function for compatibility
@@ -336,8 +350,7 @@ class surfGBAt:
         Nint = 200
         calcN_ = np.inf
         # Main loop for calculating Emin/Emax integration limits
-        while abs(calcN - calcN_) > tol and cycles < maxCycles:
-            calcN_ = calcN +0.0
+        while abs(calcN - dim) > tol and cycles < maxCycles:
             Emin -= 10
             Emax += 10
             # recalculate integration limits each iteration to ensure accuracy
@@ -352,7 +365,7 @@ class surfGBAt:
             if Nint > 1e3:
                 print(f'Warning: MaxDP above tolerance (val = {MaxDP:.3E})')
             calcN = sum(np.diag(rho))
-            print(f"Range: {Emin}, {Emax} - Err = {calcN - calcN_}")
+            print(f"Range: {Emin}, {Emax} - calcN = {calcN}")
         if cycles == maxCycles:
             print(f"Warning: Energy range ({Emin}, {Emax}) not converged (val = {calcN - dim})")
         self.fermi = calcFermi(self, ne, Emin, Emax, fGuess, Nint, 1, Eminf, tol)[0]
