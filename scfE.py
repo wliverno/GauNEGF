@@ -101,7 +101,7 @@ class NEGFE(NEGF):
     
     # Get left and right contact self-energies at specified energy
     def getSigma(self, E):
-        return (self.g.sigma(E, 0), self.g.sigma(E, 1))
+        return (self.g.sigma(E, 0), self.g.sigma(E, -1))
 
     # Updated to use energy-dependent contour integral from surfG()
     def FockToP(self):
@@ -155,6 +155,7 @@ class NEGFE(NEGF):
             acc = self.fSearch.get_accuracy()
             print(f'Fermi Energy set to {self.fermi:.2f} eV, Accuracy = +/- {acc:.2E} eV')
             self.setVoltage(self.qV)
+            self.setF(self.F, self.mu1, self.mu2)
             self.nFermiUpd = 0
         else:
             self.nFermiUpd += 1
