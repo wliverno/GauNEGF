@@ -155,7 +155,7 @@ class NEGFE(NEGF):
             acc = self.fSearch.get_accuracy()
             print(f'Fermi Energy set to {self.fermi:.2f} eV, Accuracy = +/- {acc:.2E} eV')
             self.setVoltage(self.qV)
-            self.setF(self.F, self.mu1, self.mu2)
+            self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
             self.nFermiUpd = 0
         else:
             self.nFermiUpd += 1
