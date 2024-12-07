@@ -301,15 +301,14 @@ class surfGBAt:
             sigmaK = np.array([np.eye(dim)*(1*self.eta) for k in range(self.NN)], dtype=complex)
         A = (E + self.eta*1j)*np.eye(dim) - self.H
         
-        
         #Self-consistency loop 
         count = 0
         maxIter = int(1/(conv*mix))*10
         diff = np.inf
         while diff > conv and count < maxIter:
             sigmaK_ = sigmaK.copy()
+            sigTot = np.sum(sigmaK, axis=0)
             for k in range(self.NN):
-                sigTot = np.sum(sigmaK, axis=0) - sigmaK[k]
                 gK = LA.inv(A - sigTot)
                 B = (E + self.eta*1j)*self.Slist[k] - self.Vlist[k]
                 sigmaK[k] = B.conj().T@gK@B

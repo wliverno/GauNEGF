@@ -135,6 +135,9 @@ class NEGF(object):
                 
     # Set voltage and fermi energy, update electric field applied and integral limits
     def setVoltage(self, qV, fermi=np.nan, Emin=None, Eminf=None):
+        # Check to make sure contacts set 
+        assert hasattr(self, 'rInd') and hasattr(self,'lInd'), "Contacts not set!"
+
         # Set Fermi Energy
         if np.isnan(fermi):
             self.updFermi = True
@@ -331,8 +334,7 @@ class NEGF(object):
         print(f'MaxDP: {self.MaxDP:.2E} | RMSDP: {RMSDP:.2E}')
         return RMSDP, self.MaxDP
 
-    # Use Gaussian to calculate the Density Matrix, apply damping factor
-    # Edamp - when True, add multiple additional 0.1 damp when energy increases
+    # Use Gaussian to calculate the density matrix 
     def PToFock(self):
         # Run Gaussian, update SCF Energy
         try:
