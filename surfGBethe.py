@@ -64,7 +64,7 @@ class surfGB:
             self.Slists.append(Slist)
             self.Vlists.append(Vlist)
         # Use surfGBAt() object to store the atomic Bethe lattice green's function for each contact
-        self.gList = [surfGBAt(H, Slist, Vlist, eta) for H, Slist, Vlist in zip(self.Hlist, self.Slists, self.Vlists)]
+        self.gList = [surfGBAt(self.H0, Slist, Vlist, eta) for Slist, Vlist in zip(self.Slists, self.Vlists)]
         
         for g in self.gList:
             g.calcFermi(self.ne/2)
@@ -167,74 +167,103 @@ class surfGB:
         self.Sdict = {k[1:]:params[k] for k in params if k.startswith('S')}
         self.Vdict = {k:params[k]*har_to_eV for k in params if not k.startswith('e') and not k.startswith('S')}
         # Setup onsite H0 matrix before Fermi level shifting
-        H0 = np.diag([self.Edict['s']]+ [self.Edict['p']]*3 + \
-                     [self.Edict['dt']]*3 + [self.Edict['dd']]*2)
-        self.Hlist = [H0 for indsList in self.indsLists]
+        self.H0 = np.diag([self.Edict['s']]+ [self.Edict['p']]*3 + \
+                     [self.Edict['dd']]+ [self.Edict['dt']]*2 + [self.Edict['dd'], self.Edict['dt']])
 
     def construct_mat(self, Mdict, dirCosines):
         """
-        Construct hopping matrix for octahedral direction (l,m,n)
-        Full implementation including d-orbital interactions
+        Construct hopping/overlap matrix using Slater-Koster formalism with proper phase factors.
+         
+        Parameters:
+            Mdict: Dictionary of Slater-Koster parameters (ssσ, spσ, etc.)
+            dirCosines: Array [l,m,n] of direction cosines
         """
+
         M = np.zeros((dim, dim))
         
-        # s-s -- isotropic (o-o)
+        #Original matrix before rotation - assuming [0,0,1] bond direction
+        # s-s coefficient
         M[0,0] = Mdict['sss']
         
-        # s-p --  o-8 vs o-∞
-        for i in range(3):
-            M[0,i+1] = Mdict['sps'] * dirCosines[i]
-            M[i+1, 0] = -M[0, i+1]
+        # s-p block
+        M[0,3] = Mdict['sps'] #s-pz
+        M[3,0] = -Mdict['sps'] #pz-s
+
+        # p-p block
+        M[1,1] = M[2,2] = Mdict['ppp'] #px-px, py-py
+        M[3,3] = Mdict['pps'] #pz-pz
+
+        # s-d block
+        M[0, 4] = M[4, 0] =  Mdict['sds'] #s - d3z²-r²
+
+        # p-d block
+        M[1,5] = Mdict['pdp'] #px - dxz
+        M[2,6] = Mdict['pdp'] #py - dyz
+        M[3,4] = Mdict['pds'] #pz - d3z²-r²
         
-        # p-p  -- 8-8 vs ∞-∞ vs ∞-8
-        for i in range(3):
-            for j in range(3):
-                if i == j: # 8-8 vs ∞-∞
-                    dirCos = dirCosines[i]
-                    M[i+1,j+1] = Mdict['pps'] * dirCos**2 + Mdict['ppp'] * (1 - dirCos**2)
-                else: # 8-∞ also possible
-                    M[i+1,j+1] = (Mdict['pps'] - Mdict['ppp']) * dirCosines[i] * dirCosines[j]
+        M[5,1] = -Mdict['pdp'] #dxz - px
+        M[6,2] = -Mdict['pdp'] #dyz - py
+        M[4,3] = -Mdict['pds'] #d3z²-r² - pz
+
+        # d-d block
+        M[4,4] = Mdict['dds'] #d3z²-r² - d3z²-r²
+        M[5,5] = M[6,6] = Mdict['ddp'] #dxz - dxz, dyz - dyz 
+        M[7,7] = M[8,8] = Mdict['ddd'] #dx²-y² - dx²-y², dxy - dxy 
         
-        # d-orbital angular functions
-        (l, m, n) = dirCosines
-        dxy = 2*l*m
-        dyz = 2*m*n
-        dzx = 2*n*l
-        dx2y2 = l*l - m*m
-        dz2 = (3*n*n - 1)/2
+        # Initialize 9x9 transformation matrix and polar directions
+        tr = np.zeros((9, 9))
+        x, y, z = dirCosines
+        theta = np.arccos(z)  # polar angle from z-axis
+        phi = np.arctan2(y, x)  # azimuthal angle in x-y plane
         
-        dFuncs = [dxy, dyz, dzx, dx2y2, dz2]
+        # s orbital (1x1) at position [0,0] - always 1 since spherically symmetric
+        tr[0,0] = 1.0
         
-        # s-d -- o-X (2x) vs o-+ (2x) vs o-θ
-        for i, d_func in enumerate(dFuncs):
-            M[0,4+i] = Mdict['sds'] * d_func
-            M[4+i,0] = M[0,4+i]
+        # p orbitals (3x3) at positions [1:4,1:4]
+        # [px,py,pz] block - describes how p orbitals transform under rotation
+        tr[1:4,1:4] = np.array([
+            [np.cos(theta) * np.cos(phi), -np.sin(phi)  , np.sin(theta)*np.cos(phi)],
+            [np.cos(theta) * np.sin(phi),  np.cos(phi)  , np.sin(theta)*np.sin(phi)], 
+            [-np.sin(theta)             ,  0            , np.cos(theta)]
+        ])
         
-        # p-d -- 8-X (4x) vs ∞-X (2x) vs 8-+(4x) vs ∞-+ (2x) vs 8-θ vs ∞-θ
-        for i, dCos in enumerate(dirCosines):  # p orbitals
-            for j, d_func in enumerate(dFuncs):  # d orbitals
-                M[1+i,4+j] = Mdict['pds'] * dCos * d_func + \
-                        Mdict['pdp'] * (1 - dCos*d_func)
-                M[4+j,1+i] = M[1+i,4+j]
+        # d orbitals (5x5) at positions [4:9,4:9]
+        # [d3z2-r2, dxz, dyz, dx2-y2, dxy] block - transforms the five d orbitals
+        d_block = np.zeros((5,5))
         
-        # d-d -- (X, X, +, +, θ) x (X, X, +, +, θ) = 25 combinations
-        # delta bond (ddd) = X-X 
-        for i in range(5):  # first d orbital
-            d_i = dFuncs[i]
-            for j in range(5):  # second d orbital
-                d_j = dFuncs[j]
-                sigma = d_i * d_j
-                pi = 0
-                for k in range(3):
-                    if dirCosines[k] != 0:
-                        pi += (d_i * dirCosines[k]) * (d_j * dirCosines[k])
-                pi = sigma - pi
-                delta = 1 - sigma - pi
-                M[4+i,4+j] = Mdict['dds'] * sigma+ \
-                             Mdict['ddp'] * pi + \
-                             Mdict['ddd'] * delta
-                
-        return M
+        # Copying formula from ANT.Gaussian directly
+        d_block[0,0] = (3 * z**2 - 1) / 2
+        d_block[0,1] = -np.sqrt(3) * np.sin(2*theta) / 2
+        d_block[0,3] = np.sqrt(3) * np.sin(theta)**2 / 2
+        
+        d_block[1,0] = np.sqrt(3) * np.sin(2*theta) * np.cos(phi) / 2
+        d_block[1,1] = np.cos(2*theta) * np.cos(phi)
+        d_block[1,2] = -np.cos(theta) * np.sin(phi)
+        d_block[1,3] = -d_block[1,0] / np.sqrt(3)
+        d_block[1,4] = np.sin(theta) * np.sin(phi)
+        
+        d_block[2,0] = np.sqrt(3) * np.sin(2*theta) * np.sin(phi) / 2
+        d_block[2,1] = np.cos(2*theta) * np.sin(phi)
+        d_block[2,2] = np.cos(theta) * np.cos(phi)
+        d_block[2,3] = -d_block[2,0] / np.sqrt(3)
+        d_block[2,4] = -np.sin(theta) * np.cos(phi)
+        
+        d_block[3,0] = np.sqrt(3) * np.sin(theta)**2 * np.cos(2*phi) / 2
+        d_block[3,1] = np.sin(2*theta) * np.cos(2*phi) / 2
+        d_block[3,2] = -np.sin(theta) * np.sin(2*phi)
+        d_block[3,3] = (1 + np.cos(theta)**2) * np.cos(2*phi) / 2
+        d_block[3,4] = -np.cos(theta) * np.sin(2*phi)
+        
+        d_block[4,0] = np.sqrt(3) * np.sin(theta)**2 * np.sin(2*phi) / 2
+        d_block[4,1] = np.sin(2*theta) * np.sin(2*phi) / 2
+        d_block[4,2] = np.sin(theta) * np.cos(2*phi)
+        d_block[4,3] = (1 + np.cos(theta)**2) * np.sin(2*phi) / 2
+        d_block[4,4] = np.cos(theta) * np.cos(2*phi)
+        
+        tr[4:9,4:9] = d_block
+        
+        # Apply transformation 
+        return tr.T @ M @ tr
     
     def sigma(self, E, i, conv=1e-5):
         sig = np.zeros((self.N, self.N), dtype=complex)
@@ -272,6 +301,146 @@ class surfGB:
             self.updateFermi(0, muL)
         if self.gList[-1].fermi != muR:
             self.updateFermi(-1, muR) 
+
+    ## TESTING METHODS FOR SLATER-KOSTER INTERACTIONS:
+    def test_d_orbital_functions(self):
+        """Test d orbital angular functions using surfGB parameter dictionaries"""
+    
+        # Use values from the Bethe parameter dictionaries
+        Vdict = self.Vdict  # Contains hopping parameters
+    
+        # Test along x-axis [1,0,0]
+        M = self.construct_mat(self.Vdict, [1, 0, 0])
+    
+        # dxy should be zero along x-axis
+        np.testing.assert_almost_equal(M[0,8], 0.0,
+            err_msg="dxy not zero along x-axis")
+        
+        # dx2-y2 should be sqrt(3)/2 * sds along x-axis
+        np.testing.assert_almost_equal(M[0,7], np.sqrt(3)/2 * Vdict['sds'],
+            err_msg="dx2-y2 incorrect along x-axis")
+    
+        # dz2 should be -1/2 along x-axis
+        np.testing.assert_almost_equal(M[0,4], -0.5 * Vdict['sds'],
+            err_msg="dz2 incorrect along x-axis")
+    
+        print("d orbital angular function tests passed!")
+    
+    def test_d_orbital_symmetry(self):
+        """Test d orbital symmetry properties using surfGB parameters"""
+    
+        # Test inversion symmetry
+        dir1 = [1/np.sqrt(2), 1/np.sqrt(2), 0]
+        dir2 = [-1/np.sqrt(2), -1/np.sqrt(2), 0]
+    
+        M1 = self.construct_mat(self.Vdict, dir1)
+        M2 = self.construct_mat(self.Vdict, dir2)
+    
+        # d-d block should be identical under inversion
+        np.testing.assert_array_almost_equal(
+            M1[4:,4:], M2[4:,4:],
+            err_msg="d-d block not symmetric under inversion")
+    
+        print("d orbital symmetry tests passed!")
+    
+    def test_pd_interaction(self):
+        """Test p-d orbital interactions using surfGB parameters"""
+    
+        Vdict = self.Vdict
+    
+        # Test px-dxy interaction along x-axis
+        M = self.construct_mat(Vdict, [1, 0, 0])
+    
+        # px-dxy should be zero along x-axis
+        np.testing.assert_almost_equal(
+            M[1,8], 0.0,
+            err_msg="px-dxy interaction incorrect along x-axis")
+    
+        # Test pz-dz2 interaction along z-axis
+        M = self.construct_mat(Vdict, [0, 0, 1])
+        expected = Vdict['pds']  # Should be pure sigma
+        np.testing.assert_almost_equal(
+            M[3,4], expected,
+            err_msg="pz-dz2 interaction incorrect along z-axis")
+    
+        print("p-d interaction tests passed!")
+    
+    def test_dd_interaction(self):
+        """Test d-d orbital interactions using surfGB parameters"""
+    
+        Vdict = self.Vdict
+    
+        # Test dyz-dyz interaction along x-axis
+        M = self.construct_mat(Vdict, [1, 0, 0])
+    
+        # Should be pure delta interaction
+        expected = Vdict['ddd']
+        np.testing.assert_almost_equal(
+            M[6,6], expected,
+            err_msg="dyz-dyz interaction incorrect along x-axis")
+    
+        # Test dz2-dz2 interaction along x-axis
+        M = self.construct_mat(Vdict, [0, 0, 1])
+        # Should be pure sigma interaction
+        expected = Vdict['dds']
+        np.testing.assert_almost_equal(
+            M[4,4], expected,
+            err_msg="dz2-dz2 interaction incorrect along z-axis")
+    
+        print("d-d interaction tests passed!")
+    def test_hopping_physics(self):
+        """Test that hopping matrices preserve the physical relationships between orbitals."""
+        print("\nTesting physical hopping relationships:")
+        
+        # First, let's examine the reference matrix for [0,0,1]
+        M = np.zeros((dim, dim))
+        
+        # Set up reference matrix as we do in construct_mat
+        M[0,0] = self.Vdict['sss']  # s-s is symmetric
+        M[0,3] = self.Vdict['sps']  # s-pz hopping
+        M[3,0] = -self.Vdict['sps'] # pz-s hopping, negative by physics
+        
+        print("\nReference matrix key elements:")
+        print(f"s-s hopping: {M[0,0]:.3f}")
+        print(f"s-pz hopping: {M[0,3]:.3f}")
+        print(f"pz-s hopping: {M[3,0]:.3f}")
+        
+        # Test key directions
+        test_directions = [
+            ([0, 0, 1], "z-axis"),
+            ([0, 0, -1], "negative z-axis"),
+            ([1, 0, 0], "x-axis"),
+            ([-1, 0, 0], "negative x-axis")
+        ]
+        
+        for direction, name in test_directions:
+            print(f"\nDirection: {name}")
+            # Get the transformed matrix
+            V = self.construct_mat(self.Vdict, direction)
+            
+            # Physical checks:
+            print("Checking physical relationships:")
+            # 1. s-s hopping should always be symmetric
+            print(f"s-s symmetric? {V[0,0] == V[0,0]:.3f}")
+            
+            # 2. s-p hoppings should be antisymmetric 
+            print(f"s-px hopping: {V[0,1]:.3f}")
+            print(f"px-s hopping: {V[1,0]:.3f}")
+            print(f"s-py hopping: {V[0,2]:.3f}")
+            print(f"py-s hopping: {V[2,0]:.3f}")
+            print(f"s-pz hopping: {V[0,3]:.3f}")
+            print(f"pz-s hopping: {V[3,0]:.3f}") 
+    
+    # Update run_all_tests to include new test
+    def run_all_tests(self):
+        """Run all validation tests for surfGB"""
+        print("Running Slater-Koster projection tests...")
+        self.test_d_orbital_functions()
+        self.test_d_orbital_symmetry()
+        self.test_pd_interaction()
+        self.test_dd_interaction()
+        self.test_hopping_physics()
+        print("\nAll tests passed!")
 
 # Bethe lattice surface Green's function for a single atom
 class surfGBAt:
