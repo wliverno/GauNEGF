@@ -261,7 +261,7 @@ class surfGB:
         d_block[4,4] = np.cos(theta) * np.cos(2*phi)
         
         tr[4:9,4:9] = d_block
-        
+             
         # Apply transformation 
         return tr.T @ M @ tr
     
@@ -389,49 +389,55 @@ class surfGB:
     
         print("d-d interaction tests passed!")
     def test_hopping_physics(self):
-        """Test that hopping matrices preserve the physical relationships between orbitals."""
-        print("\nTesting physical hopping relationships:")
+        """
+        Test physical properties of hopping matrices for different bond directions.
+        Verifies that hopping magnitudes and symmetries are preserved under rotation.
+        """
+        eps = 1e-10  # Tolerance for floating point comparisons
         
-        # First, let's examine the reference matrix for [0,0,1]
-        M = np.zeros((dim, dim))
+        # Get reference hopping values from [0,0,1] configuration
+        s_p_mag = abs(self.Vdict['sps'])  # Magnitude of s-p hopping
         
-        # Set up reference matrix as we do in construct_mat
-        M[0,0] = self.Vdict['sss']  # s-s is symmetric
-        M[0,3] = self.Vdict['sps']  # s-pz hopping
-        M[3,0] = -self.Vdict['sps'] # pz-s hopping, negative by physics
-        
-        print("\nReference matrix key elements:")
-        print(f"s-s hopping: {M[0,0]:.3f}")
-        print(f"s-pz hopping: {M[0,3]:.3f}")
-        print(f"pz-s hopping: {M[3,0]:.3f}")
-        
-        # Test key directions
-        test_directions = [
+        # Test set of physically important directions
+        test_cases = [
+            # Principal axes
             ([0, 0, 1], "z-axis"),
-            ([0, 0, -1], "negative z-axis"),
             ([1, 0, 0], "x-axis"),
-            ([-1, 0, 0], "negative x-axis")
+            ([0, 1, 0], "y-axis"),
+            
+            # 45-degree rotations
+            ([1/np.sqrt(2), 0, 1/np.sqrt(2)], "45° in xz-plane"),
+            ([0, 1/np.sqrt(2), 1/np.sqrt(2)], "45° in yz-plane"),
+            ([1/np.sqrt(2), 1/np.sqrt(2), 0], "45° in xy-plane"),
         ]
         
-        for direction, name in test_directions:
-            print(f"\nDirection: {name}")
-            # Get the transformed matrix
+        print("\nTesting hopping matrix physics...")
+        
+        for direction, name in test_cases:
+            direction = np.array(direction)
+            x, y, z = direction
+            
+            print(f"\nChecking {name} direction: [{x:.3f}, {y:.3f}, {z:.3f}]")
             V = self.construct_mat(self.Vdict, direction)
             
-            # Physical checks:
-            print("Checking physical relationships:")
-            # 1. s-s hopping should always be symmetric
-            print(f"s-s symmetric? {V[0,0] == V[0,0]:.3f}")
-            
-            # 2. s-p hoppings should be antisymmetric 
-            print(f"s-px hopping: {V[0,1]:.3f}")
-            print(f"px-s hopping: {V[1,0]:.3f}")
-            print(f"s-py hopping: {V[0,2]:.3f}")
-            print(f"py-s hopping: {V[2,0]:.3f}")
-            print(f"s-pz hopping: {V[0,3]:.3f}")
-            print(f"pz-s hopping: {V[3,0]:.3f}") 
+            # Check s-p hopping antisymmetry
+            for i in range(1, 4):  # Check all p orbitals
+                assert abs(V[0,i] + V[i,0]) < eps, \
+                    f"s-p hopping not antisymmetric for p{i}"
+                    
+            # Check total s-p hopping magnitude is preserved
+            s_p_total = np.sqrt(V[0,1]**2 + V[0,2]**2 + V[0,3]**2)
+            assert abs(s_p_total - s_p_mag) < eps, \
+                f"s-p hopping magnitude not preserved: {s_p_total:.6f} != {s_p_mag:.6f}"
+                
+            # Print values for verification
+            print(f"s-px: {V[0,1]:.3f}, px-s: {V[1,0]:.3f}")
+            print(f"s-py: {V[0,2]:.3f}, py-s: {V[2,0]:.3f}")
+            print(f"s-pz: {V[0,3]:.3f}, pz-s: {V[3,0]:.3f}")
+            print(f"Total s-p magnitude: {s_p_total:.3f}")
     
-    # Update run_all_tests to include new test
+        print("\nAll hopping physics tests passed!")    # Update run_all_tests to include new test
+
     def run_all_tests(self):
         """Run all validation tests for surfGB"""
         print("Running Slater-Koster projection tests...")
