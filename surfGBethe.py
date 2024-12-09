@@ -99,7 +99,7 @@ class surfGB:
         in_plane_vectors = []
         rotation_angle = np.pi / 3  # 60 degrees
         
-        for i in range(6):
+        for i in range(3):
             angle = i * rotation_angle
             # Rodrigues rotation formula
             cos_theta = np.cos(angle)
@@ -114,29 +114,33 @@ class surfGB:
             in_plane_vectors.append(rotated_vector / np.linalg.norm(rotated_vector))
         
         # Generate out-of-plane vectors
-        # We'll use a 45-degree angle for the out-of-plane component
-        out_of_plane_angle = np.pi / 4  # 45 degrees
+        out_of_plane_angle = np.arccos(1/3) / 2  # ~35.26 degrees
         
-        # Create base vector for out-of-plane components
-        out_of_plane_base = np.cos(out_of_plane_angle) * first_neighbor + \
-                           np.sin(out_of_plane_angle) * plane_normal
-        
-        # Generate 6 vectors in the next plane using the same 60-degree rotations
+                # Create vectors pointing up to next plane
         out_of_plane_vectors = []
-        for i in range(6):
-            angle = i * rotation_angle
+        out_of_plane_base = np.cos(out_of_plane_angle) * first_neighbor + \
+                  np.sin(out_of_plane_angle) * plane_normal
+        
+        for i in range(3):
+            angle = i * 2 * np.pi / 3  # 120 degree rotations
             cos_theta = np.cos(angle)
             sin_theta = np.sin(angle)
-            
+
             K = np.array([[0, -plane_normal[2], plane_normal[1]],
                          [plane_normal[2], 0, -plane_normal[0]],
                          [-plane_normal[1], plane_normal[0], 0]])
-            
+
             R = np.eye(3) + sin_theta * K + (1 - cos_theta) * np.matmul(K, K)
             rotated_vector = np.dot(R, out_of_plane_base)
-            out_of_plane_vectors.append(rotated_vector / np.linalg.norm(rotated_vector))
+            out_of_plane_vectors.append(rotated_vector)
         
-        return np.array(in_plane_vectors + out_of_plane_vectors)
+        # Add corresponding opposite vectors
+        all_vectors = in_plane_vectors + out_of_plane_vectors
+        for i in range(6):
+            all_vectors.append(-all_vectors[i])
+       
+        # Return vectors 
+        return all_vectors
 
     # Read parameters from filename.bethe file, check values, store into dicts
     def read_bethe_params(self, filename):
@@ -459,6 +463,7 @@ class surfGBAt:
         self.Slist = Slist
         self.Vlist = Vlist
         self.NN = len(Slist)
+        assert self.NN == 12, "Error: surfGBAt only implemented for FCC with 12 nearest neighbors"
         self.eta = eta
         self.sigmaKprev = None
         self.Eprev = Eminf
@@ -483,30 +488,36 @@ class surfGBAt:
         while diff > conv and count < maxIter:
             sigmaK_ = sigmaK.copy()
             sigTot = np.sum(sigmaK, axis=0)
+            
             for k in range(self.NN):
-                gK = LA.inv(A - sigTot)
+                # Pair with opposite direction (6 positions away)
+                pair_k = (k + 6) % 6
+                # Remove only the opposite direction's contribution
+                gK = LA.inv(A - sigTot + sigmaK[pair_k])
                 B = (E + self.eta*1j)*self.Slist[k] - self.Vlist[k]
-                sigmaK[k] = B.conj().T@gK@B
-            sigmaK = mix*sigmaK + (1-mix)*sigmaK_
+                sigmaK[k] = (B.conj().T@gK@B) + (1-mix)*sigmaK_[k]
+            
+            # Convergence Check
             diff = np.max(np.abs(sigmaK - sigmaK_))/np.max(np.abs(sigmaK_))
             count += 1
+
         if diff>conv:
             print(f'Warning: exceeded max iterations! E: {E}, Conv: {diff}')
         
-        #DEBUG:
-        if count>1000:
+        #Print statement if took more than 5000 iterations to converge
+        if count>5000:
             print(f'gAtom at {E:.2e} converged in {count} iterations: {diff}')
         
         self.sigmaKprev = sigmaK
         self.Eprev= E
         return LA.inv(A -  np.sum(sigmaK, axis=0))
     
-    # Return self-energy matrix associated with single atom
+    # Return self-energy matrix associated with single surface atom
     def sigmaTot(self, E, conv=1e-5):
         sig = np.zeros((dim,dim), dtype=complex)
         gSurf = self.g(E, 0, conv)
-        for S, V in zip(self.Slist,self.Vlist):
-            B = (E + self.eta*1j)*S - V
+        for k in range(9):
+            B = (E + self.eta*1j)*self.Slist[k] - self.Vlist[k]
             sig += B.conj().T@gSurf@B
         return sig
     
@@ -524,7 +535,8 @@ class surfGBAt:
         Nint = 200
         calcN_ = np.inf
         # Main loop for calculating Emin/Emax integration limits
-        while abs(calcN - dim) > tol and cycles < maxCycles:
+        while abs(calcN - calcN_) > tol and cycles < maxCycles:
+            calcN_=calcN+0.0
             Emin -= 10
             Emax += 10
             # recalculate integration limits each iteration to ensure accuracy
