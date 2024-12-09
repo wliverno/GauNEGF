@@ -134,11 +134,10 @@ class surfGB:
             rotated_vector = np.dot(R, out_of_plane_base)
             out_of_plane_vectors.append(rotated_vector)
         
-        # Add corresponding opposite vectors
-        all_vectors = in_plane_vectors
-        for i in range(3):
+        # Add corresponding opposite vectors at the (k+6)%12 location
+        all_vectors = in_plane_vectors + out_of_plane_vectors
+        for i in range(6):
             all_vectors.append(-all_vectors[i])
-        all_vectors += out_of_plane_vectors
 
         # Return vectors 
         return all_vectors
@@ -464,7 +463,7 @@ class surfGBAt:
         self.Slist = Slist
         self.Vlist = Vlist
         self.NN = len(Slist)
-        assert self.NN == 9, "Error: surfGBAt only implemented for FCC using 9 neighbors"
+        assert self.NN == 12, "Error: surfGBAt only implemented for FCC using 12 NN"
         self.eta = eta
         self.sigmaKprev = None
         self.Eprev = Eminf
@@ -473,7 +472,7 @@ class surfGBAt:
         self.F = self.H
         self.S = np.eye(dim)
     
-    # Calculate surface Green's function, i is a dummy variable for compatibility
+    # Calculate bulk atom Green's function, i is a dummy variable for compatibility
     def g(self, E, i, conv=1e-5, mix=0.5):
         #Initialize sigmaK and A matrices for Dyson equation
         if self.sigmaKprev is not None and self.Eprev != Eminf and abs(self.Eprev - E) <1:
@@ -490,19 +489,12 @@ class surfGBAt:
             sigmaK_ = sigmaK.copy()
             sigTot = np.sum(sigmaK, axis=0)
            
-            # hopping in plane --> omit hopping vector direction
-            for k in range(6):
-                pair_k = (k + 3)%3 # Opposite direction vector
+            for k in range(self.NN):
+                pair_k = (k + 6)%12 # Opposite direction vector
                 gK = LA.inv(A - sigTot + sigmaK[pair_k]) # subtracted from sigTot
                 B = (E + self.eta*1j)*self.Slist[k] - self.Vlist[k]
                 sigmaK[k] = (B.conj().T@gK@B) + (1-mix)*sigmaK_[k]
             
-            # Vectors out of plane --> use all vector directions
-            for k in range(6,9):
-                gK = LA.inv(A - sigTot)
-                B = (E + self.eta*1j)*self.Slist[k] - self.Vlist[k]
-                sigmaK[k] = (B.conj().T@gK@B) + (1-mix)*sigmaK_[k]
-
             # Convergence Check
             diff = np.max(np.abs(sigmaK - sigmaK_))/np.max(np.abs(sigmaK_))
             count += 1
@@ -522,7 +514,7 @@ class surfGBAt:
     def sigmaTot(self, E, conv=1e-5):
         sig = np.zeros((dim,dim), dtype=complex)
         gSurf = self.g(E, 0, conv)
-        for k in range(9):
+        for k in range(9): #Omitting back plane vectors
             B = (E + self.eta*1j)*self.Slist[k] - self.Vlist[k]
             sig += B.conj().T@gSurf@B
         return sig
