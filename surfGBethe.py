@@ -77,9 +77,9 @@ class surfGB:
 
     def genNeighbors(self, plane_normal, first_neighbor):
         """
-        Generate all 12 nearest neighbor unit vectors:
+        Generate 9 neighbor unit vectors based on an FCC [111] surface:
         - 6 in the plane forming a hexagonal pattern
-        - 6 in the following plane forming a similar hexagonal pattern
+        - 3 in the following plane forming a triangular pattern
         
         Args:
             plane_normal: Vector normal to the crystal plane (will be normalized)
@@ -88,7 +88,7 @@ class surfGB:
         Returns:
             Tuple containing:
                 - Array of 6 in-plane unit vectors
-                - Array of 6 out-of-plane unit vectors
+                - Array of 3 out-of-plane unit vectors
         """
         
         # Project first_neighbor onto plane perpendicular to plane_normal
@@ -135,10 +135,11 @@ class surfGB:
             out_of_plane_vectors.append(rotated_vector)
         
         # Add corresponding opposite vectors
-        all_vectors = in_plane_vectors + out_of_plane_vectors
-        for i in range(6):
+        all_vectors = in_plane_vectors
+        for i in range(3):
             all_vectors.append(-all_vectors[i])
-       
+        all_vectors += out_of_plane_vectors
+
         # Return vectors 
         return all_vectors
 
@@ -463,7 +464,7 @@ class surfGBAt:
         self.Slist = Slist
         self.Vlist = Vlist
         self.NN = len(Slist)
-        assert self.NN == 12, "Error: surfGBAt only implemented for FCC with 12 nearest neighbors"
+        assert self.NN == 9, "Error: surfGBAt only implemented for FCC using 9 neighbors"
         self.eta = eta
         self.sigmaKprev = None
         self.Eprev = Eminf
@@ -488,15 +489,20 @@ class surfGBAt:
         while diff > conv and count < maxIter:
             sigmaK_ = sigmaK.copy()
             sigTot = np.sum(sigmaK, axis=0)
-            
-            for k in range(self.NN):
-                # Pair with opposite direction (6 positions away)
-                pair_k = (k + 6) % 6
-                # Remove only the opposite direction's contribution
-                gK = LA.inv(A - sigTot + sigmaK[pair_k])
+           
+            # hopping in plane --> omit hopping vector direction
+            for k in range(6):
+                pair_k = (k + 3)%3 # Opposite direction vector
+                gK = LA.inv(A - sigTot + sigmaK[pair_k]) # subtracted from sigTot
                 B = (E + self.eta*1j)*self.Slist[k] - self.Vlist[k]
                 sigmaK[k] = (B.conj().T@gK@B) + (1-mix)*sigmaK_[k]
             
+            # Vectors out of plane --> use all vector directions
+            for k in range(6,9):
+                gK = LA.inv(A - sigTot)
+                B = (E + self.eta*1j)*self.Slist[k] - self.Vlist[k]
+                sigmaK[k] = (B.conj().T@gK@B) + (1-mix)*sigmaK_[k]
+
             # Convergence Check
             diff = np.max(np.abs(sigmaK - sigmaK_))/np.max(np.abs(sigmaK_))
             count += 1
