@@ -114,12 +114,18 @@ class surfGB:
             in_plane_vectors.append(rotated_vector / np.linalg.norm(rotated_vector))
         
         # Generate out-of-plane vectors
-        out_of_plane_angle = np.arccos(1/3) / 2  # ~35.26 degrees
+        out_of_plane_angle = np.arccos(1/np.sqrt(3)) # ~54.74
         
-                # Create vectors pointing up to next plane
         out_of_plane_vectors = []
-        out_of_plane_base = np.cos(out_of_plane_angle) * first_neighbor + \
-                  np.sin(out_of_plane_angle) * plane_normal
+        # Add 30° = pi/6 rotation to base vector before going out of plane
+        rot_angle = np.pi/6
+        K = np.array([[0, -plane_normal[2], plane_normal[1]],
+                      [plane_normal[2], 0, -plane_normal[0]],
+                      [-plane_normal[1], plane_normal[0], 0]])
+        R = np.eye(3) + np.sin(rot_angle) * K + (1 - np.cos(rot_angle)) * np.matmul(K, K)
+        rotated_first = np.dot(R, first_neighbor)
+        out_of_plane_base = np.cos(out_of_plane_angle) * rotated_first + \
+                      np.sin(out_of_plane_angle) * plane_normal
         
         for i in range(3):
             angle = i * 2 * np.pi / 3  # 120 degree rotations
@@ -265,9 +271,9 @@ class surfGB:
         d_block[4,4] = np.cos(theta) * np.cos(2*phi)
         
         tr[4:9,4:9] = d_block
-             
+        
         # Apply transformation 
-        return tr.T @ M @ tr
+        return tr @ M @ tr.T
     
     def sigma(self, E, i, conv=1e-5):
         sig = np.zeros((self.N, self.N), dtype=complex)
@@ -552,6 +558,6 @@ class surfGBAt:
             print(f"Range: {Emin}, {Emax} - calcN = {calcN}")
         if cycles == maxCycles:
             print(f"Warning: Energy range ({Emin}, {Emax}) not converged (val = {calcN - dim})")
-        self.fermi = calcFermi(self, ne, Emin, Emax, fGuess, Nint, 1, Eminf, tol)[0]
+        self.fermi = calcFermi(self, ne, Emin, Emax, fGuess, Nint, 32, Eminf, tol)[0]
         return self.fermi
 
