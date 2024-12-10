@@ -80,7 +80,7 @@ class surfG:
         diff = conv+1
         while diff>conv and count<maxIter:
             g_ = g.copy()
-            g = LA.inv(A - B@g@B.conj().T)
+            g = LA.inv(A - B.conj().T@g@B)
             dg = abs(g - g_)/(abs(g).max())
             g = g*relFactor + g_*(1-relFactor)
             diff = dg.max()

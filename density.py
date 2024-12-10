@@ -267,8 +267,20 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
 
     return Emin, Ncomplex, Nreal
 
+# Get the fermi energy of a contact (compatible with Bethe or 1D)
+def getFermiContact(g, ne, tol=1e-4, Eminf=-1e6, maxcycles=1000):
+    # Set up infinite system from contact
+    S = g.S
+    F = g.F
+    orbs, _ = LA.eig(LA.inv(S)@F)
+    orbs = np.sort(np.real(orbs))
+    fermi = (orbs[int(ne)-1] + orbs[int(ne)])/2
+    Emin, N1, N2 = integralFit(g.F, g.S, g, fermi, Eminf, tol, maxcycles)
+    Emax = max(orbs)
+    return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, Eminf, tol, maxcycles)[0]
+
 # Get the fermi energy of a 1D contact
-def getFermiContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
+def getFermi1DContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
     # Set up infinite system from contact
     F = gSys.aList[ind]
     S = gSys.aSList[ind]

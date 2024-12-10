@@ -52,7 +52,7 @@ class DOSFermiSearch:
         derivatives = np.linalg.solve(A, b)
         return derivatives
 
-    def step(self, dos_func, N_curr, stepLim=1):
+    def step(self, dos_func, N_curr, stepLim=10):
         """
         Perform one step of the Fermi energy search.
 

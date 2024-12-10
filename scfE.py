@@ -37,11 +37,11 @@ V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 
 class NEGFE(NEGF):
     # Set energy dependent Bethe lattice contact using surfGB() object
-    def setContactBethe(self, contactList, file='Au', eta=1e-9, T=300):
+    def setContactBethe(self, contactList, latFile='Au', eta=1e-9, T=300):
         inds = super().setContacts(contactList[0], contactList[-1])
         self.lInd = inds[0]
         self.rInd = inds[1]
-        self.g = surfGB(self.F, self.S, contactList, self.bar, file, self.spin, eta)
+        self.g = surfGB(self.F, self.S, contactList, self.bar, latFile, self.spin, eta, T)
         self.setIntegralLimits(100, 50)
         self.T = T
         return inds
@@ -82,7 +82,8 @@ class NEGFE(NEGF):
         print(f'RUNNING SCF FOR {cycles} CYCLES USING DEFAULT GRID: ')
         if self.updFermi:
             self.updFermi=False
-            self.SCF(1e-10,damp,cycles)
+            if cycles>0:
+                self.SCF(1e-10,damp,cycles)
             self.updFermi=True
         else:
             self.SCF(1e-10,damp,cycles)
