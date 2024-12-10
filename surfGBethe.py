@@ -13,7 +13,7 @@ har_to_eV = 27.211386   # eV/Hartree
 Eminf = -1e6            # Setting lower bound to -1e6 eV
 
 class surfGB:
-    def __init__(self, F, S, contacts, bar,  file='Au', spin='r', eta=1e-9):
+    def __init__(self, F, S, contacts, bar,  latFile='Au', spin='r', eta=1e-9, T=0):
         #Read contact/orbital information and store
         self.cVecs = []
         self.latVecs = []
@@ -51,7 +51,7 @@ class surfGB:
 
         
         # Read Bethe lattice parameters and generate hopping/overlap matrices
-        self.read_bethe_params('Au')
+        self.read_bethe_params(latFile)
         self.Slists = []
         self.Vlists = []
         for dirList in self.dirLists: 
@@ -64,7 +64,7 @@ class surfGB:
             self.Slists.append(Slist)
             self.Vlists.append(Vlist)
         # Use surfGBAt() object to store the atomic Bethe lattice green's function for each contact
-        self.gList = [surfGBAt(self.H0, Slist, Vlist, eta) for Slist, Vlist in zip(self.Slists, self.Vlists)]
+        self.gList = [surfGBAt(self.H0, Slist, Vlist, eta, T) for Slist, Vlist in zip(self.Slists, self.Vlists)]
         
         for g in self.gList:
             g.calcFermi(self.ne/2)
@@ -79,7 +79,7 @@ class surfGB:
         """
         Generate 9 neighbor unit vectors based on an FCC [111] surface:
         - 6 in the plane forming a hexagonal pattern
-        - 3 in the following plane forming a triangular pattern
+        - 6 in the following planes forming a triangular pattern
         
         Args:
             plane_normal: Vector normal to the crystal plane (will be normalized)
@@ -87,8 +87,7 @@ class surfGB:
             
         Returns:
             Tuple containing:
-                - Array of 6 in-plane unit vectors
-                - Array of 3 out-of-plane unit vectors
+                - Array of 3 in-plane and 3 out of plane unit vectors followed by their negatives
         """
         
         # Project first_neighbor onto plane perpendicular to plane_normal
@@ -181,12 +180,14 @@ class surfGB:
                      [self.Edict['dd']]+ [self.Edict['dt']]*2 + [self.Edict['dd'], self.Edict['dt']])
 
     def construct_mat(self, Mdict, dirCosines):
-        """
-        Construct hopping/overlap matrix using Slater-Koster formalism with proper phase factors.
+        """Construct hopping/overlap matrix using Slater-Koster formalism with proper phase factors.
          
-        Parameters:
-            Mdict: Dictionary of Slater-Koster parameters (ssσ, spσ, etc.)
-            dirCosines: Array [l,m,n] of direction cosines
+        Args:
+            Mdict (dict): Dictionary of Slater-Koster parameters (ssσ, spσ, etc.)
+            dirCosines (tuple or list): Array [l,m,n] of direction cosines
+
+        Returns:
+            ndarray: The constructed matrix rotated to the given direction
         """
 
         M = np.zeros((dim, dim))
@@ -399,10 +400,7 @@ class surfGB:
     
         print("d-d interaction tests passed!")
     def test_hopping_physics(self):
-        """
-        Test physical properties of hopping matrices for different bond directions.
-        Verifies that hopping magnitudes and symmetries are preserved under rotation.
-        """
+        """ Test physical properties of hopping matrices for different bond directions"""
         eps = 1e-10  # Tolerance for floating point comparisons
         
         # Get reference hopping values from [0,0,1] configuration
@@ -460,7 +458,7 @@ class surfGB:
 
 # Bethe lattice surface Green's function for a single atom
 class surfGBAt:
-    def __init__(self, H, Slist, Vlist, eta):
+    def __init__(self, H, Slist, Vlist, eta, T=0):
         assert np.shape(H) == (dim,dim), f"Error with H dim, should be {dim}x{dim}"
         for S,V in zip(Slist, Vlist):
             assert np.shape(S) == (dim,dim), f"Error with S dim, should be {dim}x{dim}"
@@ -471,6 +469,7 @@ class surfGBAt:
         self.NN = len(Slist)
         assert self.NN == 12, "Error: surfGBAt only implemented for FCC using 12 NN"
         self.eta = eta
+        self.T = T
         self.sigmaKprev = None
         self.Eprev = Eminf
 
@@ -478,8 +477,25 @@ class surfGBAt:
         self.F = self.H
         self.S = np.eye(dim)
     
-    # Calculate bulk atom Green's function, i is a dummy variable for compatibility
-    def g(self, E, i, conv=1e-5, mix=0.5):
+    # Calculate sigmaK for the bulk
+    def sigmaK(self, E, conv=1e-5, mix=0.5):
+        """Calculate all self-energies of all 12 lattice directions in the bulk FCC lattice:
+
+                [3x out of plane dir]
+                        \|/  
+        [3x plane dir] - o - [3x plane dir]
+                        /|\     
+                [3x out -f plane dir]
+
+        Args:
+            E (float): Energy value for calculating Green's functions
+            conv (float): Convergence criteria for Dyson equation (default=1e-5)
+            mix (float): Mixing factor for Dyson equation (default=0.5)
+            
+        Returns:
+            list: A list of 12 self-energy matrices (ndarrays) in order by lattice direction 
+
+        """
         #Initialize sigmaK and A matrices for Dyson equation
         if self.sigmaKprev is not None and self.Eprev != Eminf and abs(self.Eprev - E) <1:
             sigmaK = self.sigmaKprev.copy()
@@ -506,29 +522,70 @@ class surfGBAt:
             count += 1
 
         if diff>conv:
-            print(f'Warning: exceeded max iterations! E: {E}, Conv: {diff}')
+            print(f'Warning: sigmaK() exceeded max iterations! E: {E}, Conv: {diff}')
         
         #Print statement if took more than 5000 iterations to converge
         if count>5000:
-            print(f'gAtom at {E:.2e} converged in {count} iterations: {diff}')
+            print(f'sigmaK at {E:.2e} converged in {count} iterations: {diff}')
         
         self.sigmaKprev = sigmaK
         self.Eprev= E
-        return LA.inv(A -  np.sum(sigmaK, axis=0))
+
+        return sigmaK
+
+    def sigma(self, E, i=-1, conv=1e-5, mix=0.5): 
+        """Calculate the self energies for atoms at the surface of the FCC lattice (9 directions):
+
+        [3x plane dir] - o - [3x plane dir]
+                        /|\     
+                [3x out -f plane dir]
+
+        Args:
+            E (float): Energy value for calculating Green's functions
+            i (int): index of the sigma matrix used, if -1 returns sum (default=-1)
+            conv (float): Convergence criteria for Dyson equation (default=1e-5)
+            mix (float): Mixing factor for Dyson equation (default=0.5)
+            
+        Returns:
+            ndarray: A self-energy matrix (index i or sum total) for the surface atom
+        """
+        sigSurf = self.sigmaK(E, conv, mix)[:9]
+        #Self-consistency loop 
+        count = 0
+        maxIter = int(1/(conv*mix))*10
+        diff = np.inf
+        A = (E + self.eta*1j)*np.eye(dim) - self.H
+        planeVec = [0,1,2,6,7,8] # Location of vectors in plane
+        while diff > conv and count < maxIter:
+            sigSurf_ = sigSurf.copy()
+            sigTot = np.sum(sigSurf, axis=0)
+            g = LA.inv(A - sigTot) # subtracted from sigTot
+            for k in range(6):
+                k = planeVec[i]
+                pair_k = planeVec[(i+3)%6]
+                B = (E + self.eta*1j)*self.Slist[k] - self.Vlist[k]
+                sigSurf[k] = (B.conj().T@g@B) + (1-mix)*sigSurf_[k]
+            
+            # Convergence Check
+            diff = np.max(np.abs(sigSurf - sigSurf_))/np.max(np.abs(sigSurf_))
+            count += 1
+
+        if diff>conv:
+            print(f'Warning: sigma() exceeded max iterations! E: {E}, Conv: {diff}')
+        
+        #Print statement if took more than 5000 iterations to converge
+        if count>5000:
+            print(f'sigma() at {E:.2e} converged in {count} iterations: {diff}')
+        
+        if i == -1:
+            return np.sum(sigSurf, axis=0)
+        else:
+            return sigSurf[i]
     
-    # Return self-energy matrix associated with single surface atom
+    # Wrapper function for compatibility with density.py methods
     def sigmaTot(self, E, conv=1e-5):
-        sig = np.zeros((dim,dim), dtype=complex)
-        gSurf = self.g(E, 0, conv)
-        for k in range(9): #Omitting back plane vectors
-            B = (E + self.eta*1j)*self.Slist[k] - self.Vlist[k]
-            sig += B.conj().T@gSurf@B
-        return sig
+        return self.sigma(E, i=-1)
     
-    # Adding this function for compatibility
-    def sigma(self, E, i, conv=1e-5):
-        return self.sigmaTot(E, conv=1e-5)
-   
     # Calculate fermi energy using bisection (to specified tolerance)
     def calcFermi(self, ne, fGuess=5, tol=1e-3):
         Emin = min(np.diag(self.H))
@@ -550,7 +607,7 @@ class surfGBAt:
             while MaxDP > tol and Nint < 1e3:
                 Nint *= 2
                 rho_ = rho.copy()
-                rho = np.real(densityComplex(self.H, np.eye(dim), self, Emin, Emax, Nint, T=0, showText=False))
+                rho = np.real(densityComplex(self.H, np.eye(dim), self, Emin, Emax, Nint, self.T, showText=False))
                 MaxDP = max(np.diag(abs(rho_ - rho)))
             if Nint > 1e3:
                 print(f'Warning: MaxDP above tolerance (val = {MaxDP:.3E})')
@@ -558,6 +615,6 @@ class surfGBAt:
             print(f"Range: {Emin}, {Emax} - calcN = {calcN}")
         if cycles == maxCycles:
             print(f"Warning: Energy range ({Emin}, {Emax}) not converged (val = {calcN - dim})")
-        self.fermi = calcFermi(self, ne, Emin, Emax, fGuess, Nint, 32, Eminf, tol)[0]
+        self.fermi = calcFermi(self, ne, Emin, Emax, fGuess, Nint, 100, Eminf, tol)[0]
         return self.fermi
 
