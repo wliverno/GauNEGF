@@ -20,7 +20,7 @@ def Gr(F, S, g, E):
 def fermi(E, mu, T):
     kT = kB*T
     if kT==0:
-        return (E<mu)*1
+        return (E<=mu)*1
     else:
         return 1/(np.exp((E - mu)/kT)+1)
 
@@ -59,7 +59,7 @@ def bisectFermi(V, Vc, D, Gam, Nexp, conv=1e-3, Eminf=-1e6):
     Emax = max(D.real)
     dN = Nexp
     Niter = 0
-    while abs(dN) > conv:
+    while abs(dN) > conv and Niter<1000:
         fermi = (Emin + Emax)/2
         P = density(V, Vc, D, Gam, Eminf, fermi)
         dN = np.trace(P).real - Nexp
@@ -68,6 +68,8 @@ def bisectFermi(V, Vc, D, Gam, Nexp, conv=1e-3, Eminf=-1e6):
         else:
             Emin = fermi
         Niter += 1
+    if Niter >= 1000:
+        print('Warning: Bisection search timed out after 1000 iterations!')
     print(f'Bisection fermi search converged to {dN:.2E} in {Niter} iterations.')
     return fermi
 
@@ -222,12 +224,12 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
 
     # Calculate Emin using DOS
     D,_ = LA.eig(LA.inv(S)@F)
-    Emin = min(D.real.flatten())-1
+    Emin = min(D.real.flatten())-5
     counter = 0
     dP = DOSg(F,S,g,Emin)
     while dP>tol and counter<maxcycles:
         Emin -= 1
-        dP = DOSg(F,S,g,Emin)
+        dP = abs(DOSg(F,S,g,Emin))
         print(Emin, dP)
         counter += 1
     if counter == maxcycles:
@@ -243,7 +245,7 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
         Ncomplex *= 2 # Start with 16 points, double each time
         rho_ = np.real(densityComplex(F, S, g, Emin,  mu, Ncomplex, T=0))
         dP = max(abs(np.diag(rho_ - rho)))
-        print(f"MaxDP = {dP:.2E}")
+        print(f"MaxDP = {dP:.2E}, N = {sum(np.diag(rho_).real):2f}")
         rho = rho_
         counter += 1
     if Ncomplex >  maxcycles and dP > tol:
@@ -303,12 +305,15 @@ def getFermi1DContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
     return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, Eminf, tol, maxcycles)
 
 # Calculate the fermi energy of the surfG() object
-def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e-4, maxcycles=1000):
+def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e-4, maxcycles=1000, nOrbs=0):
     # Fermi Energy search using full contact
     print(f'Eminf DOS = {DOSg(g.F,g.S,g,Eminf)}')
     fermi = fermiGuess
     pLow = densityReal(g.F, g.S, g, Eminf, Emin, N2, T=0, showText=False)
-    nELow = np.trace(pLow@g.S)
+    if nOrbs==0:
+        nELow = np.trace(pLow@g.S)
+    else:
+        nELow = np.trace((pLow@g.S)[-nOrbs:, -nOrbs:])
     print(f'Electrons below lowest onsite energy: {nELow}')
     if nELow >= ne:
         raise Exception('Calculated Fermi energy is below lowest orbital energy!')
@@ -322,7 +327,10 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e
     print('Calculating Fermi energy using bisection:')
     while abs(ne - Ncurr) > tol and counter < maxcycles:
         p_ = np.real(pLow+pMu(fermi))
-        Ncurr = np.trace(p_@g.S)
+        if nOrbs==0:
+            Ncurr = np.trace(p_@g.S)
+        else:
+            Ncurr = np.trace((p_@g.S)[-nOrbs:, -nOrbs:])
         dN = ne-Ncurr
         if dN > 0 and fermi > lBound:
             lBound = fermi
