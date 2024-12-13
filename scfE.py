@@ -106,6 +106,43 @@ class NEGFE(NEGF):
 
     # Updated to use energy-dependent contour integral from surfG()
     def FockToP(self):
+        # Fermi Energy Update using local self-energy approximation
+        if self.updFermi:
+            fermi_old = self.fermi+0.0
+            
+            # Generate inputs for energy-independent density calculation
+            X = np.array(self.X)
+            sig1, sig2 = self.getSigma(self.fermi)
+            Fbar = X@(self.F*har_to_eV + sig1 + sig2)@X
+            Gam1 = (sig1 - sig1.conj().T)*1j
+            Gam2 = (sig2 - sig2.conj().T)*1j
+            GamBar = (X@Gam1@X)+(X@Gam2@X)
+            D, V = LA.eig(Fbar)
+            Vc = LA.inv(V.conj().T)
+
+            # Number of electrons calculated assuming energy independent
+            Ncurr = np.trace(density(V,Vc,D,GamBar,self.Eminf, self.fermi)).real
+            
+            # Account for factor of 2 for restricted case
+            if self.spin=='r':
+                dN = (self.bar.ne-self.nelec)/2
+                #print('Nexp: ', self.bar.ne/2, ' Nactual: ', self.nelec/2, ' Napprox: ', Ncurr, ' setpoint:', Ncurr+dN)  
+            else:
+                dN = (self.bar.ne-self.nelec)
+                #print('Nexp: ', self.bar.ne, ' Nactual: ', self.nelec, ' Napprox: ', Ncurr, ' setpoint:', Ncurr+dN)  
+            conv= min(self.convLevel, 1e-3)
+            Nsearch = Ncurr + dN
+            if Nsearch > 0 and Nsearch < len(self.F):
+                self.fermi = bisectFermi(V, Vc, D, GamBar, Ncurr+dN, conv, self.Eminf)
+                print(f'Fermi Energy set to {self.fermi:.2f} eV, shifting by {dN:.2E} electrons ')
+            else:
+                print('Warning: Local sigma approximation not valid, Fermi energy not updated...')
+            # Shift Emin, mu1, and mu2 and update contact self-energies
+            self.setVoltage(self.qV)
+            self.Emin += self.fermi-fermi_old
+            self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
+        
+        # Calculate matrices using two part integration method
         print('Calculating equilibrium density matrix:') 
         P = densityReal(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
         P += densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=self.N1, T=self.T)
@@ -140,26 +177,30 @@ class NEGFE(NEGF):
         self.F, self.locs = getFock(self.bar, self.spin)
         self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
        
-        # Debug:
+        #DEBUG:
         #D,V = LA.eig(self.X@(Fock_old*har_to_eV)@self.X) 
         #EListBefore = np.sort(np.array(np.real(D)).flatten())
         #D,V = LA.eig(self.X@(self.F*har_to_eV)@self.X) 
         #EList = np.sort(np.array(np.real(D)).flatten())
         #for pair in zip(EListBefore, EList):                       
         #    print("Energy Before =", str(pair[0]), ", Energy After =", str(pair[1]))
-        
+       
+        # OLD IMPLEMENTATION OF FERMI ENERGY UPDATE: 
         # Update fermi if MaxDP below threshold or at least once every 20 iterations
-        if self.updFermi and (self.MaxDP<1e-2 or self.nFermiUpd>=20):
-            dosFunc = lambda E: DOS([E], self.F*har_to_eV, self.S, 
-                                    self.getSigma(E)[0], self.getSigma(E)[1])[0][0]
-            self.fermi = self.fSearch.step(dosFunc, self.updateN())
-            acc = self.fSearch.get_accuracy()
-            print(f'Fermi Energy set to {self.fermi:.2f} eV, Accuracy = +/- {acc:.2E} eV')
-            self.setVoltage(self.qV)
-            self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
-            self.nFermiUpd = 0
-        else:
-            self.nFermiUpd += 1
+        #if self.updFermi and (self.MaxDP<1e-2 or self.nFermiUpd>=20):
+        #    fermi_old = self.fermi+0.0
+        #    dosFunc = lambda E: DOS([E], self.F*har_to_eV, self.S, 
+        #                            self.getSigma(E)[0], self.getSigma(E)[1])[0][0]
+        #    self.fermi = self.fSearch.step(dosFunc, self.updateN())
+        #    acc = self.fSearch.get_accuracy()
+        #    print(f'Fermi Energy set to {self.fermi:.2f} eV, Accuracy = +/- {acc:.2E} eV')
+        #    # Apply fermi shift to all integration limits (mu1, mu2, Emin)
+        #    self.setVoltage(self.qV)
+        #    self.Emin += self.fermi-fermi_old
+        #    self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
+        #    self.nFermiUpd = 0
+        #else:
+        #    self.nFermiUpd += 1
 
         return dE
     
