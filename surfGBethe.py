@@ -493,6 +493,7 @@ class surfGBAt:
         self.Vlist = Vlist
         self.NN = len(Slist)
         assert self.NN == 12, "Error: surfGBAt only implemented for FCC using 12 NN"
+        self.Slist = [np.zeros((dim,dim)) for n in range(self.NN)]
         self.eta = eta
         self.T = T
         self.sigmaKprev = None
@@ -532,12 +533,11 @@ class surfGBAt:
         if self.sigmaKprev is not None and self.Eprev != Eminf and abs(self.Eprev - E) <1:
             sigmaK = self.sigmaKprev.copy()
         else:
-            sigmaK = np.array([np.eye(dim)*(1*self.eta) for k in range(self.NN)], dtype=complex)
-        A = (E + self.eta*1j)*np.eye(dim) - self.H
-        
+            sigmaK = np.array([np.eye(dim)*-1j for k in range(self.NN)], dtype=complex)
+        A = (E - self.eta*1j)*np.eye(dim) - self.H
         #Self-consistency loop 
         count = 0
-        maxIter = int(1/(conv*mix))
+        maxIter = 1000
         diff = np.inf
         while diff > conv and count < maxIter:
             sigmaK_ = sigmaK.copy()
@@ -546,19 +546,15 @@ class surfGBAt:
             for k in range(self.NN):
                 pair_k = (k + 6)%12 # Opposite direction vector
                 gK = LA.inv(A - sigTot + sigmaK[pair_k]) # subtracted from sigTot
-                B = (E + self.eta*1j)*self.Slist[k] - self.Vlist[k]
-                sigmaK[k] = (B.conj().T@gK@B) + (1-mix)*sigmaK_[k]
+                B = (E - self.eta*1j)*self.Slist[k] - self.Vlist[k]
+                sigmaK[k] = (B@gK@B.conj().T) + (1-mix)*sigmaK_[k]
             
             # Convergence Check
             diff = np.max(np.abs(sigmaK - sigmaK_))/np.max(np.abs(sigmaK_))
             count += 1
 
         if diff>conv:
-            print(f'Warning: sigmaK() exceeded max iterations! E: {E}, Conv: {diff}')
-        
-        #Print statement if took more than 5000 iterations to converge
-        elif count>5000:
-            print(f'sigmaK at {E:.2e} converged in {count} iterations: {diff}')
+            print(f'Warning: sigmaK() exceeded 1000 iterations! E: {E}, Conv: {diff}')
         
         self.sigmaKprev = sigmaK
         self.Eprev= E
@@ -584,30 +580,25 @@ class surfGBAt:
         sigSurf = self.sigmaK(E, conv, mix)[:9]
         #Self-consistency loop 
         count = 0
-        maxIter = int(1/(conv*mix))
+        maxIter = 1000
         diff = 0#np.inf
-        A = (E + self.eta*1j)*np.eye(dim) - self.H
+        A = (E - self.eta*1j)*np.eye(dim) - self.H
         planeVec = [0,1,2,6,7,8] # Location of vectors in plane
         while diff > conv and count < maxIter:
             sigSurf_ = sigSurf.copy()
             sigTot = np.sum(sigSurf, axis=0)
             g = LA.inv(A - sigTot) # subtracted from sigTot
-            for k in range(6):
-                k = planeVec[i]
-                pair_k = planeVec[(i+3)%6]
-                B = (E + self.eta*1j)*self.Slist[k] - self.Vlist[k]
-                sigSurf[k] = (B.conj().T@g@B) + (1-mix)*sigSurf_[k]
+            for k in planeVec:
+                pair_k = (k + 6)%12 # Opposite direction vector
+                B = (E - self.eta*1j)*self.Slist[k] - self.Vlist[k]
+                sigSurf[k] = (B@g@B.conj().T) + (1-mix)*sigSurf_[k]
             
             # Convergence Check
             diff = np.max(np.abs(sigSurf - sigSurf_))/np.max(np.abs(sigSurf_))
             count += 1
 
         if diff>conv:
-            print(f'Warning: sigma() exceeded max iterations! E: {E}, Conv: {diff}')
-        
-        #Print statement if took more than 5000 iterations to converge
-        elif count>5000:
-            print(f'sigma() at {E:.2e} converged in {count} iterations: {diff}')
+            print(f'Warning: sigma() exceeded 1000 iterations! E: {E}, Conv: {diff}')
         
         if inds is None:
             return np.sum(sigSurf, axis=0)
@@ -626,36 +617,40 @@ class surfGBAt:
     
     # Calculate fermi energy using bisection (to specified tolerance)
     def calcFermi(self, ne, fGuess=5, tol=1e-3):
-        D, _ = LA.eig(LA.inv(self.S)@self.F)
-        # Generate extended system 
-        Emin = min(D.real)
-        Emax = max(D.real)
-        maxCycles = 1000
-        cycles = 0
-        calcN = 0
-        Nint = 200
-        calcN_ = np.inf
-        # Main loop for calculating Emin/Emax integration limits
-        while abs(calcN - calcN_) > tol and cycles < maxCycles:
-            calcN_=calcN+0.0
-            Emin -= 10
-            Emax += 10
-            # recalculate integration limits each iteration to ensure accuracy
-            Nint = 8
-            MaxDP = np.inf
-            rho = np.eye(dim*(self.NN+1))
-            while MaxDP > tol and Nint < 1e3:
-                Nint *= 2
-                rho_ = rho.copy()
-                rho = np.real(densityComplex(self.F, self.S, self, Emin, Emax, Nint, self.T, showText=False))
-                MaxDP = max(np.diag(abs(rho_ - rho)))
-            if Nint > 1e3:
-                print(f'Warning: MaxDP above tolerance (val = {MaxDP:.3E})')
-            calcN = np.trace((rho@self.S)[-dim:, -dim:])
-            print(f"Range: {Emin}, {Emax} - calcN = {calcN}")
-        if cycles == maxCycles:
-            print(f"Warning: Energy range ({Emin}, {Emax}) not converged (val = {calcN - dim})")
-        self.fermi = calcFermi(self, ne, Emin, Emax, fGuess, Nint, 100, 
-                               Eminf=Eminf, tol=tol, nOrbs=dim)[0]
+        # COPYING ANT.GAUSSIAN IMPLEMENTATION
+        #D, _ = LA.eig(LA.inv(self.S)@self.F)
+        ## Generate extended system 
+        #Emin = min(D.real)
+        #Emax = max(D.real)
+        #maxCycles = 40
+        #cycles = 0
+        #calcN = 0
+        #Nint = 200
+        #calcN_ = np.inf
+        ## Main loop for calculating Emin/Emax integration limits
+        #while abs(calcN - calcN_) > tol and cycles < maxCycles:
+        #    calcN_=calcN+0.0
+        #    Emin -= 10
+        #    Emax += 10
+        #    # recalculate integration limits each iteration to ensure accuracy
+        #    Nint = 8
+        #    MaxDP = np.inf
+        #    rho = np.eye(dim*(self.NN+1))
+        #    while MaxDP > tol and Nint < 1e3:
+        #        Nint *= 2
+        #        rho_ = rho.copy()
+        #        rho = np.real(densityComplex(self.F, self.S, self, Emin, Emax, Nint, self.T, showText=False))
+        #        MaxDP = max(np.diag(abs(rho_ - rho)))
+        #    if Nint > 1e3:
+        #        print(f'Warning: MaxDP above tolerance (val = {MaxDP:.3E})')
+        #    calcN = np.trace((rho@self.S)[-dim:, -dim:])
+        #    print(f"Range: {Emin}, {Emax} - calcN = {calcN}")
+        #if cycles == maxCycles:
+        #    print(f"Warning: Energy range ({Emin}, {Emax}) not converged (val = {calcN - dim})")
+        #print(ne)
+        #self.fermi = calcFermi(self, ne, Emin, Emax, fGuess, Nint, 1000, 
+        #                Eminf=Eminf, tol=tol, maxcycles=maxCycles, nOrbs=dim)[0]
+        # USING OUR IMPLEMENTATION:
+        self.fermi = getFermiContact(self, ne, tol, Eminf, 40, nOrbs=dim)
         return self.fermi
 
