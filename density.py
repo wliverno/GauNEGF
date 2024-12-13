@@ -241,7 +241,7 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
     Ncomplex = 8
     dP = 100
     rho = np.zeros(np.shape(F))
-    while dP > tol and Ncomplex < maxcycles:
+    while dP > tol and Ncomplex < 1000:
         Ncomplex *= 2 # Start with 16 points, double each time
         rho_ = np.real(densityComplex(F, S, g, Emin,  mu, Ncomplex, T=0))
         dP = max(abs(np.diag(rho_ - rho)))
@@ -256,7 +256,7 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
     Nreal = 8
     dP = 100
     rho = np.zeros(np.shape(F))
-    while dP > tol and Nreal < maxcycles:
+    while dP > tol and Nreal < 1000:
         Nreal *= 2 # Start with 16 points, double each time
         rho_ = np.real(densityReal(F, S, g, Eminf, Emin, Nreal, T=0))
         dP = max(abs(np.diag(rho_ - rho)))
@@ -270,7 +270,7 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
     return Emin, Ncomplex, Nreal
 
 # Get the fermi energy of a contact (compatible with Bethe or 1D)
-def getFermiContact(g, ne, tol=1e-4, Eminf=-1e6, maxcycles=1000):
+def getFermiContact(g, ne, tol=1e-4, Eminf=-1e6, maxcycles=1000, nOrbs=0):
     # Set up infinite system from contact
     S = g.S
     F = g.F
@@ -279,7 +279,8 @@ def getFermiContact(g, ne, tol=1e-4, Eminf=-1e6, maxcycles=1000):
     fermi = (orbs[int(ne)-1] + orbs[int(ne)])/2
     Emin, N1, N2 = integralFit(g.F, g.S, g, fermi, Eminf, tol, maxcycles)
     Emax = max(orbs)
-    return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, Eminf, tol, maxcycles)[0]
+    return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, 
+                        Eminf, tol, maxcycles, nOrbs)[0]
 
 # Get the fermi energy of a 1D contact
 def getFermi1DContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
@@ -325,7 +326,7 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e
     lBound = Emin
     uBound = Emax
     print('Calculating Fermi energy using bisection:')
-    while abs(ne - Ncurr) > tol and counter < maxcycles:
+    while abs(ne - Ncurr) > tol and uBound-lBound > tol/10 and counter < maxcycles:
         p_ = np.real(pLow+pMu(fermi))
         if nOrbs==0:
             Ncurr = np.trace(p_@g.S)
