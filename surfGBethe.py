@@ -547,7 +547,7 @@ class surfGBAt:
                 pair_k = (k + 6)%12 # Opposite direction vector
                 gK = LA.inv(A - sigTot + sigmaK[pair_k]) # subtracted from sigTot
                 B = (E - self.eta*1j)*self.Slist[k] - self.Vlist[k]
-                sigmaK[k] = (B@gK@B.conj().T) + (1-mix)*sigmaK_[k]
+                sigmaK[k] = mix*(B@gK@B.conj().T) + (1-mix)*sigmaK_[k]
             
             # Convergence Check
             diff = np.max(np.abs(sigmaK - sigmaK_))/np.max(np.abs(sigmaK_))
@@ -591,7 +591,7 @@ class surfGBAt:
             for k in planeVec:
                 pair_k = (k + 6)%12 # Opposite direction vector
                 B = (E - self.eta*1j)*self.Slist[k] - self.Vlist[k]
-                sigSurf[k] = (B@g@B.conj().T) + (1-mix)*sigSurf_[k]
+                sigSurf[k] = mix*(B@g@B.conj().T) + (1-mix)*sigSurf_[k]
             
             # Convergence Check
             diff = np.max(np.abs(sigSurf - sigSurf_))/np.max(np.abs(sigSurf_))
