@@ -50,8 +50,8 @@ class surfGB:
             # Calculate rest of lattice directions
             nVecs = self.genNeighbors(Vt[-1], latVec)
             
-            # Use lattice vectors to see what nearest neighbors  
-            nInds = []
+            # Use lattice vectors to see what nearest neighbors
+            nIndList = []
             for c in cList:
                 nAtVecs = []
                 for c2 in cList:
@@ -65,8 +65,10 @@ class surfGB:
                     nInds.append(np.argmax(valList))
                     assert valList[nInds[-1]] > 0.9 and nInds[-1] in [0,1,2,6,7,8], \
                              'Error: Lattice mismatch in atoms!'
-            # write lattice directions and neighbor indices
-            self.nIndLists.append(nInds)
+                # write neighbor indices for each atom
+                nIndList.append(nInds)
+            # write direction vectors and neighbors for each contact
+            self.nIndLists.append(nIndList)
             self.dirLists.append(nVecs)
 
         
@@ -297,11 +299,12 @@ class surfGB:
     
     def sigma(self, E, i, conv=1e-5):
         sig = np.zeros((self.N, self.N), dtype=complex)
-        # Apply self energies in first 9 directions that aren't attached to atoms
-        sigInds = list(set(range(9)) - set(self.nIndLists[i]))
-        sigAtom = np.sum(self.gList[i].sigma(E, sigInds, conv), axis=0)
-        for inds in self.indsLists[i]:
-            sig[np.ix_(inds, inds)] = sigAtom
+        sigSurf = self.gList[i].sigma(E, None, conv)
+        # Apply self energies in first 9 directions that aren't attached to atom
+        for nInds, Finds in zip(self.nIndLists[i], self.indsLists[i]):
+            sigInds = list(set(range(9)) - set(nInds))
+            sigAtom = sum([sigSurf[j] for j in sigInds])
+            sig[np.ix_(Finds, Finds)] = sigAtom
         if self.spin == 'u' or self.spin == 'ro':
             sig = np.kron(np.eye(2), sig)
         elif self.spin =='g':
@@ -493,7 +496,7 @@ class surfGBAt:
         self.Vlist = Vlist
         self.NN = len(Slist)
         assert self.NN == 12, "Error: surfGBAt only implemented for FCC using 12 NN"
-        self.Slist = [np.zeros((dim,dim)) for n in range(self.NN)]
+        #self.Slist = [np.zeros((dim,dim)) for n in range(self.NN)]
         self.eta = eta
         self.T = T
         self.sigmaKprev = None
@@ -570,18 +573,18 @@ class surfGBAt:
 
         Args:
             E (float): Energy value for calculating Green's functions
-            i (list,int): indices of the sigma matrix used, if None returns sum (default=None)
+            inds (list,int): indices of the sigma matrix used, if None returns full list (default=None)
             conv (float): Convergence criteria for Dyson equation (default=1e-5)
             mix (float): Mixing factor for Dyson equation (default=0.5)
             
         Returns:
-            ndarray: A self-energy matrix (index i or sum total) for the surface atom
+            list(ndarray): A listo of self-energy matrices for the surface atom
         """
         sigSurf = self.sigmaK(E, conv, mix)[:9]
         #Self-consistency loop 
         count = 0
         maxIter = 1000
-        diff = 0#np.inf
+        diff = np.inf                             ## SET THIS TO 0 to BYPASS SECOND LOOP
         A = (E - self.eta*1j)*np.eye(dim) - self.H
         planeVec = [0,1,2,6,7,8] # Location of vectors in plane
         while diff > conv and count < maxIter:
@@ -601,7 +604,7 @@ class surfGBAt:
             print(f'Warning: sigma() exceeded 1000 iterations! E: {E}, Conv: {diff}')
         
         if inds is None:
-            return np.sum(sigSurf, axis=0)
+            return sigSurf
         else:
             return [sigSurf[i] for i in inds]
     
@@ -616,7 +619,7 @@ class surfGBAt:
         return sig
     
     # Calculate fermi energy using bisection (to specified tolerance)
-    def calcFermi(self, ne, fGuess=5, tol=1e-3):
+    def calcFermi(self, ne, fGuess=5, tol=1e-5):
         # COPYING ANT.GAUSSIAN IMPLEMENTATION
         #D, _ = LA.eig(LA.inv(self.S)@self.F)
         ## Generate extended system 

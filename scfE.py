@@ -86,7 +86,8 @@ class NEGFE(NEGF):
                 self.SCF(1e-10,damp,cycles)
             self.updFermi=True
         else:
-            self.SCF(1e-10,damp,cycles)
+            if cycles>0:
+                self.SCF(1e-10,damp,cycles)
         print('SETTING INTEGRATION LIMITS... ')
         self.Emin, self.N1, self.N2 = integralFit(self.F*har_to_eV, self.S, self.g, sum(self.getHOMOLUMO())/2, self.Eminf, tol)
         if self.updFermi:
