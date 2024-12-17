@@ -128,9 +128,9 @@ class NEGF(object):
         orbs, _ = LA.eig(self.X@self.F@self.X)
         orbs = np.sort(orbs)*har_to_eV
         if self.spin=='r':
-            homo_lumo = orbs[self.nae-1:self.nae+1]
+            homo_lumo = orbs[self.nae-1:self.nae+1].real
         else:
-            homo_lumo = orbs[self.nae+self.nbe-1:self.nae+self.nbe+1]
+            homo_lumo = orbs[self.nae+self.nbe-1:self.nae+self.nbe+1].real
         return homo_lumo
                 
     # Set voltage and fermi energy, update electric field applied and integral limits
