@@ -327,6 +327,8 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e
     uBound = Emax
     print('Calculating Fermi energy using bisection:')
     while abs(ne - Ncurr) > tol and uBound-lBound > tol/10 and counter < maxcycles:
+        g.setF(g.F, fermi, fermi)
+        pLow = densityReal(g.F, g.S, g, Eminf, Emin, N2, T=0, showText=False)
         p_ = np.real(pLow+pMu(fermi))
         if nOrbs==0:
             Ncurr = np.trace(p_@g.S)

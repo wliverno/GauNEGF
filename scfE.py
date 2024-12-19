@@ -41,7 +41,7 @@ class NEGFE(NEGF):
         inds = super().setContacts(contactList[0], contactList[-1])
         self.lInd = inds[0]
         self.rInd = inds[1]
-        self.g = surfGB(self.F, self.S, contactList, self.bar, latFile, self.spin, eta, T)
+        self.g = surfGB(self.F*har_to_eV, self.S, contactList, self.bar, latFile, self.spin, eta, T)
         self.setIntegralLimits(100, 50)
         self.T = T
         return inds
