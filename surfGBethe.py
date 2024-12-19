@@ -12,6 +12,7 @@ dim = 9                 # size of single atom matrix: 1s + 3p + 5d
 har_to_eV = 27.211386   # eV/Hartree
 Eminf = -1e6            # Setting lower bound to -1e6 eV
 
+# Bethe lattice surface Green's function for a device with contacts
 class surfGB:
     def __init__(self, F, S, contacts, bar,  latFile='Au', spin='r', eta=1e-9, T=0):
         #Read contact/orbital information and store
@@ -20,7 +21,7 @@ class surfGB:
         self.indsLists = []
         self.dirLists = []
         self.nIndLists = []
-        self.X = fractional_matrix_power(S, -0.5)
+        self.Xi = fractional_matrix_power(S, 0.5)
         
         # Spin independent implementation, add generate spin terms during sigma generation
         self.spin = spin
@@ -305,6 +306,9 @@ class surfGB:
             sigInds = list(set(range(9)) - set(nInds))
             sigAtom = sum([sigSurf[j] for j in sigInds])
             sig[np.ix_(Finds, Finds)] = sigAtom
+        # Apply de-orthonormalization technique from ANT.Gaussian if orthonormal
+        if self.Sdict['sss'] == 0:
+            sig = self.Xi @ sig @ self.Xi
         if self.spin == 'u' or self.spin == 'ro':
             sig = np.kron(np.eye(2), sig)
         elif self.spin =='g':
@@ -317,21 +321,15 @@ class surfGB:
     
     # Update contact i with a new fermi energy (Ef) by shifting Hamiltonian
     def updateFermi(self, i, Ef):
-        fermiPrev = self.gList[i].fermi
+        fermiPrev = self.gList[i].fermi +0.0
         if i==-1:
             print(f'Changing right contact fermi energy: {fermiPrev} --> {Ef}')
         elif i==0:
             print(f'Changing left contact fermi energy: {fermiPrev} --> {Ef}')
         else:
             print(f'Changing contact {i+1} fermi energy: {fermiPrev} --> {Ef}')
-        dFermi = Ef - fermiPrev
         # Onsite energies
-        self.gList[i].H += dFermi*np.eye(dim)
-        # And hopping overlaps
-        for j,S in enumerate(self.gList[i].Slist):
-            self.gList[i].Vlist[j] += dFermi*S
-        #print(np.diag(self.gList[i].H))
-        self.gList[i].fermi = Ef
+        self.gList[i].updateH(Ef)
     
     # Fermi levels used to update onsite energies, Fock matrix unused 
     def setF(self,F, muL, muR):
@@ -502,7 +500,28 @@ class surfGBAt:
         self.sigmaKprev = None
         self.Eprev = Eminf
 
-        # For generate extended system for compatibility with density functions
+        self.updateH()
+
+    def updateH(self, fermi=None):
+        """Update onsite and hopping matrices, as well as extended lattice matrices
+        H0x and S0x include 13 sites total (12 neighbor sites followed by 1 onsite term)
+        Also stored as F and S for compatibility with density.py functions
+
+        Args:
+            fermi (float): New Fermi energy setpoint if not None (default=None)
+        """
+        if fermi is not None and self.fermi is not None and fermi != self.fermi:
+            # Shift fermi energy
+            fermiPrev = self.fermi
+            dFermi =  fermi - fermiPrev
+            # Onsite energies
+            self.H += dFermi*np.eye(dim)
+            # And hopping overlaps
+            for j,S in enumerate(self.Slist):
+                self.Vlist[j] += dFermi*S
+            #print(np.diag(self.H))
+            self.fermi = fermi
+
         H0x = np.kron(np.eye(self.NN+1), self.H)
         S0x = np.eye(dim*(self.NN+1))
         for i in range(self.NN):
@@ -584,7 +603,7 @@ class surfGBAt:
         #Self-consistency loop 
         count = 0
         maxIter = 1000
-        diff = np.inf                             ## SET THIS TO 0 to BYPASS SECOND LOOP
+        diff = 0#np.inf                             ## SET THIS TO 0 to BYPASS SECOND LOOP
         A = (E - self.eta*1j)*np.eye(dim) - self.H
         planeVec = [0,1,2,6,7,8] # Location of vectors in plane
         while diff > conv and count < maxIter:
@@ -608,6 +627,10 @@ class surfGBAt:
         else:
             return [sigSurf[i] for i in inds]
     
+    # Empty function for compatibility with density.py methods
+    def setF(self, F, mu1, mu2):
+        pass # Bethe lattice bulk properties are intrinsic (dependent on TB parameters)
+    
     # Wrapper function for compatibility with density.py methods
     def sigmaTot(self, E, conv=1e-5):
         sig = np.zeros(((self.NN + 1)*dim, (self.NN+1)*dim), dtype=complex)
@@ -617,6 +640,12 @@ class surfGBAt:
             pair_k = (k + 6)%12 # Opposite direction vector
             sig[k*dim:(k+1)*dim,k*dim:(k+1)*dim] = sigTot - sigK[pair_k]
         return sig
+    
+    # Get the bulk DOS of the Bethe lattice
+    def DOS(self, E):
+        Gr = LA.inv((E-1j*self.eta)*np.eye(dim)- self.H - np.sum(self.sigma(E), axis=0))
+        return -np.trace(Gr).imag/np.pi
+
     
     # Calculate fermi energy using bisection (to specified tolerance)
     def calcFermi(self, ne, fGuess=5, tol=1e-5):
