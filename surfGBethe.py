@@ -494,7 +494,7 @@ class surfGBAt:
         self.Vlist = Vlist
         self.NN = len(Slist)
         assert self.NN == 12, "Error: surfGBAt only implemented for FCC using 12 NN"
-        #self.Slist = [np.zeros((dim,dim)) for n in range(self.NN)]
+        #self.Slist = [np.zeros((dim,dim)) for n in range(self.NN)] #To match ANT.Gaussian default
         self.eta = eta
         self.T = T
         self.sigmaKprev = None

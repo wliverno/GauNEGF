@@ -78,15 +78,18 @@ class NEGFE(NEGF):
         if Emin:
             self.Emin=Emin
  
-    def integralCheck(self, tol=1e-4, cycles=10, damp=0.1):
-        print(f'RUNNING SCF FOR {cycles} CYCLES USING DEFAULT GRID: ')
+    def integralCheck(self, tol=1e-4, cycles=10, damp=0.1, pauseFermi=False):
         if self.updFermi:
-            self.updFermi=False
+            if pauseFermi:
+                self.updFermi=False
             if cycles>0:
+                print(f'RUNNING SCF FOR {cycles} CYCLES USING DEFAULT GRID: ')
                 self.SCF(1e-10,damp,cycles)
-            self.updFermi=True
+            if pauseFermi:
+                self.updFermi=True
         else:
             if cycles>0:
+                print(f'RUNNING SCF FOR {cycles} CYCLES USING DEFAULT GRID: ')
                 self.SCF(1e-10,damp,cycles)
         print('SETTING INTEGRATION LIMITS... ')
         self.Emin, self.N1, self.N2 = integralFit(self.F*har_to_eV, self.S, self.g, sum(self.getHOMOLUMO())/2, self.Eminf, tol)
@@ -124,13 +127,11 @@ class NEGFE(NEGF):
             # Number of electrons calculated assuming energy independent
             Ncurr = np.trace(density(V,Vc,D,GamBar,self.Eminf, self.fermi)).real
             
+            dN = self.bar.ne - self.nelec
             # Account for factor of 2 for restricted case
             if self.spin=='r':
-                dN = (self.bar.ne-self.nelec)/2
-                #print('Nexp: ', self.bar.ne/2, ' Nactual: ', self.nelec/2, ' Napprox: ', Ncurr, ' setpoint:', Ncurr+dN)  
-            else:
-                dN = (self.bar.ne-self.nelec)
-                #print('Nexp: ', self.bar.ne, ' Nactual: ', self.nelec, ' Napprox: ', Ncurr, ' setpoint:', Ncurr+dN)  
+                dN /= 2
+            #print('Nexp: ', self.bar.ne, ' Nact: ', self.nelec, ' Napprox: ', Ncurr, ' setpoint:', Ncurr+dN)  
             conv= min(self.convLevel, 1e-3)
             Nsearch = Ncurr + dN
             if Nsearch > 0 and Nsearch < len(self.F):
