@@ -3,6 +3,8 @@ import numpy as np
 from numpy import linalg as LA
 from scipy.linalg import fractional_matrix_power
 from scipy.special import roots_legendre
+from scipy.special import roots_chebyu
+import matplotlib.pyplot as plt
 
 # Developed Packages:
 from fermiSearch import DOSFermiSearch
@@ -26,6 +28,35 @@ def fermi(E, mu, T):
 
 def DOSg(F, S, g, E):
     return -np.trace(np.imag(Gr(F,S, g, E)))/np.pi
+
+def getANTPoints(N):
+    """
+    Generate integration points and weights matching ANT.Gaussian implementation.
+    Following IntCompPlane subroutine in device.F90.
+    
+    Args:
+        N (int): Number of points
+    
+    Returns:
+        tuple: (points, weights) - numpy arrays of integration points and weights
+    """
+    
+    k = np.arange(1,N+1,2)
+    theta = k*np.pi/(2*N)
+    xs = np.sin(theta)
+    xcc = np.cos(theta)
+
+    #print(k,xs,xcc)
+
+    # Transform points using ANT-like formula
+    x = 1.0 + 0.21220659078919378103 * xs * xcc * (3 + 2*xs*xs) - k/(N)
+    x = np.concatenate((x,-1*x))
+    
+    # Generate weights similarly to ANT
+    w = xs**4 * 16.0/(3*(N))
+    w = np.concatenate((w, w))
+    
+    return x, w
 
 ## ENERGY INDEPENDENT DENSITY FUNCTIONS
 # Requires D, V = eig(H - sigma) and Gam = X@(sigma - sigma.conj().T)@X
@@ -148,7 +179,7 @@ def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=300):
     return den/(2*np.pi)
 
 # Get equilibrium density using a complex contour and a Gaussian quadrature
-def densityComplex(F, S, g, Emin, mu, N=100, T=300, showText=True):
+def densityComplex(F, S, g, Emin, mu, N=100, T=300, showText=True, method='ant'):
     #Construct circular contour
     nKT= 5
     broadening = nKT*kB*T
@@ -156,14 +187,26 @@ def densityComplex(F, S, g, Emin, mu, N=100, T=300, showText=True):
     center = (Emin+Emax)/2
     r = (Emax-Emin)/2
     
+    if method == 'legendre':
+        x, w = roots_legendre(N)
+    elif method == 'chebyshev':
+        k = np.arange(1, N+1)
+        x = np.cos(k * np.pi / (N+1))
+        w = (np.pi/(N+1))*(np.sin(k * np.pi / (N+1))**2) /np.sqrt(1-(x**2))
+    elif method == 'ant':
+        x, w = getANTPoints(N)
+    else:
+        x = np.linspace(-1, 1, N)
+        w = 2*np.ones(N)/N
+    
     #Integrate along contour
     if showText:
        print(f'Complex integration over {N} points...')
     lineInt = np.array(np.zeros(np.shape(F)), dtype=complex)
-    x,w = roots_legendre(N)
-    x = np.real(x)
+    #x = np.real(x)
     for i, val in enumerate(x):
         theta = np.pi/2 * (val + 1)
+        #print('Theta=',theta, ', Weight=',w[i])
         z = center + r*np.exp(1j*theta)
         dz = 1j * r * np.exp(1j*theta)
         lineInt += (np.pi/2)*w[i]*Gr(F, S, g, z)*fermi(z, mu, T)*dz
@@ -234,7 +277,7 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
         counter += 1
     if counter == maxcycles:
         print(f'Warning: Emin still not within tolerance (final value = {dP}) after {maxcycles} energy samples')
-    print(f'Final Emin: {Emin} eV') 
+    print(f'Final Emin: {Emin} eV, DOS = {dP:.2E}') 
     
     #Determine grid using dP
     counter = 0
@@ -318,7 +361,7 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e
     print(f'Electrons below lowest onsite energy: {nELow}')
     if nELow >= ne:
         raise Exception('Calculated Fermi energy is below lowest orbital energy!')
-    pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, N1, T=0, showText=False)
+    pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, N1, T=0, showText=False, method='legendre')
     
     # Fermi search using bisection method (F not changing, highly stable)
     Ncurr = -1

@@ -193,6 +193,8 @@ class NEGF(object):
             self.rContact=np.array(rContact)
         lInd = np.where(np.isin(abs(self.locs), self.lContact))[0]
         rInd = np.where(np.isin(abs(self.locs), self.rContact))[0]
+        contInds = list(lContact) + list(rContact)
+        self.nelecContacts = sum([self.bar.atmchg[i-1] for i in contInds])
         return lInd, rInd
     
     # Set self-energies of left and right contacts (TODO: n>2 terminal device?)
