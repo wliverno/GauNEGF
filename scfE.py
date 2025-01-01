@@ -38,10 +38,14 @@ V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 class NEGFE(NEGF):
     # Set energy dependent Bethe lattice contact using surfGB() object
     def setContactBethe(self, contactList, latFile='Au', eta=1e-9, T=300):
+        # Set L/R contacts based on atom numbers, use orbital inds for surfG() object
         inds = super().setContacts(contactList[0], contactList[-1])
         self.lInd = inds[0]
         self.rInd = inds[1]
+        # Generate surfGB() object for Bethe lattice contacts
         self.g = surfGB(self.F*har_to_eV, self.S, contactList, self.bar, latFile, self.spin, eta, T)
+        
+        # Update other variables
         self.setIntegralLimits(100, 50)
         self.T = T
         return inds
@@ -61,16 +65,17 @@ class NEGFE(NEGF):
             tauList = (ind1, ind2)
         # Generate surfG() object for the molecule + contacts and initialize variables
         self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eta)
+        
+        # Update other variables
         self.setIntegralLimits(100, 50)
         self.T = T
         return inds
     
     # Set up Fermi Search algorithm after setting system Fermi energies
-    def setVoltage(self, qV, fermi=np.nan, Emin=None, Eminf=None):
+    def setVoltage(self, qV, fermi=np.nan, Emin=None, Eminf=None, fermiMethod='muller'):
         super().setVoltage(qV, fermi, Emin, Eminf)
         if self.updFermi:
-            self.fSearch = DOSFermiSearch(self.fermi, self.nae+self.nbe)
-        self.nFermiUpd = 0 
+            self.fermiMethod = fermiMethod
     
     def setIntegralLimits(self, N1, N2, Emin=False):
         self.N1 = N1
@@ -78,7 +83,7 @@ class NEGFE(NEGF):
         if Emin:
             self.Emin=Emin
  
-    def integralCheck(self, tol=1e-4, cycles=10, damp=0.1, pauseFermi=False):
+    def integralCheck(self, tol=1e-4, cycles=10, damp=0.02, pauseFermi=False):
         if self.updFermi:
             if pauseFermi:
                 self.updFermi=False
@@ -93,14 +98,14 @@ class NEGFE(NEGF):
                 self.SCF(1e-10,damp,cycles)
         print('SETTING INTEGRATION LIMITS... ')
         self.Emin, self.N1, self.N2 = integralFit(self.F*har_to_eV, self.S, self.g, sum(self.getHOMOLUMO())/2, self.Eminf, tol)
+        PLower = densityReal(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
+        nLower = np.trace(self.S@PLower).real
         if self.updFermi:
                 print('CALCULATING FERMI ENERGY')
                 ne = self.nae if self.spin is 'r' else self.nae+self.nbe
-                self.fermi = calcFermi(self.g, ne, self.Emin, self.Emax, self.fermi, 
-                                       self.N1, self.N2, self.Eminf, tol)[0]
-                self.nFermiUpd=0
-                self.setVoltage(self.qV)
-                self.fSearch.Ef=self.fermi
+                self.fermi, dE, _ = calcFermiSecant(self.g, ne-nLower, self.Emin, self.fermi, self.N1, tol=tol, maxcycles=100)
+                print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
+                self.setVoltage(self.qV, fermiMethod=self.fermiMethod)
         print('INTEGRATION LIMITS SET!')
         print('#############################')
     
@@ -110,45 +115,71 @@ class NEGFE(NEGF):
 
     # Updated to use energy-dependent contour integral from surfG()
     def FockToP(self):
+        
+        print('Calculating lower density matrix:') 
+        P = densityReal(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
+        nLower = np.trace(self.S@P).real 
+
         # Fermi Energy Update using local self-energy approximation
         if self.updFermi:
             fermi_old = self.fermi+0.0
-            
-            # Generate inputs for energy-independent density calculation
-            X = np.array(self.X)
-            sig1, sig2 = self.getSigma(self.fermi)
-            Fbar = X@(self.F*har_to_eV + sig1 + sig2)@X
-            Gam1 = (sig1 - sig1.conj().T)*1j
-            Gam2 = (sig2 - sig2.conj().T)*1j
-            GamBar = (X@Gam1@X)+(X@Gam2@X)
-            D, V = LA.eig(Fbar)
-            Vc = LA.inv(V.conj().T)
-
-            # Number of electrons calculated assuming energy independent
-            Ncurr = np.trace(density(V,Vc,D,GamBar,self.Eminf, self.fermi)).real
-            
-            dN = self.bar.ne - self.nelec
-            # Account for factor of 2 for restricted case
-            if self.spin=='r':
-                dN /= 2
-            #print('Nexp: ', self.bar.ne, ' Nact: ', self.nelec, ' Napprox: ', Ncurr, ' setpoint:', Ncurr+dN)  
             conv= min(self.convLevel, 1e-3)
-            Nsearch = Ncurr + dN
-            if Nsearch > 0 and Nsearch < len(self.F):
-                self.fermi = bisectFermi(V, Vc, D, GamBar, Ncurr+dN, conv, self.Eminf)
-                print(f'Fermi Energy set to {self.fermi:.2f} eV, shifting by {dN:.2E} electrons ')
+            if self.fermiMethod=='predict':
+                # Generate inputs for energy-independent density calculation
+                X = np.array(self.X)
+                sig1, sig2 = self.getSigma(self.fermi)
+                Fbar = X@(self.F*har_to_eV + sig1 + sig2)@X
+                Gam1 = (sig1 - sig1.conj().T)*1j
+                Gam2 = (sig2 - sig2.conj().T)*1j
+                GamBar = (X@Gam1@X)+(X@Gam2@X)
+                D, V = LA.eig(Fbar)
+                Vc = LA.inv(V.conj().T)
+
+                # Number of electrons calculated assuming energy independent
+                Ncurr = np.trace(density(V,Vc,D,GamBar,self.Eminf, self.fermi)).real
+                
+                dN = self.bar.ne - self.nelec
+                # Account for factor of 2 for restricted case
+                if self.spin=='r':
+                    dN /= 2
+                dN -= nLower
+                #print('Nexp: ', self.bar.ne, ' Nact: ', self.nelec, ' Napprox: ', Ncurr, ' setpoint:', Ncurr+dN)  
+                Nsearch = Ncurr + dN
+                if Nsearch > 0 and Nsearch < len(self.F):
+                    self.fermi = bisectFermi(V, Vc, D, GamBar, Ncurr+dN, conv, self.Eminf, conv=conv)
+                    print(f'Fermi Energy set to {self.fermi:.2f} eV, shifting by {dN:.2E} electrons ')
+                else:
+                    print('Warning: Local sigma approximation not valid, Fermi energy not updated...')
+                print('Calculating equilibrium density matrix:') 
+                P += densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=self.N1, T=self.T)
+            elif self.fermiMethod=='secant':
+                ne = self.bar.ne
+                if self.spin =='r':
+                    ne /= 2
+                print('SECANT METHOD:')
+                self.fermi, dE, P2 = calcFermiSecant(self.g, ne-nLower, self.Emin, fermi_old, self.N1, tol=conv)  
+                print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
+                print('Setting equilibrium density matrix...') 
+                P += P2
+            elif self.fermiMethod=='muller':
+                ne = self.bar.ne
+                if self.spin =='r':
+                    ne /= 2
+                print('MULLER METHOD:')
+                self.fermi, dE, P2 = calcFermiMuller(self.g, ne-nLower, self.Emin, fermi_old, self.N1, tol=conv)
+                print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
+                print('Setting equilibrium density matrix...') 
+                P += P2
             else:
-                print('Warning: Local sigma approximation not valid, Fermi energy not updated...')
+                raise Exception('Error: invalid Fermi search method, needs to be \'muller\', \'secant\', or \'predict\'')
             # Shift Emin, mu1, and mu2 and update contact self-energies
-            self.setVoltage(self.qV)
+            self.setVoltage(self.qV, fermiMethod=self.fermiMethod)
             self.Emin += self.fermi-fermi_old
             self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
-        
-        # Calculate matrices using two part integration method
-        print('Calculating equilibrium density matrix:') 
-        P = densityReal(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
-        P += densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=self.N1, T=self.T)
-                
+        else:
+            print('Calculating equilibrium density matrix:') 
+            P += densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=self.N1, T=self.T)
+         
         # If bias applied, need to integrate G<
         if self.mu1 != self.mu2:
             print('Calculating non-equilibrium density matrix:')
@@ -187,23 +218,6 @@ class NEGFE(NEGF):
         #for pair in zip(EListBefore, EList):                       
         #    print("Energy Before =", str(pair[0]), ", Energy After =", str(pair[1]))
        
-        # OLD IMPLEMENTATION OF FERMI ENERGY UPDATE: 
-        # Update fermi if MaxDP below threshold or at least once every 20 iterations
-        #if self.updFermi and (self.MaxDP<1e-2 or self.nFermiUpd>=20):
-        #    fermi_old = self.fermi+0.0
-        #    dosFunc = lambda E: DOS([E], self.F*har_to_eV, self.S, 
-        #                            self.getSigma(E)[0], self.getSigma(E)[1])[0][0]
-        #    self.fermi = self.fSearch.step(dosFunc, self.updateN())
-        #    acc = self.fSearch.get_accuracy()
-        #    print(f'Fermi Energy set to {self.fermi:.2f} eV, Accuracy = +/- {acc:.2E} eV')
-        #    # Apply fermi shift to all integration limits (mu1, mu2, Emin)
-        #    self.setVoltage(self.qV)
-        #    self.Emin += self.fermi-fermi_old
-        #    self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
-        #    self.nFermiUpd = 0
-        #else:
-        #    self.nFermiUpd += 1
-
         return dE
     
     

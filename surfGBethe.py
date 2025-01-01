@@ -22,6 +22,8 @@ class surfGB:
         self.dirLists = []
         self.nIndLists = []
         self.Xi = fractional_matrix_power(S, 0.5)
+        if spin != 'r':
+            self.Xi = self.Xi[::2, ::2]
         
         # Spin independent implementation, add generate spin terms during sigma generation
         self.spin = spin
@@ -322,12 +324,12 @@ class surfGB:
     # Update contact i with a new fermi energy (Ef) by shifting Hamiltonian
     def updateFermi(self, i, Ef):
         fermiPrev = self.gList[i].fermi +0.0
-        if i==-1:
-            print(f'Changing right contact fermi energy: {fermiPrev} --> {Ef}')
-        elif i==0:
-            print(f'Changing left contact fermi energy: {fermiPrev} --> {Ef}')
-        else:
-            print(f'Changing contact {i+1} fermi energy: {fermiPrev} --> {Ef}')
+        #if i==-1:
+        #    print(f'Changing right contact fermi energy: {fermiPrev} --> {Ef}')
+        #elif i==0:
+        #    print(f'Changing left contact fermi energy: {fermiPrev} --> {Ef}')
+        #else:
+        #    print(f'Changing contact {i+1} fermi energy: {fermiPrev} --> {Ef}')
         # Onsite energies
         self.gList[i].updateH(Ef)
     
@@ -603,7 +605,7 @@ class surfGBAt:
         #Self-consistency loop 
         count = 0
         maxIter = 1000
-        diff = 0#np.inf                             ## SET THIS TO 0 to BYPASS SECOND LOOP
+        diff = np.inf                             ## SET THIS TO 0 to BYPASS SECOND LOOP
         A = (E - self.eta*1j)*np.eye(dim) - self.H
         planeVec = [0,1,2,6,7,8] # Location of vectors in plane
         while diff > conv and count < maxIter:

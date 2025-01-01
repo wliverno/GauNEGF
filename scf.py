@@ -305,8 +305,8 @@ class NEGF(object):
     def PMix(self, damping, Pulay=False):
         # Store Old Density Info
         Pback = getDen(self.bar, self.spin)
-        Dense_old = np.diagonal(Pback)
-        Dense_diff = abs(np.diagonal(self.P) - Dense_old)
+        Dense_old = np.diag(Pback)
+        Dense_diff = abs(np.diag(self.P) - Dense_old)
         self.pList[1:, :, :] = self.pList[:-1, :, :]
         self.pList[0,  :, :] = Pback + damping*(self.P - Pback)
         self.DPList[1:, :] = self.DPList[:-1, :]
