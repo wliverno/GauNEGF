@@ -281,17 +281,19 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
     
     #Determine grid using dP
     counter = 0
-    Ncomplex = 8
+    Ncomplex = 4
     dP = 100
     rho = np.zeros(np.shape(F))
     while dP > tol and Ncomplex < 1000:
-        Ncomplex *= 2 # Start with 16 points, double each time
+        Ncomplex *= 2 # Start with 8 points, double each time
         rho_ = np.real(densityComplex(F, S, g, Emin,  mu, Ncomplex, T=0))
         dP = max(abs(np.diag(rho_ - rho)))
         print(f"MaxDP = {dP:.2E}, N = {sum(np.diag(rho_).real):2f}")
         rho = rho_
         counter += 1
-    if Ncomplex >  maxcycles and dP > tol:
+    if dP < tol:
+        Ncomplex /= 2
+    elif Ncomplex >  maxcycles and dP > tol:
         print(f'Warning: Ncomplex still not within tolerance (final value = {dP})')
     print(f'Final Ncomplex: {Ncomplex}') 
     #Determine grid using dP
@@ -306,7 +308,9 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
         print(f"MaxDP = {dP:.2E}")
         rho = rho_
         counter += 1
-    if Nreal >  maxcycles and dP > tol:
+    if dP < tol:
+        Nreal /= 2
+    elif Nreal >  maxcycles and dP > tol:
         print(f'Warning: Nreal still not within tolerance (final value = {dP})')
     print(f'Final Nreal: {Nreal}') 
 
@@ -349,7 +353,7 @@ def getFermi1DContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
     return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, Eminf, tol, maxcycles)
 
 # Calculate the fermi energy of the surfG() object
-def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e-4, maxcycles=1000, nOrbs=0):
+def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e-4, maxcycles=20, nOrbs=0):
     # Fermi Energy search using full contact
     print(f'Eminf DOS = {DOSg(g.F,g.S,g,Eminf)}')
     fermi = fermiGuess
@@ -389,3 +393,106 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e
         print(f'Warning: Fermi energy still not within tolerance! Ef = {fermi:.2f} eV, N = {Ncurr:.2f})')
     print(f'Finished after {counter} iterations, Ef = {fermi:.2f}')
     return fermi, Emin, N1, N2
+
+def calcFermiSecant(g, ne, Emin, Ef, N, tol=1e-3, maxcycles=10):
+    """
+    Calculate Fermi energy using Secant method, updating dE at each step
+    """
+    assert ne < len(g.F), "Number of electrons cannot exceed number of basis functions!"
+    pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, N, T=0, showText=False)
+    g.setF(g.F, Ef, Ef)
+    nCurr = np.trace(pMu(Ef)@g.S).real
+    dE = 1.0
+    counter = 0
+    while abs(nCurr-ne) > tol and counter < maxcycles:
+        Ef += dE
+        g.setF(g.F, Ef, Ef)
+        P = pMu(Ef)
+        nNext = np.trace(pMu(Ef)@g.S).real
+        #print(Ef, dE, nCurr, nNext)
+        if abs(nNext - nCurr)<1e-10:
+            print('Warning: change in ne low, reducing step size')
+            dE *= 0.1
+            counter += 1
+            continue
+        dE = dE*((ne - nCurr)/(nNext-nCurr)) - dE
+        nCurr = nNext + 0.0
+        counter += 1
+    
+    Ef += dE  
+    if counter == maxcycles:
+        print(f'Warning: Max cycles reached, convergence = {abs(nCurr-ne):.2E}')
+    return Ef, dE, P
+
+def calcFermiMuller(g, ne, Emin, Ef, N, tol=1e-3, maxcycles=10):
+    """
+    Calculate Fermi energy using Muller's method, starting with 3 initial points
+    """
+    assert ne < len(g.F), "Number of electrons cannot exceed number of basis functions!"
+    small = 1e-10  # Small value to prevent division by zero
+    pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, N, T=0, showText=False)
+
+    # Initialize three points around initial guess
+    E2 = Ef
+    E1 = E2 - 0.5
+    E0 = E1 - 0.5
+
+    # Get initial density matrices and electron counts
+    g.setF(g.F, E2, E2)
+    n2 = np.trace(pMu(E2)@g.S).real - ne
+    g.setF(g.F, E1, E1)
+    n1 = np.trace(pMu(E1)@g.S).real - ne
+    g.setF(g.F, E0, E0)
+    n0 = np.trace(pMu(E0)@g.S).real - ne
+
+    counter = 0
+    while counter < maxcycles:
+        # Calculate differences between points
+        h0 = E0 - E2
+        h1 = E1 - E2
+
+        # Set up quadratic coefficients
+        c = n2
+        e0 = n0 - c
+        e1 = n1 - c
+        
+        # Calculate coefficients for the quadratic approximation
+        det = h0 * h1 * (h0 - h1)
+        a = (e0 * h1 - h0 * e1) / det
+        b = (h0 * h0 * e1 - h1 * h1 * e0) / det
+
+        # Calculate discriminant for quadratic formula
+        disc = np.sqrt(b * b - 4 * a * c) if b * b > 4 * a * c else 0
+        if b < 0:
+            disc = -disc
+
+        # Calculate next approximation
+        dE = -2 * c / (b + disc)
+        Enext = E2 + dE
+
+        # Update points maintaining proper ordering
+        if abs(Enext - E1) < abs(Enext - E0):
+            E0, E1 = E1, E0
+            n0, n1 = n1, n0
+
+        if abs(Enext - E2) < abs(Enext - E1):
+            E2, E1 = E1, E2
+            n2, n1 = n1, n2
+
+        E2 = Enext
+        g.setF(g.F, E2, E2)
+        P = pMu(E2)
+        n2 = np.trace(P@g.S).real - ne
+
+        # Check both relative error and absolute convergence
+        if abs(n2) < tol:
+            break
+
+        #print("E0 - ", E0, n0, "E1 - ", E1, n1, "E2 - ", E2, n2, " dE ", dE)
+        counter += 1
+
+    if counter == maxcycles:
+        print(f'Warning: Max cycles reached, convergence = {abs(n2):.2E}')
+
+    return E2, dE, P
+
