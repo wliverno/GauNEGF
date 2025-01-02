@@ -225,7 +225,7 @@ def densityComplex(F, S, g, Emin, mu, N=100, T=300, showText=True, method='ant')
 
     
     #Return -Im(Integral)/pi, Equation 19 in 10.1103/PhysRevB.63.245407
-    return (1+0j)*np.abs(np.imag(lineInt))/np.pi
+    return (1+0j)*np.imag(lineInt)/np.pi
 
 
 # Get density using a complex contour and trapezoidal integration
@@ -399,7 +399,7 @@ def calcFermiSecant(g, ne, Emin, Ef, N, tol=1e-3, maxcycles=10):
     Calculate Fermi energy using Secant method, updating dE at each step
     """
     assert ne < len(g.F), "Number of electrons cannot exceed number of basis functions!"
-    pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, N, T=0, showText=False)
+    pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, N, T=0)
     g.setF(g.F, Ef, Ef)
     nCurr = np.trace(pMu(Ef)@g.S).real
     dE = 1.0
@@ -430,7 +430,7 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=1e-3, maxcycles=10):
     """
     assert ne < len(g.F), "Number of electrons cannot exceed number of basis functions!"
     small = 1e-10  # Small value to prevent division by zero
-    pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, N, T=0, showText=False)
+    pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, N, T=0)
 
     # Initialize three points around initial guess
     E2 = Ef
