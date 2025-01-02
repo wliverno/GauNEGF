@@ -67,7 +67,7 @@ class NEGF(object):
 
         # Pulay Mixing Initialization
         self.pList = np.array([self.P for i in range(nPulay)], dtype=complex)
-        self.DPList = np.ones((nPulay, self.nsto))*1e4
+        self.DPList = np.ones((nPulay, self.nsto, self.nsto))*1e4
         self.pMat = np.ones((nPulay+1, nPulay+1))*-1
         self.pMat[-1, -1] = 0
         self.pB = np.zeros(nPulay+1)
@@ -266,11 +266,8 @@ class NEGF(object):
         
         D,V = LA.eig(np.array(Fbar))
         Vc = LA.inv(V.conj().T)
-           
-        err =  np.float_(sum(np.imag(D)))
-        if  err > 0:
-            print('Imaginary elements on diagonal of D are positive ------->  ', err)
-        
+          
+                
         #Update Fermi Energy (if not constant)
         if self.updFermi:
             Nexp = self.bar.ne
@@ -309,8 +306,8 @@ class NEGF(object):
         Dense_diff = abs(np.diag(self.P) - Dense_old)
         self.pList[1:, :, :] = self.pList[:-1, :, :]
         self.pList[0,  :, :] = Pback + damping*(self.P - Pback)
-        self.DPList[1:, :] = self.DPList[:-1, :]
-        self.DPList[0,  :] = np.diag(np.real(self.P - Pback))
+        self.DPList[1:, :, :] = self.DPList[:-1, :, :]
+        self.DPList[0,  :, :] = np.real(self.P - Pback)
         
         # Pulay Mixing
         for i, v1 in enumerate(self.DPList):

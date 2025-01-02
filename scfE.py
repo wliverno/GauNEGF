@@ -145,8 +145,9 @@ class NEGFE(NEGF):
                 dN -= nLower
                 #print('Nexp: ', self.bar.ne, ' Nact: ', self.nelec, ' Napprox: ', Ncurr, ' setpoint:', Ncurr+dN)  
                 Nsearch = Ncurr + dN
+                print('CONSTANT SELF-ENERGY APPROXIMATION:')
                 if Nsearch > 0 and Nsearch < len(self.F):
-                    self.fermi = bisectFermi(V, Vc, D, GamBar, Ncurr+dN, conv, self.Eminf, conv=conv)
+                    self.fermi = bisectFermi(V, Vc, D, GamBar, Ncurr+dN, conv, self.Eminf)
                     print(f'Fermi Energy set to {self.fermi:.2f} eV, shifting by {dN:.2E} electrons ')
                 else:
                     print('Warning: Local sigma approximation not valid, Fermi energy not updated...')
@@ -190,7 +191,7 @@ class NEGFE(NEGF):
         D,V = LA.eig(self.X@(self.F*har_to_eV)@self.X)
         self.Xi = LA.inv(self.X)
         pshift = V.conj().T @ (self.Xi@P@self.Xi) @ V
-        self.P = np.abs(P.real) + 1j*P.imag
+        self.P = P.copy()
         occList = np.diag(np.real(pshift)) 
         EList = np.array(np.real(D)).flatten()
         inds = np.argsort(EList)        
