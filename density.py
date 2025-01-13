@@ -401,14 +401,15 @@ def calcFermiSecant(g, ne, Emin, Ef, N, tol=1e-3, maxcycles=10):
     assert ne < len(g.F), "Number of electrons cannot exceed number of basis functions!"
     pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, N, T=0)
     g.setF(g.F, Ef, Ef)
-    nCurr = np.trace(pMu(Ef)@g.S).real
+    P = pMu(Ef)
+    nCurr = np.trace(P@g.S).real
     dE = 1.0
     counter = 0
     while abs(nCurr-ne) > tol and counter < maxcycles:
         Ef += dE
         g.setF(g.F, Ef, Ef)
         P = pMu(Ef)
-        nNext = np.trace(pMu(Ef)@g.S).real
+        nNext = np.trace(P@g.S).real
         #print(Ef, dE, nCurr, nNext)
         if abs(nNext - nCurr)<1e-10:
             print('Warning: change in ne low, reducing step size')

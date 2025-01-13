@@ -103,9 +103,10 @@ class NEGFE(NEGF):
         if self.updFermi:
                 print('CALCULATING FERMI ENERGY')
                 ne = self.nae if self.spin is 'r' else self.nae+self.nbe
-                self.fermi, dE, _ = calcFermiSecant(self.g, ne-nLower, self.Emin, self.fermi, self.N1, tol=tol, maxcycles=100)
+                self.fermi, dE, P = calcFermiSecant(self.g, ne-nLower, self.Emin, self.fermi, self.N1, tol=tol, maxcycles=20)
                 print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
                 self.setVoltage(self.qV, fermiMethod=self.fermiMethod)
+                self.P = P
         print('INTEGRATION LIMITS SET!')
         print('#############################')
     

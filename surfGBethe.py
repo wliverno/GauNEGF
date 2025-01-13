@@ -25,7 +25,7 @@ class surfGB:
         if spin != 'r':
             self.Xi = self.Xi[::2, ::2]
         
-        # Spin independent implementation, add generate spin terms during sigma generation
+        # Spin independent implementation, add degenerate spin terms during sigma generation
         self.spin = spin
         orbMap = bar.ibfatm[bar.ibfatm>0] 
         orbTyp = bar.ibftyp[bar.ibfatm>0]
