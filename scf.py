@@ -67,8 +67,8 @@ class NEGF(object):
 
         # Pulay Mixing Initialization
         self.pList = np.array([self.P for i in range(nPulay)], dtype=complex)
-        self.DPList = np.ones((nPulay, self.nsto, self.nsto))*1e4
-        self.pMat = np.ones((nPulay+1, nPulay+1))*-1
+        self.DPList = np.ones((nPulay, self.nsto, self.nsto), dtype=complex)*1e4
+        self.pMat = np.ones((nPulay+1, nPulay+1), dtype=complex)*-1
         self.pMat[-1, -1] = 0
         self.pB = np.zeros(nPulay+1)
         self.pB[-1] = -1
@@ -307,7 +307,7 @@ class NEGF(object):
         self.pList[1:, :, :] = self.pList[:-1, :, :]
         self.pList[0,  :, :] = Pback + damping*(self.P - Pback)
         self.DPList[1:, :, :] = self.DPList[:-1, :, :]
-        self.DPList[0,  :, :] = np.real(self.P - Pback)
+        self.DPList[0,  :, :] = self.P - Pback
         
         # Pulay Mixing
         for i, v1 in enumerate(self.DPList):
