@@ -5,6 +5,7 @@ from scipy.linalg import fractional_matrix_power
 from scipy.special import roots_legendre
 from scipy.special import roots_chebyu
 import matplotlib.pyplot as plt
+import warnings
 
 # Developed Packages:
 from fermiSearch import DOSFermiSearch
@@ -17,9 +18,11 @@ kB = 8.617e-5           # eV/Kelvin
 
 ## HELPER FUNCTIONS
 def Gr(F, S, g, E):
+    """Green's function calculation (no broadening)"""
     return LA.inv(E*S - F - g.sigmaTot(E)) 
 
 def fermi(E, mu, T):
+    """Fermi function with T=0 convergent case"""
     kT = kB*T
     if kT==0:
         return (E<=mu)*1
@@ -57,6 +60,30 @@ def getANTPoints(N):
     w = np.concatenate((w, w))
     
     return x, w
+
+def integratePoints(computeFunc, points, weights, parallel=True, numWorkers=None, nChunk=1, 
+                  showText=True, integrationType=""):
+    """Generic integration helper that handles both parallel and serial cases"""
+    if parallel:
+        try:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=numWorkers) as executor:
+                if showText:
+                    print(f'{integrationType} integration over {len(points)} points using parallel processing...')
+                results = list(executor.map(computeFunc, range(len(points)), chunksize=nChunk))
+                return sum(results)
+        except ImportError:
+            if showText:
+                print(f'{integrationType} integration over {len(points)} points using serial processing (parallel unavailable)...')
+        except Exception as e:
+            warnings.warn(f"Parallel processing failed: {str(e)}. Falling back to serial processing.")
+            if showText:
+                print(f'{integrationType} integration over {len(points)} points using serial processing (parallel failed)...')
+    else:
+        if showText:
+            print(f'{integrationType} integration over {len(points)} points using serial processing...')
+    
+    return sum(computeFunc(i) for i in range(len(points)))
 
 ## ENERGY INDEPENDENT DENSITY FUNCTIONS
 # Requires D, V = eig(H - sigma) and Gam = X@(sigma - sigma.conj().T)@X
@@ -106,25 +133,29 @@ def bisectFermi(V, Vc, D, Gam, Nexp, conv=1e-3, Eminf=-1e6):
 
 ## ENERGY DEPENDENT DENSITY FUNCTIONS
 # Get equilibrium density at a single contact (ind) using a real energy grid
-def densityReal(F, S, g, Emin, mu, N=100, T=300, showText=True):
+def densityReal(F, S, g, Emin, mu, N=100, T=300, parallel=True,
+                numWorkers=None, showText=True):
     kT = kB*T
     Emax = mu + 5*kT
     mid = (Emax-Emin)/2
     defInt = np.array(np.zeros(np.shape(F)), dtype=complex)
     x,w = roots_legendre(N)
     x = np.real(x)
-    if showText:
-        print(f'Real integration over {N} points...')
-    for i, val in enumerate(x):
-        E = mid*(val + 1) + Emin
-        defInt += mid*w[i]*Gr(F, S, g, E)*fermi(E, mu, T)
+    
+    def computePoint(i):
+        E = mid*(x[i] + 1) + Emin
+        return mid*w[i]*Gr(F, S, g, E)*fermi(E, mu, T)
+
+    defInt = integratePoints(computePoint, x, w, parallel, numWorkers,
+                              showText=showText, integrationType="Real")
     if showText:
         print('Integration done!')
     
     return (-1+0j)*np.imag(defInt)/(np.pi)
 
 # Get non-equilibrium density at a single contact (ind) using a real energy grid
-def densityGrid(F, S, g, mu1, mu2, ind=None, N=100, T=300):
+def densityGrid(F, S, g, mu1, mu2, ind=None, N=100, T=300, parallel=True,
+                numWorkers=None, showText=True):
     kT = kB*T
     muLo = min(mu1, mu2)
     muHi = max(mu1, mu2)
@@ -135,9 +166,9 @@ def densityGrid(F, S, g, mu1, mu2, ind=None, N=100, T=300):
     den = np.array(np.zeros(np.shape(F)), dtype=complex)
     x,w = roots_legendre(N)
     x = np.real(x)
-    print(f'Real integration over {N} points...')
-    for i, val in enumerate(x):
-        E = mid*(val + 1) + Emin
+    
+    def computePoint(i):
+        E = mid*(x[i] + 1) + Emin
         GrE = Gr(F, S, g, E)
         GaE = GrE.conj().T
         if ind == None:
@@ -146,9 +177,13 @@ def densityGrid(F, S, g, mu1, mu2, ind=None, N=100, T=300):
             sig = g.sigma(E, ind)
         Gamma = 1j*(sig - sig.conj().T)
         dFermi = fermi(E, muHi, T) - fermi(E, muLo, T)
-        den += mid*w[i]*(GrE@Gamma@GaE)*dFermi*dInt
-    print('Integration done!')
-    
+        return mid*w[i]*(GrE@Gamma@GaE)*dFermi*dInt
+     
+    den = integratePoints(computePoint, x, w, parallel, numWorkers,
+                              showText=showText, integrationType="Real (NEGF)")
+    if showText:
+        print('Integration done!')
+ 
     return den/(2*np.pi)
 
 # Get non-equilibrium density at a single contact (ind) using a real energy grid
@@ -179,7 +214,8 @@ def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=300):
     return den/(2*np.pi)
 
 # Get equilibrium density using a complex contour and a Gaussian quadrature
-def densityComplex(F, S, g, Emin, mu, N=100, T=300, showText=True, method='ant'):
+def densityComplex(F, S, g, Emin, mu, N=100, T=300, parallel=True, numWorkers=None, 
+                         showText=True, method='ant'):
     #Construct circular contour
     nKT= 5
     broadening = nKT*kB*T
@@ -200,26 +236,26 @@ def densityComplex(F, S, g, Emin, mu, N=100, T=300, showText=True, method='ant')
         w = 2*np.ones(N)/N
     
     #Integrate along contour
-    if showText:
-       print(f'Complex integration over {N} points...')
-    lineInt = np.array(np.zeros(np.shape(F)), dtype=complex)
-    #x = np.real(x)
-    for i, val in enumerate(x):
-        theta = np.pi/2 * (val + 1)
+    def computePoint(i):
+        theta = np.pi/2 * (x[i] + 1)
         #print('Theta=',theta, ', Weight=',w[i])
         z = center + r*np.exp(1j*theta)
         dz = 1j * r * np.exp(1j*theta)
-        lineInt += (np.pi/2)*w[i]*Gr(F, S, g, z)*fermi(z, mu, T)*dz
+        return (np.pi/2)*w[i]*Gr(F, S, g, z)*fermi(z, mu, T)*dz
+    
+    lineInt=integratePoints(computePoint, x, w, parallel, numWorkers,
+                            showText=showText, integrationType="Complex")
     
     #Add integration points for Fermi Broadening
     if T>0:
-        if showText:
-            print('Integrating Fermi Broadening')
-        x,w = roots_legendre(N//10)
-        x = np.real(x)
-        for i, val in enumerate(x):
+        x_fermi,w_fermi = roots_legendre(N//8)
+        def computePointBroadening(i):
             E = broadening * (val) + mu
-            lineInt += broadening*w[i]*Gr(F, S, g, E)*fermi(E, mu, T)
+            return broadening*w[i]*Gr(F, S, g, E)*fermi(E, mu, T)
+    
+        lineInt += integratePoints(computePoint, x_fermi, w_fermi, parallel,
+                        numWorkers, showText=showText, integrationType="Real (Broadening)")
+
     if showText:
         print('Integration done!')
 
@@ -250,8 +286,8 @@ def densityComplexTrap(F, S, g, Emin, mu, N, T=300):
     #Add integration points for Fermi Broadening
     if T>0:
         print('Integrating Fermi Broadening')
-        Egrid2 = np.linspace(Emax, Emax+2*broadening, N//10)
-        for i in range(1, N//10):
+        Egrid2 = np.linspace(Emax, Emax+2*broadening, N//8)
+        for i in range(1, N//8):
             E = (Egrid2[i]+Egrid2[i-1])/2
             dS = Egrid2[i]-Egrid2[i-1]
             lineInt += Gr(F, S, g, E)*fermi(E, mu, T)*dS
