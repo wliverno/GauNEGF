@@ -15,6 +15,7 @@ from fermiSearch import DOSFermiSearch
 from scf import NEGF
 from surfG1D import surfG
 from surfGBethe import surfGB
+from surfGTester import surfGTest
 
 # Matrix Headers
 AlphaDen = "ALPHA DENSITY MATRIX"
@@ -70,7 +71,18 @@ class NEGFE(NEGF):
         self.setIntegralLimits(100, 50)
         self.T = T
         return inds
-    
+   
+    # Set constant sigma contact for testing or adding non-zero temperature
+    def setSigma(self, lContact, rContact, sig=-0.1j, sig2=False, T=300):
+        super().setSigma(lContact, rContact, sig, sig2)
+        inds = [self.lInd, self.rInd]
+        self.g = surfGTest(self.F*har_to_eV, self.S, inds)
+        
+        # Update other variables
+        self.setIntegralLimits(100, 50)
+        self.T = T
+        return inds
+
     # Set up Fermi Search algorithm after setting system Fermi energies
     def setVoltage(self, qV, fermi=np.nan, Emin=None, Eminf=None, fermiMethod='muller'):
         super().setVoltage(qV, fermi, Emin, Eminf)
