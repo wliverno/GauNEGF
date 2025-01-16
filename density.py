@@ -1,4 +1,4 @@
-# Python packages
+# Numerical Packages
 import numpy as np
 from numpy import linalg as LA
 from scipy.linalg import fractional_matrix_power
@@ -6,6 +6,10 @@ from scipy.special import roots_legendre
 from scipy.special import roots_chebyu
 import matplotlib.pyplot as plt
 import warnings
+
+# Parallelization packages
+from multiprocessing import Pool
+import os
 
 # Developed Packages:
 from fermiSearch import DOSFermiSearch
@@ -61,29 +65,75 @@ def getANTPoints(N):
     
     return x, w
 
-def integratePoints(computeFunc, points, weights, parallel=True, numWorkers=None, nChunk=1, 
-                  showText=True, integrationType=""):
-    """Generic integration helper that handles both parallel and serial cases"""
-    if parallel:
-        try:
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=numWorkers) as executor:
-                if showText:
-                    print(f'{integrationType} integration over {len(points)} points using parallel processing...')
-                results = list(executor.map(computeFunc, range(len(points)), chunksize=nChunk))
-                return sum(results)
-        except ImportError:
-            if showText:
-                print(f'{integrationType} integration over {len(points)} points using serial processing (parallel unavailable)...')
-        except Exception as e:
-            warnings.warn(f"Parallel processing failed: {str(e)}. Falling back to serial processing.")
-            if showText:
-                print(f'{integrationType} integration over {len(points)} points using serial processing (parallel failed)...')
-    else:
-        if showText:
-            print(f'{integrationType} integration over {len(points)} points using serial processing...')
+def integratePoints(computePointFunc, numPoints, parallel=False, numWorkers=None, 
+                   chunkSize=None, debug=False):
+    """
+    Integration of points optimized for quantum transport calculations.
+    Defaults to numpy's built-in parallelization for matrix operations.
     
-    return sum(computeFunc(i) for i in range(len(points)))
+    Parameters:
+    -----------
+    computePointFunc : callable
+        Function that computes a single integration point
+    numPoints : int
+        Total number of points to integrate
+    parallel : bool, optional (default=False)
+        Whether to force process-level parallel processing
+    numWorkers : int, optional
+        Number of workers for parallel processing. If None, automatically determined.
+    chunkSize : int, optional
+        Size of chunks for parallel processing. If None, automatically determined.
+    debug : bool, optional (default=False)
+        Whether to print debug information
+    """
+    # Get SLURM CPU count if available
+    numCores = int(os.environ.get('SLURM_CPUS_ON_NODE', os.cpu_count()))
+    
+    if debug:
+        print(f'Number of points to integrate: {numPoints}')
+        print(f'Number of CPU cores: {numCores}')
+    
+    # Use process-level parallelization for large workloads or when requested
+    useProcessParallel = parallel or (
+        numPoints >= 100 and numCores >= 32
+    )
+    
+    # Standard case: Use numpy's built-in parallelization
+    if not useProcessParallel:
+        if debug:
+            print('Using numpy built-in parallelization for matrix operations')
+        result = np.zeros_like(computePointFunc(0))
+        for i in range(numPoints):
+            result += computePointFunc(i)
+        return result
+    
+    # Parallel case
+    if debug:
+        print('Using process-level parallelization')
+        
+    if numWorkers is None:
+        numWorkers = max(1, numCores // 16)
+    
+    if chunkSize is None:
+        chunkSize = max(1, min(numPoints // (numWorkers * 4), 100))
+        
+    if debug:
+        print(f'Workers: {numWorkers}, Chunk size: {chunkSize}')
+    
+    def process_chunk(points):
+        return sum(computePointFunc(i) for i in points)
+
+    # Create chunks of indices
+    chunks = [range(i, min(i + chunkSize, numPoints)) 
+             for i in range(0, numPoints, chunkSize)]
+
+    with Pool(numWorkers) as pool:
+        try:
+            results = pool.map(process_chunk, chunks)
+            return sum(results)
+        except (AttributeError, TypeError):
+            # Fallback to sequential processing if parallel fails
+            return sum(process_chunk(chunk) for chunk in chunks)
 
 ## ENERGY INDEPENDENT DENSITY FUNCTIONS
 # Requires D, V = eig(H - sigma) and Gam = X@(sigma - sigma.conj().T)@X
@@ -133,7 +183,7 @@ def bisectFermi(V, Vc, D, Gam, Nexp, conv=1e-3, Eminf=-1e6):
 
 ## ENERGY DEPENDENT DENSITY FUNCTIONS
 # Get equilibrium density at a single contact (ind) using a real energy grid
-def densityReal(F, S, g, Emin, mu, N=100, T=300, parallel=True,
+def densityReal(F, S, g, Emin, mu, N=100, T=300, parallel=False,
                 numWorkers=None, showText=True):
     kT = kB*T
     Emax = mu + 5*kT
@@ -145,16 +195,19 @@ def densityReal(F, S, g, Emin, mu, N=100, T=300, parallel=True,
     def computePoint(i):
         E = mid*(x[i] + 1) + Emin
         return mid*w[i]*Gr(F, S, g, E)*fermi(E, mu, T)
+    
+    if showText:
+        print(f'Real integration over {N} points...')
 
-    defInt = integratePoints(computePoint, x, w, parallel, numWorkers,
-                              showText=showText, integrationType="Real")
+    defInt = integratePoints(computePoint, int(N), parallel, numWorkers)
+
     if showText:
         print('Integration done!')
     
     return (-1+0j)*np.imag(defInt)/(np.pi)
 
 # Get non-equilibrium density at a single contact (ind) using a real energy grid
-def densityGrid(F, S, g, mu1, mu2, ind=None, N=100, T=300, parallel=True,
+def densityGrid(F, S, g, mu1, mu2, ind=None, N=100, T=300, parallel=False,
                 numWorkers=None, showText=True):
     kT = kB*T
     muLo = min(mu1, mu2)
@@ -179,8 +232,11 @@ def densityGrid(F, S, g, mu1, mu2, ind=None, N=100, T=300, parallel=True,
         dFermi = fermi(E, muHi, T) - fermi(E, muLo, T)
         return mid*w[i]*(GrE@Gamma@GaE)*dFermi*dInt
      
-    den = integratePoints(computePoint, x, w, parallel, numWorkers,
-                              showText=showText, integrationType="Real (NEGF)")
+    if showText:
+        print(f'Real integration over {N} points...')
+    
+    den = integratePoints(computePoint, int(N), parallel, numWorkers)
+
     if showText:
         print('Integration done!')
  
@@ -214,7 +270,7 @@ def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=300):
     return den/(2*np.pi)
 
 # Get equilibrium density using a complex contour and a Gaussian quadrature
-def densityComplex(F, S, g, Emin, mu, N=100, T=300, parallel=True, numWorkers=None, 
+def densityComplex(F, S, g, Emin, mu, N=100, T=300, parallel=False, numWorkers=None, 
                          showText=True, method='ant'):
     #Construct circular contour
     nKT= 5
@@ -243,18 +299,20 @@ def densityComplex(F, S, g, Emin, mu, N=100, T=300, parallel=True, numWorkers=No
         dz = 1j * r * np.exp(1j*theta)
         return (np.pi/2)*w[i]*Gr(F, S, g, z)*fermi(z, mu, T)*dz
     
-    lineInt=integratePoints(computePoint, x, w, parallel, numWorkers,
-                            showText=showText, integrationType="Complex")
+    if showText:
+        print(f'Complex Integration over {N} points...')
+    lineInt=integratePoints(computePoint, int(N), parallel, numWorkers)
     
     #Add integration points for Fermi Broadening
     if T>0:
+        if showText:
+            print('Integrating Fermi Broadening')
         x_fermi,w_fermi = roots_legendre(N//8)
         def computePointBroadening(i):
-            E = broadening * (val) + mu
+            E = broadening * (x_fermi[i]) + mu
             return broadening*w[i]*Gr(F, S, g, E)*fermi(E, mu, T)
     
-        lineInt += integratePoints(computePoint, x_fermi, w_fermi, parallel,
-                        numWorkers, showText=showText, integrationType="Real (Broadening)")
+        lineInt += integratePoints(computePoint, int(N//8), parallel, numWorkers)
 
     if showText:
         print('Integration done!')
