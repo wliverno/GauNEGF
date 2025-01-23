@@ -15,7 +15,7 @@ from gauopen import QCUtil as qcu
 kB = 8.617e-5           # eV/Kelvin
 
 class surfG:
-    def __init__(self, Fock, Overlap, indsList, taus=-1, staus=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, neList=-1, eta=1e-9):
+    def __init__(self, Fock, Overlap, indsList, taus=-1, staus=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eta=1e-9):
         # Set up system
         self.F = np.array(Fock)
         self.S = np.array(Overlap)
@@ -43,14 +43,14 @@ class surfG:
             self.setContacts()
         else:
             self.contactFromFock = False
-            self.setContacts(alphas, aOverlaps, betas, bOverlaps, neList)
-            self.fermiList = [0]*len(indsList)
+            self.setContacts(alphas, aOverlaps, betas, bOverlaps)
+            self.fermiList=[None]*len(indsList)
 
         # Set up broadening for retarded/advanced Green's function, initialize g
         self.eta = eta
         self.gPrev = [np.zeros(np.shape(alpha)) for alpha in self.aList]
     
-    def setContacts(self, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, neList=-1):
+    def setContacts(self, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1):
         if self.contactFromFock:
             self.aList = []
             self.aSList = []
@@ -67,7 +67,6 @@ class surfG:
         else:
             self.bList = betas
             self.bSList = bOverlaps
-            self.fermiList = [getFermi1DContact(self, neList[i], i) for i in range(len(indsList))]
     
     def g(self,E, i, conv=1e-5, relFactor=0.1):
         alpha = self.aList[i]
@@ -104,13 +103,17 @@ class surfG:
             self.tauList = [self.F[np.ix_(taus[0],indsList[0])], self.F[np.ix_(taus[1],indsList[-1])]]
             self.stauList = [self.S[np.ix_(taus[0],indsList[0])], self.S[np.ix_(taus[1],indsList[-1])]]
         if not self.contactFromFock:
-            for i,mu in zip([0,-1], [mu1, mu2]):
-                fermi = self.fermiList[i]
-                if fermi!= mu:
-                    dFermi = mu - fermi
-                    self.alphas[i] += dFermi*np.eye(len(self.alphas[i]))
-                    self.betas[i] += dFermi*betaOverlaps[i]
-                    self.fermiList[i] = mu
+            if self.fermiList[0] == None:
+                self.fermiList[0] = mu1
+                self.fermiList[-1] = mu2
+            else:
+                for i,mu in zip([0,-1], [mu1, mu2]):
+                    fermi = self.fermiList[i]
+                    if fermi!= mu:
+                        dFermi = mu - fermi
+                        self.aList[i] += dFermi*np.eye(len(self.aList[i]))
+                        self.bList[i] += dFermi*self.bSList[i]
+                        self.fermiList[i] = mu
     
     def sigma(self, E, i, conv=1e-5):
         sigma = np.array(np.zeros(np.shape(self.F)), dtype=complex)

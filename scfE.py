@@ -52,21 +52,26 @@ class NEGFE(NEGF):
         return inds
 
     # Set energy dependent 1D contact using surfG() object
-    def setContact1D(self, contactList, tauList=-1, stauList=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eta=1e-9, T=0):
+    def setContact1D(self, contactList, tauList=-1, stauList=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, neList=-1, eta=1e-9, T=0):
         # Set L/R contacts based on atom numbers, use orbital inds for surfG() object
         inds = super().setContacts(contactList[0], contactList[-1])
         self.lInd = inds[0]
         self.rInd = inds[1]
         # if tauList is a list of atom numbers (rather than a matrix), generate orbital indices
-        if isinstance(tauList, int):
+        if not isinstance(tauList, int):
             pass
         elif len(np.shape(tauList[0])) == 1: 
             ind1 = np.where(np.isin(abs(self.locs), tauList[0]))[0]
             ind2 = np.where(np.isin(abs(self.locs), tauList[-1]))[0]
             tauList = (ind1, ind2)
+
         # Generate surfG() object for the molecule + contacts and initialize variables
         self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eta)
         
+        if isinstance(alphas, int):
+            muL = getFermi1DContact(self.g, neList[0], 0)
+            muR = getFermi1DContact(self.g, neList[-1], -1)
+            self.g.setF(self.g.F, muL, muR)
         # Update other variables
         self.setIntegralLimits(100, 50)
         self.T = T
