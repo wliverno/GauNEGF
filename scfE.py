@@ -38,7 +38,7 @@ V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 
 class NEGFE(NEGF):
     # Set energy dependent Bethe lattice contact using surfGB() object
-    def setContactBethe(self, contactList, latFile='Au', eta=1e-9, T=300):
+    def setContactBethe(self, contactList, latFile='Au', eta=1e-9, T=0):
         # Set L/R contacts based on atom numbers, use orbital inds for surfG() object
         inds = super().setContacts(contactList[0], contactList[-1])
         self.lInd = inds[0]
@@ -52,7 +52,7 @@ class NEGFE(NEGF):
         return inds
 
     # Set energy dependent 1D contact using surfG() object
-    def setContact1D(self, contactList, tauList=-1, stauList=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eta=1e-9, T=300):
+    def setContact1D(self, contactList, tauList=-1, stauList=-1, alphas=-1, aOverlaps=-1, betas=-1, bOverlaps=-1, eta=1e-9, T=0):
         # Set L/R contacts based on atom numbers, use orbital inds for surfG() object
         inds = super().setContacts(contactList[0], contactList[-1])
         self.lInd = inds[0]
@@ -73,10 +73,10 @@ class NEGFE(NEGF):
         return inds
    
     # Set constant sigma contact for testing or adding non-zero temperature
-    def setSigma(self, lContact, rContact, sig=-0.1j, sig2=False, T=300):
+    def setSigma(self, lContact, rContact, sig=-0.1j, sig2=False, T=0):
         super().setSigma(lContact, rContact, sig, sig2)
         inds = [self.lInd, self.rInd]
-        self.g = surfGTest(self.F*har_to_eV, self.S, inds)
+        self.g = surfGTest(self.F*har_to_eV, self.S, inds, sig, sig2)
         
         # Update other variables
         self.setIntegralLimits(100, 50)
@@ -171,7 +171,7 @@ class NEGFE(NEGF):
                 if self.spin =='r':
                     ne /= 2
                 print('SECANT METHOD:')
-                self.fermi, dE, P2 = calcFermiSecant(self.g, ne-nLower, self.Emin, fermi_old, self.N1, tol=conv)  
+                self.fermi, dE, P2 = calcFermiSecant(self.g, ne-nLower, self.Emin, fermi_old, self.N1, tol=conv, T=self.T)  
                 print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
                 print('Setting equilibrium density matrix...') 
                 P += P2
@@ -180,7 +180,7 @@ class NEGFE(NEGF):
                 if self.spin =='r':
                     ne /= 2
                 print('MULLER METHOD:')
-                self.fermi, dE, P2 = calcFermiMuller(self.g, ne-nLower, self.Emin, fermi_old, self.N1, tol=conv)
+                self.fermi, dE, P2 = calcFermiMuller(self.g, ne-nLower, self.Emin, fermi_old, self.N1, tol=conv, T=self.T)
                 print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
                 print('Setting equilibrium density matrix...') 
                 P += P2

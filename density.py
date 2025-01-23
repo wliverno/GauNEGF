@@ -6,6 +6,7 @@ from scipy.special import roots_legendre
 from scipy.special import roots_chebyu
 import matplotlib.pyplot as plt
 import warnings
+#import cupy as cp
 
 # Parallelization packages
 from multiprocessing import Pool
@@ -23,7 +24,8 @@ kB = 8.617e-5           # eV/Kelvin
 ## HELPER FUNCTIONS
 def Gr(F, S, g, E):
     """Green's function calculation (no broadening)"""
-    return LA.inv(E*S - F - g.sigmaTot(E)) 
+    #return cp.asnumpy(cp.linalg.inv(cp.asarray(E*S - F - g.sigmaTot(E))))
+    return LA.inv(E*S - F - g.sigmaTot(E))
 
 def fermi(E, mu, T):
     """Fermi function with T=0 convergent case"""
@@ -488,12 +490,12 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e
     print(f'Finished after {counter} iterations, Ef = {fermi:.2f}')
     return fermi, Emin, N1, N2
 
-def calcFermiSecant(g, ne, Emin, Ef, N, tol=1e-3, maxcycles=10):
+def calcFermiSecant(g, ne, Emin, Ef, N, tol=1e-3, maxcycles=10, T=0):
     """
     Calculate Fermi energy using Secant method, updating dE at each step
     """
     assert ne < len(g.F), "Number of electrons cannot exceed number of basis functions!"
-    pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, N, T=0)
+    pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, N, T)
     g.setF(g.F, Ef, Ef)
     P = pMu(Ef)
     nCurr = np.trace(P@g.S).real
@@ -519,13 +521,13 @@ def calcFermiSecant(g, ne, Emin, Ef, N, tol=1e-3, maxcycles=10):
         print(f'Warning: Max cycles reached, convergence = {abs(nCurr-ne):.2E}')
     return Ef, dE, P
 
-def calcFermiMuller(g, ne, Emin, Ef, N, tol=1e-3, maxcycles=10):
+def calcFermiMuller(g, ne, Emin, Ef, N, tol=1e-3, maxcycles=10, T=0):
     """
     Calculate Fermi energy using Muller's method, starting with 3 initial points
     """
     assert ne < len(g.F), "Number of electrons cannot exceed number of basis functions!"
     small = 1e-10  # Small value to prevent division by zero
-    pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, N, T=0)
+    pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, N, T)
 
     # Initialize three points around initial guess
     E2 = Ef
