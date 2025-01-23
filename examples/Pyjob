@@ -1,0 +1,31 @@
+#!/bin/bash
+#SBATCH --job-name=Si
+#SBATCH --account=anantram-ckpt
+#SBATCH --partition=ckpt
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=20
+#SBATCH --time=100:00:00
+#SBATCH --mem=100GB
+#SBATCH --mail-type=END
+#SBATCH --mail-user=willll@uw.edu
+##
+
+set -e
+
+module load anantram/gdv
+module load gcc
+
+source /gscratch/anantram/willll/miniconda3/etc/profile.d/conda.sh
+conda activate /gscratch/anantram/willll/NEGF
+
+export GAUSS_SCRDIR='/tmp'
+export GAUSS_PDEF=$SLURM_NTASKS
+export GAUSS_MEMDEF=${SLURM_MEM_PER_NODE}MB
+
+#python3 -u -m trace --ignore-dir=/gscratch/anantram/willll/NEGF/ --trace AuTrans.py
+python3 -u SiNEGF.py
+
+#cp /tmp/*.faf .
+
+exit 0
+

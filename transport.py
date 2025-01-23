@@ -22,6 +22,18 @@ def quickCurrent(F, S, sig1, sig2, fermi, qV, spin="r",dE=0.01):
         curr *= 2
     return curr
 
+def quickCurrentE(F, S, g, fermi, qV, spin="r",dE=0.01):
+    if qV < 0:
+        dE = -1*abs(dE)
+    else:
+        dE = abs(dE)
+    Elist = np.arange(fermi-(qV/2), fermi+(qV/2), dE)
+    Tr = cohTransE(Elist, F, S, g)
+    curr = eoverh * np.trapz(Tr, Elist)
+    if spin=="r":
+        curr *= 2
+    return curr
+
 # Calculate current from SCF mat file
 def qCurrentF(fn, dE=0.01):
     matfile = io.loadmat(fn)
