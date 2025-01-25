@@ -1,3 +1,25 @@
+"""
+Self-consistent field (SCF) implementation for Non-Equilibrium Green's Function calculations.
+
+This module provides the base NEGF class for performing self-consistent DFT+NEGF
+calculations using Gaussian quantum chemistry package. It handles:
+    - Integration with Gaussian for DFT calculations
+    - SCF convergence with Pulay mixing
+    - Contact self-energy calculations
+    - Voltage bias and electric field effects
+    - Spin-polarized calculations
+
+The implementation follows the standard NEGF formalism where the density matrix
+is calculated self-consistently with the Fock matrix from Gaussian DFT calculations.
+
+References
+----------
+.. [1] Brandbyge, M., et al. "Density-functional method for nonequilibrium 
+   electron transport", Phys. Rev. B 65, 165401 (2002).
+.. [2] Taylor, J., et al. "Ab initio simulation of electron transport through 
+   molecules and self-assembled monolayers", J. Phys. Chem. B 110, 17160 (2006).
+"""
+
 # Python packages
 import numpy as np
 from scipy import linalg as LA
@@ -19,7 +41,60 @@ har_to_eV = 27.211386   # eV/Hartree
 V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 
 class NEGF(object):
+    """
+    Non-Equilibrium Green's Function calculator integrated with Gaussian DFT.
+
+    This class manages the self-consistent field calculation between NEGF
+    transport calculations and DFT electronic structure calculations using
+    Gaussian. It handles the interaction with Gaussian, manages the density
+    and Fock matrices, and implements Pulay mixing for convergence.
+
+    Parameters
+    ----------
+    fn : str
+        Base filename for Gaussian input/output files (without extension)
+    basis : str, optional
+        Gaussian basis set name (default: 'lanl2dz')
+    func : str, optional
+        DFT functional to use (default: 'b3pw91')
+    spin : {'r', 'u', 'ro', 'g'}, optional
+        Spin configuration:
+        - 'r': restricted
+        - 'u': unrestricted
+        - 'ro': restricted open-shell
+        - 'g': generalized open-shell (non-collinear)
+        (default: 'r')
+    fullSCF : bool, optional
+        Whether to run full SCF or use Harris approximation (default: True)
+    route : str, optional
+        Additional Gaussian route commands (default: '')
+    nPulay : int, optional
+        Number of previous iterations to use in Pulay mixing (default: 4)
+
+    Attributes
+    ----------
+    F : ndarray
+        Fock matrix in eV
+    P : ndarray
+        Density matrix
+    S : ndarray
+        Overlap matrix
+    fermi : float
+        Fermi energy in eV
+    nelec : float
+        Number of electrons
+    """
+
     def __init__(self, fn, basis="lanl2dz", func="b3pw91", spin="r", fullSCF=True, route="", nPulay=4):
+        """
+        Initialize NEGF calculator and run initial DFT calculation.
+
+        Sets up the calculator with specified parameters and runs an initial
+        DFT calculation using Gaussian to obtain the starting Fock and 
+        overlap matrices.
+
+        Parameters are documented in class docstring.
+        """
         # Set up variables
         self.ifile = fn + ".gjf"
         self.chkfile = fn + ".chk"
@@ -85,8 +160,26 @@ class NEGF(object):
         print("Initial SCF energy: ", self.Total_E)
         print('###################################')
     
-    #Run DFT in Gaussian, default run full SCF to convergence, otherwise use Harris guess only
     def runDFT(self, fullSCF=True):
+        """
+        Run DFT calculation using Gaussian.
+
+        Performs either a full SCF calculation or generates an initial Harris
+        guess using Gaussian. Updates the Fock matrix and orbital indices
+        after completion.
+
+        Parameters
+        ----------
+        fullSCF : bool, optional
+            If True, runs full SCF to convergence.
+            If False, uses Harris guess only. (default: True)
+
+        Notes
+        -----
+        - Attempts to load from checkpoint file first
+        - Falls back to full calculation if checkpoint fails
+        - Updates self.F and self.locs with new Fock matrix
+        """
         if fullSCF:
             try:
                 self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock=True,chkname=self.chkfile, miscroute=self.otherRoute)
@@ -105,8 +198,19 @@ class NEGF(object):
             print("Done!")
             self.F, self.locs = getFock(self.bar, self.spin)
     
-    # Update number of Electrons (self.nelec) from density matrix
     def updateN(self):
+        """
+        Update the total number of electrons from the density matrix.
+
+        Calculates the number of electrons by tracing the product of
+        the density and overlap matrices. For restricted calculations,
+        multiplies by 2 to account for spin degeneracy.
+
+        Returns
+        -------
+        float
+            Total number of electrons
+        """
         nOcc =  np.real(np.trace(self.P@self.S))
         if self.spin == 'r':
             self.nelec = 2*nOcc
@@ -115,9 +219,28 @@ class NEGF(object):
         return self.nelec
 
     def setFock(self, F_):
+        """
+        Set the Fock matrix, converting from eV to atomic units.
+
+        Parameters
+        ----------
+        F_ : ndarray
+            Fock matrix in Hartree units
+        """
         self.F = np.array(F_)/har_to_eV
 
     def setDen(self, P_):
+        """
+        Set the density matrix and update dependent quantities.
+
+        Updates the density matrix, stores it in Gaussian format,
+        recalculates the number of electrons, and updates the Fock matrix.
+
+        Parameters
+        ----------
+        P_ : ndarray
+            New density matrix
+        """
         self.P = P_ 
         storeDen(self.bar, self.P, self.spin)
         self.updateN() 
@@ -125,6 +248,18 @@ class NEGF(object):
         self.PToFock()
 
     def getHOMOLUMO(self):
+        """
+        Calculate HOMO and LUMO energies.
+
+        Diagonalizes the Fock matrix in orthogonalized basis to get
+        orbital energies, then identifies HOMO and LUMO based on
+        electron occupation and spin configuration.
+
+        Returns
+        -------
+        ndarray
+            Array of [HOMO, LUMO] energies in eV
+        """
         orbs, _ = LA.eig(self.X@self.F@self.X)
         orbs = np.sort(orbs)*har_to_eV
         if self.spin=='r':
@@ -133,8 +268,33 @@ class NEGF(object):
             homo_lumo = orbs[self.nae+self.nbe-1:self.nae+self.nbe+1].real
         return homo_lumo
                 
-    # Set voltage and fermi energy, update electric field applied and integral limits
     def setVoltage(self, qV, fermi=np.nan, Emin=None, Eminf=None):
+        """
+        Set voltage bias and Fermi energy, updating electric field.
+
+        Applies a voltage bias between contacts and updates the chemical
+        potentials and electric field. Can optionally set the Fermi energy
+        and integration limits.
+
+        Parameters
+        ----------
+        qV : float
+            Voltage bias in eV
+        fermi : float, optional
+            Fermi energy in eV. If not provided, will be calculated or
+            use existing value (default: np.nan)
+        Emin : float, optional
+            Minimum energy for integration in eV (default: None)
+        Eminf : float, optional
+            Lower bound energy in eV (default: None)
+
+        Notes
+        -----
+        - Requires contacts to be set first
+        - Updates chemical potentials as fermi ± qV/2
+        - Calculates and applies electric field between contacts
+        - If fermi not provided, uses (HOMO+LUMO)/2 for initial guess
+        """
         # Check to make sure contacts set 
         assert hasattr(self, 'rInd') and hasattr(self,'lInd'), "Contacts not set!"
 
@@ -150,7 +310,8 @@ class NEGF(object):
                 fermi = self.fermi
         else:
             self.updFermi = False
-            # Set Integration limits
+        
+        # Set Integration limits
         if Emin!=None:
             self.Emin = Emin
         if Eminf!=None:
@@ -161,9 +322,7 @@ class NEGF(object):
         self.mu1 =  fermi + (qV/2)
         self.mu2 =  fermi - (qV/2)
     
-    
-        # Calculate electric field to apply during SCF, apply between contacts
-        # TODO: average location of all contact atoms (currently just first atom)
+        # Calculate electric field to apply during SCF
         lAtom = self.bar.c[int(self.lContact[0]-1)*3:int(self.lContact[0])*3]
         rAtom = self.bar.c[int(self.rContact[0]-1)*3:int(self.rContact[0])*3]
         vec  = np.array(lAtom-rAtom)
@@ -181,8 +340,25 @@ class NEGF(object):
         if not self.updFermi:
             print("E-field set to "+str(LA.norm(field))+" au")
     
-    # Set contacts based on atom orbital locations
     def setContacts(self, lContact=-1, rContact=-1):
+        """
+        Set contact atoms and get corresponding orbital indices.
+
+        Identifies the orbital indices corresponding to the specified
+        contact atoms. If no contacts specified, uses all orbitals.
+
+        Parameters
+        ----------
+        lContact : int or array-like, optional
+            Atom number(s) for left contact. -1 means all atoms. (default: -1)
+        rContact : int or array-like, optional
+            Atom number(s) for right contact. -1 means all atoms. (default: -1)
+
+        Returns
+        -------
+        tuple of ndarrays
+            (left_orbital_indices, right_orbital_indices)
+        """
         if lContact == -1:
             self.lContact = np.arange(self.nsto)
         else:
@@ -198,10 +374,45 @@ class NEGF(object):
         return lInd, rInd
     
     # Set self-energies of left and right contacts (TODO: n>2 terminal device?)
-    def setSigma(self, lContact, rContact, sig=-0.1j, sig2=False): 
+    def setSigma(self, lContact, rContact, sig=-0.1j, sig2=None): 
+        """
+        Set self-energies for left and right contacts.
+
+        Configures the contact self-energies, handling various input formats
+        and spin configurations. Self-energies can be scalar, vector, or matrix,
+        with automatic handling of spin degrees of freedom.
+
+        Parameters
+        ----------
+        lContact : array-like
+            Atom numbers for left contact
+        rContact : array-like
+            Atom numbers for right contact
+        sig : scalar or array-like, optional
+            Self-energy for left contact. Can be:
+            - scalar: same value for all orbitals
+            - vector: one value per orbital
+            - matrix: full self-energy matrix
+            (default: -0.1j)
+        sig2 : scalar, array-like, or None, optional
+            Self-energy for right contact. If None, uses sig.
+            Same format options as sig. (default: None)
+
+        Notes
+        -----
+        - Handles spin configurations ('r', 'u', 'ro', 'g')
+        - Automatically expands scalar/vector inputs to full matrices
+        - Verifies matrix dimensions match Fock matrix
+        - Updates self.sigma1, self.sigma2, self.sigma12
+        
+        Raises
+        ------
+        Exception
+            If matrix dimensions don't match or invalid input format
+        """
         lInd, rInd = self.setContacts(lContact, rContact)
         #Is there a second sigma matrix? If not, copy the first one
-        if isinstance(sig2, bool):
+        if sig2 is None:
             sig2 = sig + 0.0
        
         # Sigma can be a value, list, or matrix
@@ -300,6 +511,21 @@ class NEGF(object):
         return EList[inds], occList[inds]
 
     def PMix(self, damping, Pulay=False):
+        """
+        Mix old and new density matrices using damping or Pulay method.
+
+        Parameters
+        ----------
+        damping : float
+            Mixing parameter between 0 and 1
+        Pulay : bool, optional
+            Whether to use Pulay mixing (default: False)
+
+        Returns
+        -------
+        tuple
+            (RMSDP, MaxDP) - RMS and maximum density matrix differences
+        """
         # Store Old Density Info
         Pback = getDen(self.bar, self.spin)
         Dense_old = np.diag(Pback)
@@ -335,6 +561,14 @@ class NEGF(object):
 
     # Use Gaussian to calculate the density matrix 
     def PToFock(self):
+        """
+        Calculate new Fock matrix from current density matrix using Gaussian.
+
+        Returns
+        -------
+        float
+            Energy difference from previous iteration
+        """
         # Run Gaussian, update SCF Energy
         try:
             self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="DENSITY", miscroute=self.otherRoute)
@@ -354,6 +588,27 @@ class NEGF(object):
     # Main SCF loop, runs Fock <-> Density cycle until convergence reached
     # Convergence criteria: dE, RMSDP, and MaxDP < conv, or maxcycles reached
     def SCF(self, conv=1e-5, damping=0.1, maxcycles=100, plot=False, pulay=True):
+        """
+        Run self-consistent field calculation until convergence.
+
+        Parameters
+        ----------
+        conv : float, optional
+            Convergence criterion for energy and density (default: 1e-5)
+        damping : float, optional
+            Mixing parameter between 0 and 1 (default: 0.1)
+        maxcycles : int, optional
+            Maximum number of SCF cycles (default: 100)
+        plot : bool, optional
+            Whether to plot convergence data (default: False)
+        pulay : bool, optional
+            Whether to use Pulay mixing (default: True)
+
+        Returns
+        -------
+        tuple
+            (iterations, electron_counts, energies)
+        """
         # Check to make sure contacts and voltage set 
         assert hasattr(self, 'mu1') and hasattr(self, 'mu2'), "Voltage not set!"
         assert hasattr(self, 'rInd') and hasattr(self,'lInd'), "Contacts not set!"
@@ -430,15 +685,32 @@ class NEGF(object):
         return count, PP, TotalE
 
     def writeChk(self):
+        """
+        Write current state to Gaussian checkpoint file.
+        """
         print('Writing to checkpoint file...') 
         self.bar.writefile(self.chkfile)
         print(self.chkfile+' written!') 
     
-    # Save's matlab *.mat file with main variables
     def saveMAT(self, matfile="out.mat"):
+        """
+        Save calculation results to MATLAB format file.
+
+        Parameters
+        ----------
+        matfile : str, optional
+            Output filename (default: "out.mat")
+
+        Returns
+        -------
+        ndarray
+            Fock matrix in orthogonalized basis
+        """
         (sigma1, sigma2) = self.getSigma(self.fermi)
         # Save data in MATLAB .mat file
-        matdict = {"F":self.F*har_to_eV, "sig1": sigma1, "sig2": sigma2, "S": self.S, "fermi": self.fermi, "qV": self.qV, "spin" : self.spin, "den" : self.P, "conv": self.convLevel}
+        matdict = {"F":self.F*har_to_eV, "sig1": sigma1, "sig2": sigma2, 
+                  "S": self.S, "fermi": self.fermi, "qV": self.qV, 
+                  "spin": self.spin, "den": self.P, "conv": self.convLevel}
         io.savemat(matfile, matdict)
         return self.X@self.F@self.X
 
