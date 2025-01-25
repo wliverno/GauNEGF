@@ -1,3 +1,21 @@
+"""
+Density matrix calculation methods for quantum transport simulations.
+
+This module provides functions for calculating density matrices in quantum transport
+calculations using various integration methods:
+- Analytical integration for energy-independent self-energies
+- Complex contour integration for equilibrium calculations
+- Real-axis integration for non-equilibrium calculations
+- Parallel processing support for large systems
+
+
+Notes
+-----
+The module supports both serial and parallel computation modes, automatically
+selecting the most efficient method based on system size and available resources.
+Temperature effects are included through Fermi-Dirac statistics.
+"""
+
 # Numerical Packages
 import numpy as np
 from numpy import linalg as LA
@@ -23,12 +41,45 @@ kB = 8.617e-5           # eV/Kelvin
 
 ## HELPER FUNCTIONS
 def Gr(F, S, g, E):
-    """Green's function calculation (no broadening)"""
-    #return cp.asnumpy(cp.linalg.inv(cp.asarray(E*S - F - g.sigmaTot(E))))
+    """
+    Calculate retarded Green's function at given energy.
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix
+    S : ndarray
+        Overlap matrix
+    g : surfG object
+        Surface Green's function calculator
+    E : float
+        Energy in eV
+
+    Returns
+    -------
+    ndarray
+        Retarded Green's function G(E) = [ES - F - Σ(E)]^(-1)
+    """
     return LA.inv(E*S - F - g.sigmaTot(E))
 
 def fermi(E, mu, T):
-    """Fermi function with T=0 convergent case"""
+    """
+    Calculate Fermi-Dirac distribution.
+
+    Parameters
+    ----------
+    E : float
+        Energy in eV
+    mu : float
+        Chemical potential in eV
+    T : float
+        Temperature in Kelvin
+
+    Returns
+    -------
+    float
+        Fermi-Dirac occupation number
+    """
     kT = kB*T
     if kT==0:
         return (E<=mu)*1
@@ -36,26 +87,49 @@ def fermi(E, mu, T):
         return 1/(np.exp((E - mu)/kT)+1)
 
 def DOSg(F, S, g, E):
+    """
+    Calculate density of states at given energy.
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix
+    S : ndarray
+        Overlap matrix
+    g : surfG object
+        Surface Green's function calculator
+    E : float
+        Energy in eV
+
+    Returns
+    -------
+    float
+        Density of states at energy E
+    """
     return -np.trace(np.imag(Gr(F,S, g, E)))/np.pi
 
 def getANTPoints(N):
     """
     Generate integration points and weights matching ANT.Gaussian implementation.
-    Following IntCompPlane subroutine in device.F90.
-    
-    Args:
-        N (int): Number of points
-    
-    Returns:
-        tuple: (points, weights) - numpy arrays of integration points and weights
+
+    Follows the IntCompPlane subroutine in device.F90 from ANT.Gaussian package.
+    Uses a modified Gauss-Chebyshev quadrature scheme optimized for transport
+    calculations.
+
+    Parameters
+    ----------
+    N : int
+        Number of integration points
+
+    Returns
+    -------
+    tuple
+        (points, weights) - Arrays of integration points and weights
     """
-    
     k = np.arange(1,N+1,2)
     theta = k*np.pi/(2*N)
     xs = np.sin(theta)
     xcc = np.cos(theta)
-
-    #print(k,xs,xcc)
 
     # Transform points using ANT-like formula
     x = 1.0 + 0.21220659078919378103 * xs * xcc * (3 + 2*xs*xs) - k/(N)
@@ -70,23 +144,44 @@ def getANTPoints(N):
 def integratePoints(computePointFunc, numPoints, parallel=False, numWorkers=None, 
                    chunkSize=None, debug=False):
     """
-    Integration of points optimized for quantum transport calculations.
-    Defaults to numpy's built-in parallelization for matrix operations.
-    
-    Parameters:
-    -----------
+    Perform parallel or serial integration for quantum transport calculations.
+
+    This function provides a flexible integration framework that automatically
+    chooses between numpy's built-in parallelization for matrix operations
+    and process-level parallelization for large workloads.
+
+    Parameters
+    ----------
     computePointFunc : callable
-        Function that computes a single integration point
+        Function that computes a single integration point. Should take an
+        integer index i and return a matrix/array.
     numPoints : int
         Total number of points to integrate
-    parallel : bool, optional (default=False)
-        Whether to force process-level parallel processing
+    parallel : bool, optional
+        Whether to force process-level parallel processing (default: False)
     numWorkers : int, optional
-        Number of workers for parallel processing. If None, automatically determined.
+        Number of worker processes. If None, automatically determined based
+        on system resources and workload.
     chunkSize : int, optional
-        Size of chunks for parallel processing. If None, automatically determined.
-    debug : bool, optional (default=False)
-        Whether to print debug information
+        Size of chunks for parallel processing. If None, automatically
+        optimized based on numPoints and numWorkers.
+    debug : bool, optional
+        Whether to print debug information (default: False)
+
+    Returns
+    -------
+    ndarray
+        Sum of all computed points
+
+    Notes
+    -----
+    - Automatically detects SLURM environment for HPC compatibility
+    - Falls back to serial processing if parallel execution fails
+    - Uses numpy's built-in parallelization for small workloads
+    - Switches to process-level parallelization for:
+        * Large number of points (≥100)
+        * Many available cores (≥32)
+        * When explicitly requested via parallel=True
     """
     # Get SLURM CPU count if available
     numCores = int(os.environ.get('SLURM_CPUS_ON_NODE', os.cpu_count()))
@@ -138,9 +233,39 @@ def integratePoints(computePointFunc, numPoints, parallel=False, numWorkers=None
             return sum(process_chunk(chunk) for chunk in chunks)
 
 ## ENERGY INDEPENDENT DENSITY FUNCTIONS
-# Requires D, V = eig(H - sigma) and Gam = X@(sigma - sigma.conj().T)@X
-# Get density using analytical integration
 def density(V, Vc, D, Gam, Emin, mu):
+    """
+    Calculate density matrix using analytical integration for energy-independent self-energies.
+
+    Implements the analytical integration method from Eq. 27 in PRB 65, 165401 (2002).
+    The method assumes energy-independent self-energies and uses the spectral function
+    representation of the density matrix.
+
+    Parameters
+    ----------
+    V : ndarray
+        Eigenvectors of Fock matrix in orthogonalized basis
+    Vc : ndarray
+        Inverse conjugate transpose of V
+    D : ndarray
+        Eigenvalues of Fock matrix
+    Gam : ndarray
+        Broadening matrix Γ = i[Σ - Σ†] in orthogonalized basis
+    Emin : float
+        Lower bound for integration in eV
+    mu : float
+        Chemical potential in eV
+
+    Returns
+    -------
+    ndarray
+        Density matrix in orthogonalized basis
+
+    Notes
+    -----
+    The integration is performed analytically using the residue theorem.
+    The result includes contributions from poles below the Fermi energy.
+    """
     Nd = len(V)
     DD = np.array([D for i in range(Nd)]).T
     
@@ -163,8 +288,41 @@ def density(V, Vc, D, Gam, Emin, mu):
     den = V@ prefactor @ V.conj().T
     return den
 
-# Locate the fermi energy using bisection
 def bisectFermi(V, Vc, D, Gam, Nexp, conv=1e-3, Eminf=-1e6):
+    """
+    Find Fermi energy using bisection method.
+
+    Uses bisection to find the Fermi energy that gives the expected number
+    of electrons. The search is performed using the analytical density matrix
+    calculation.
+
+    Parameters
+    ----------
+    V : ndarray
+        Eigenvectors of Fock matrix in orthogonalized basis
+    Vc : ndarray
+        Inverse conjugate transpose of V
+    D : ndarray
+        Eigenvalues of Fock matrix
+    Gam : ndarray
+        Broadening matrix Γ = i[Σ - Σ†] in orthogonalized basis
+    Nexp : float
+        Expected number of electrons
+    conv : float, optional
+        Convergence criterion for electron number (default: 1e-3)
+    Eminf : float, optional
+        Lower bound for integration in eV (default: -1e6)
+
+    Returns
+    -------
+    float
+        Fermi energy in eV that gives the expected electron count
+
+    Notes
+    -----
+    The search is bounded by the minimum and maximum eigenvalues.
+    Warns if maximum iterations reached without convergence.
+    """
     Emin = min(D.real)
     Emax = max(D.real)
     dN = Nexp
@@ -184,9 +342,43 @@ def bisectFermi(V, Vc, D, Gam, Nexp, conv=1e-3, Eminf=-1e6):
     return fermi
 
 ## ENERGY DEPENDENT DENSITY FUNCTIONS
-# Get equilibrium density at a single contact (ind) using a real energy grid
 def densityReal(F, S, g, Emin, mu, N=100, T=300, parallel=False,
                 numWorkers=None, showText=True):
+    """
+    Calculate equilibrium density matrix using real-axis integration.
+
+    Performs numerical integration along the real energy axis using Gauss-Legendre
+    quadrature. Suitable for equilibrium calculations with energy-dependent
+    self-energies.
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix
+    S : ndarray
+        Overlap matrix
+    g : surfG object
+        Surface Green's function calculator
+    Emin : float
+        Lower bound for integration in eV
+    mu : float
+        Chemical potential in eV
+    N : int, optional
+        Number of integration points (default: 100)
+    T : float, optional
+        Temperature in Kelvin (default: 300)
+    parallel : bool, optional
+        Whether to use parallel processing (default: False)
+    numWorkers : int, optional
+        Number of worker processes for parallel mode
+    showText : bool, optional
+        Whether to print progress messages (default: True)
+
+    Returns
+    -------
+    ndarray
+        Density matrix
+    """
     kT = kB*T
     Emax = mu + 5*kT
     mid = (Emax-Emin)/2
@@ -208,9 +400,44 @@ def densityReal(F, S, g, Emin, mu, N=100, T=300, parallel=False,
     
     return (-1+0j)*np.imag(defInt)/(np.pi)
 
-# Get non-equilibrium density at a single contact (ind) using a real energy grid
 def densityGrid(F, S, g, mu1, mu2, ind=None, N=100, T=300, parallel=False,
                 numWorkers=None, showText=True):
+    """
+    Calculate non-equilibrium density matrix using real-axis integration.
+
+    Performs numerical integration for the non-equilibrium part of the density
+    matrix when a bias voltage is applied. Uses Gauss-Legendre quadrature.
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix
+    S : ndarray
+        Overlap matrix
+    g : surfG object
+        Surface Green's function calculator
+    mu1 : float
+        Left contact chemical potential in eV
+    mu2 : float
+        Right contact chemical potential in eV
+    ind : int or None, optional
+        Contact index (None for total) (default: None)
+    N : int, optional
+        Number of integration points (default: 100)
+    T : float, optional
+        Temperature in Kelvin (default: 300)
+    parallel : bool, optional
+        Whether to use parallel processing (default: False)
+    numWorkers : int, optional
+        Number of worker processes for parallel mode
+    showText : bool, optional
+        Whether to print progress messages (default: True)
+
+    Returns
+    -------
+    ndarray
+        Non-equilibrium contribution to density matrix
+    """
     kT = kB*T
     muLo = min(mu1, mu2)
     muHi = max(mu1, mu2)
@@ -271,9 +498,50 @@ def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=300):
     
     return den/(2*np.pi)
 
-# Get equilibrium density using a complex contour and a Gaussian quadrature
 def densityComplex(F, S, g, Emin, mu, N=100, T=300, parallel=False, numWorkers=None, 
                          showText=True, method='ant'):
+    """
+    Calculate equilibrium density matrix using complex contour integration.
+
+    Performs numerical integration along a complex contour that encloses the
+    poles of the Fermi function. More efficient than real-axis integration
+    for equilibrium calculations.
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix
+    S : ndarray
+        Overlap matrix
+    g : surfG object
+        Surface Green's function calculator
+    Emin : float
+        Lower bound for integration in eV
+    mu : float
+        Chemical potential in eV
+    N : int, optional
+        Number of integration points (default: 100)
+    T : float, optional
+        Temperature in Kelvin (default: 300)
+    parallel : bool, optional
+        Whether to use parallel processing (default: False)
+    numWorkers : int, optional
+        Number of worker processes for parallel mode
+    showText : bool, optional
+        Whether to print progress messages (default: True)
+    method : {'ant', 'legendre', 'chebyshev'}, optional
+        Integration method to use (default: 'ant')
+
+    Returns
+    -------
+    ndarray
+        Equilibrium density matrix
+
+    Notes
+    -----
+    The 'ant' method uses a modified Gauss-Chebyshev quadrature optimized
+    for transport calculations, matching the ANT.Gaussian implementation.
+    """
     #Construct circular contour
     nKT= 5
     broadening = nKT*kB*T
@@ -296,7 +564,6 @@ def densityComplex(F, S, g, Emin, mu, N=100, T=300, parallel=False, numWorkers=N
     #Integrate along contour
     def computePoint(i):
         theta = np.pi/2 * (x[i] + 1)
-        #print('Theta=',theta, ', Weight=',w[i])
         z = center + r*np.exp(1j*theta)
         dz = 1j * r * np.exp(1j*theta)
         return (np.pi/2)*w[i]*Gr(F, S, g, z)*fermi(z, mu, T)*dz
@@ -319,7 +586,6 @@ def densityComplex(F, S, g, Emin, mu, N=100, T=300, parallel=False, numWorkers=N
     if showText:
         print('Integration done!')
 
-    
     #Return -Im(Integral)/pi, Equation 19 in 10.1103/PhysRevB.63.245407
     return (1+0j)*np.imag(lineInt)/np.pi
 
@@ -358,9 +624,45 @@ def densityComplexTrap(F, S, g, Emin, mu, N, T=300):
 
 
 ## INTEGRATION LIMIT FUNCTIONS
-# A simple fitting algorithm for Emin, N1, N2
 def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
+    """
+    Optimize integration parameters for density calculations.
 
+    Determines optimal integration parameters by iteratively testing
+    convergence of the density matrix calculation.
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix
+    S : ndarray
+        Overlap matrix
+    g : surfG object
+        Surface Green's function calculator
+    mu : float
+        Initial guess for chemical potential in eV
+    Eminf : float
+        Lower bound for integration in eV
+    tol : float, optional
+        Convergence tolerance (default: 1e-6)
+    maxcycles : int, optional
+        Maximum number of iterations (default: 1000)
+
+    Returns
+    -------
+    tuple
+        (Emin, N1, N2) - Optimized integration parameters:
+        - Emin: Lower bound for complex contour
+        - N1: Number of complex contour points
+        - N2: Number of real axis points
+
+    Notes
+    -----
+    The optimization process:
+    1. Finds Emin by checking DOS convergence
+    2. Optimizes N1 for complex contour integration
+    3. Optimizes N2 for real axis integration
+    """
     # Calculate Emin using DOS
     D,_ = LA.eig(LA.inv(S)@F)
     Emin = min(D.real.flatten())-5
@@ -392,6 +694,7 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
     elif Ncomplex >  maxcycles and dP > tol:
         print(f'Warning: Ncomplex still not within tolerance (final value = {dP})')
     print(f'Final Ncomplex: {Ncomplex}') 
+
     #Determine grid using dP
     counter = 0
     Nreal = 8
@@ -412,8 +715,33 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
 
     return Emin, Ncomplex, Nreal
 
-# Get the fermi energy of a contact (compatible with Bethe or 1D)
 def getFermiContact(g, ne, tol=1e-4, Eminf=-1e6, maxcycles=1000, nOrbs=0):
+    """
+    Calculate Fermi energy for a contact.
+
+    Determines the Fermi energy for a contact system (Bethe lattice or 1D chain)
+    by matching the electron count.
+
+    Parameters
+    ----------
+    g : surfG object
+        Surface Green's function calculator
+    ne : float
+        Target number of electrons
+    tol : float, optional
+        Convergence tolerance (default: 1e-4)
+    Eminf : float, optional
+        Lower bound for integration (default: -1e6)
+    maxcycles : int, optional
+        Maximum number of iterations (default: 1000)
+    nOrbs : int, optional
+        Number of orbitals to consider (0 for all) (default: 0)
+
+    Returns
+    -------
+    float
+        Fermi energy in eV
+    """
     # Set up infinite system from contact
     S = g.S
     F = g.F
@@ -425,15 +753,39 @@ def getFermiContact(g, ne, tol=1e-4, Eminf=-1e6, maxcycles=1000, nOrbs=0):
     return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, 
                         Eminf, tol, maxcycles, nOrbs)[0]
 
-# Get the fermi energy of a 1D contact
 def getFermi1DContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
+    """
+    Calculate Fermi energy for a 1D chain contact.
+
+    Specialized version of getFermiContact for 1D chain contacts, handling
+    the periodic boundary conditions correctly.
+
+    Parameters
+    ----------
+    gSys : surfG object
+        Surface Green's function calculator for the full system
+    ne : float
+        Target number of electrons per unit cell
+    ind : int, optional
+        Contact index (0 for left, -1 for right) (default: 0)
+    tol : float, optional
+        Convergence tolerance (default: 1e-4)
+    Eminf : float, optional
+        Lower bound for integration (default: -1e6)
+    maxcycles : int, optional
+        Maximum number of iterations (default: 1000)
+
+    Returns
+    -------
+    float
+        Fermi energy in eV
+    """
     # Set up infinite system from contact
     F = gSys.aList[ind]
     S = gSys.aSList[ind]
     tau = gSys.bList[ind]
     stau = gSys.bSList[ind]
     inds = np.arange(len(F))
-    #print(S.shape, S.shape, inds.shape, tau.shape, stau.shape)
     g = surfG(F, S, [inds], [tau], [stau], eta=1e-6)
 
     # Initial guess and integral setup using two layers
@@ -443,13 +795,49 @@ def getFermi1DContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
     orbs, _ = LA.eig(LA.inv(Sorbs)@Forbs)
     orbs = np.sort(np.real(orbs))
     fermi = (orbs[2*int(ne)-1] + orbs[2*int(ne)])/2
-    #print(orbs, fermi)
     Emin, N1, N2 = integralFit(Forbs, Sorbs, gorbs, fermi, Eminf, tol, maxcycles)
     Emax = max(orbs)
     return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, Eminf, tol, maxcycles)
 
 # Calculate the fermi energy of the surfG() object
 def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e-4, maxcycles=20, nOrbs=0):
+    """
+    Calculate Fermi energy using bisection method.
+
+    Parameters
+    ----------
+    g : surfG object
+        Surface Green's function calculator
+    ne : float
+        Target number of electrons
+    Emin : float
+        Lower bound for complex contour in eV
+    Emax : float
+        Upper bound for search in eV
+    fermiGuess : float, optional
+        Initial guess for Fermi energy in eV (default: 0)
+    N1 : int, optional
+        Number of complex contour points (default: 100)
+    N2 : int, optional
+        Number of real axis points (default: 50)
+    Eminf : float, optional
+        Lower bound for real axis integration in eV (default: -1e6)
+    tol : float, optional
+        Convergence tolerance (default: 1e-4)
+    maxcycles : int, optional
+        Maximum number of iterations (default: 20)
+    nOrbs : int, optional
+        Number of orbitals to consider, 0 for all (default: 0)
+
+    Returns
+    -------
+    tuple
+        (fermi, Emin, N1, N2) - Optimized parameters:
+        - fermi: Calculated Fermi energy in eV
+        - Emin: Lower bound for complex contour
+        - N1: Number of complex contour points
+        - N2: Number of real axis points
+    """
     # Fermi Energy search using full contact
     print(f'Eminf DOS = {DOSg(g.F,g.S,g,Eminf)}')
     fermi = fermiGuess

@@ -1,3 +1,22 @@
+"""
+Transport calculations for quantum systems using Non-Equilibrium Green's Functions.
+
+This module provides functions for calculating quantum transport properties:
+- Coherent transmission through molecular junctions
+- Spin-dependent transport calculations
+- Current calculations at finite bias
+- Density of states calculations
+
+The module supports both energy-independent and energy-dependent self-energies,
+with implementations for both spin-restricted and spin-unrestricted calculations.
+Spin-dependent transport follows the formalism described in [1].
+
+References
+----------
+.. [1] Herrmann, C., Solomon, G. C., & Ratner, M. A. J. Chem. Theory Comput. 6, 3078 (2010)
+      DOI: 10.1021/acs.jctc.9b01078
+"""
+
 import numpy as np
 from numpy import linalg as LA
 import scipy.io as io
@@ -11,6 +30,33 @@ V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 
 # Calculate Coherent Current at T=0K using NEGF
 def quickCurrent(F, S, sig1, sig2, fermi, qV, spin="r",dE=0.01):
+    """
+    Calculate coherent current at T=0K using NEGF with energy-independent self-energies.
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix
+    S : ndarray
+        Overlap matrix
+    sig1 : ndarray
+        Left contact self-energy (vector or matrix)
+    sig2 : ndarray
+        Right contact self-energy (vector or matrix)
+    fermi : float
+        Fermi energy in eV
+    qV : float
+        Applied bias voltage in eV
+    spin : str, optional
+        Spin configuration ('r' for restricted) (default: 'r')
+    dE : float, optional
+        Energy step for integration in eV (default: 0.01)
+
+    Returns
+    -------
+    float
+        Current in Amperes
+    """
     if qV < 0:
         dE = -1*abs(dE)
     else:
@@ -23,6 +69,31 @@ def quickCurrent(F, S, sig1, sig2, fermi, qV, spin="r",dE=0.01):
     return curr
 
 def quickCurrentE(F, S, g, fermi, qV, spin="r",dE=0.01):
+    """
+    Calculate coherent current at T=0K using NEGF with energy-dependent self-energies.
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix
+    S : ndarray
+        Overlap matrix
+    g : surfG object
+        Surface Green's function calculator
+    fermi : float
+        Fermi energy in eV
+    qV : float
+        Applied bias voltage in eV
+    spin : str, optional
+        Spin configuration ('r' for restricted) (default: 'r')
+    dE : float, optional
+        Energy step for integration in eV (default: 0.01)
+
+    Returns
+    -------
+    float
+        Current in Amperes
+    """
     if qV < 0:
         dE = -1*abs(dE)
     else:
@@ -36,12 +107,63 @@ def quickCurrentE(F, S, g, fermi, qV, spin="r",dE=0.01):
 
 # Calculate current from SCF mat file
 def qCurrentF(fn, dE=0.01):
+    """
+    Calculate current from saved SCF matrix file.
+
+    Parameters
+    ----------
+    fn : str
+        Filename of .mat file containing SCF data
+    dE : float, optional
+        Energy step for integration in eV (default: 0.01)
+
+    Returns
+    -------
+    float
+        Current in Amperes
+
+    Notes
+    -----
+    The .mat file should contain:
+    - F: Fock matrix
+    - S: Overlap matrix
+    - sig1, sig2: Contact self-energies
+    - fermi: Fermi energy
+    - qV: Applied voltage
+    - spin: Spin configuration
+    """
     matfile = io.loadmat(fn)
     return quickCurrent(matfile["F"], matfile["S"], matfile["sig1"],matfile["sig2"],
             matfile["fermi"][0,0], matfile["qV"][0,0], matfile["spin"][0], dE=dE)
 
 # F,S are NxN matrices, sig1 and sig2 are Nx1 vectors or NxN Matrices
 def cohTrans(Elist, F, S, sig1, sig2):
+    """
+    Calculate coherent transmission with energy-independent self-energies.
+
+    Parameters
+    ----------
+    Elist : array_like
+        List of energies in eV to calculate transmission at
+    F : ndarray
+        Fock matrix
+    S : ndarray
+        Overlap matrix
+    sig1 : ndarray
+        Left contact self-energy (vector or matrix)
+    sig2 : ndarray
+        Right contact self-energy (vector or matrix)
+
+    Returns
+    -------
+    list
+        Transmission values at each energy
+
+    Notes
+    -----
+    Supports both vector and matrix self-energies. For vector self-energies,
+    diagonal matrices are constructed internally.
+    """
     F = np.array(F)
     N = len(F)
     S = np.array(S)
@@ -70,6 +192,43 @@ def cohTrans(Elist, F, S, sig1, sig2):
 
 # F,S are NxN matrices, sig1 and sig2 are Nx1 vectors or NxN Matrices
 def cohTransSpin(Elist, F, S, sig1, sig2, spin='u'):
+    """
+    Calculate spin-dependent coherent transmission with energy-independent self-energies.
+
+    Parameters
+    ----------
+    Elist : array_like
+        List of energies in eV to calculate transmission at
+    F : ndarray
+        Fock matrix (2N x 2N for spin-unrestricted)
+    S : ndarray
+        Overlap matrix (2N x 2N for spin-unrestricted)
+    sig1 : ndarray
+        Left contact self-energy (spin independent vector (1xN) or matrix (NxN), 
+                                            spin dependent matrix (2Nx2N))
+    sig2 : ndarray
+        Right contact self-energy (spin independent vector (1xN) or matrix (NxN), 
+                                            spin dependent matrix (2Nx2N))
+    spin : str, optional
+        Spin basis {'r', 'u', 'ro', or 'g'} (default: 'u')
+
+    Returns
+    -------
+    tuple
+        (Tr, Tspin) where:
+        - Tr: Total transmission at each energy
+        - Tspin: Array of spin-resolved transmissions [T↑↑, T↑↓, T↓↑, T↓↓]
+
+    Notes
+    -----
+    For collinear spin calculations ('u' or 'ro'), the matrices are arranged in blocks:
+    [F↑↑  0 ]  [S↑↑  0 ]
+    [0   F↓↓], [0   S↓↓]
+    For generalized spin basis ('g'), each orbital contains a 2x2 spinor block:
+    [F↑↑  F↑↓]  [S↑↑  S↑↓]
+    [F↓↑  F↓↓], [S↓↑  S↓↓]
+    which are then combined into a 2Nx2N matrix.
+    """
     F = np.array(F)
     N = int(len(F)/2)
     S = np.array(S)
@@ -114,11 +273,8 @@ def cohTransSpin(Elist, F, S, sig1, sig2, spin='u'):
             raise Exception('Sigma size mismatch!')
         for i in range(N):
             for j in range(4):
-                #T_ = np.dot(gam1Gr[j][i,:],gam2Ga[j][:,i])
                 T_ = sum(gam1Gr[j][i,:]*gam2Ga[j][:,i])
-                #T_ = np.einsum('i,i->',gam1Gr[j][i,:],gam2Ga[j][:,i])
                 Ts[j] += T_
-                #print(i, j, Ts)
                 T+= T_
         T = np.real(T)
         Ts = np.real(Ts)
@@ -129,6 +285,29 @@ def cohTransSpin(Elist, F, S, sig1, sig2, spin='u'):
 
 # H0 is an NxN matrix, sig1 and sig2 are Nx1 vectors
 def DOS(Elist, F, S, sig1, sig2):
+    """
+    Calculate density of states with energy-independent self-energies.
+
+    Parameters
+    ----------
+    Elist : array_like
+        List of energies in eV to calculate DOS at
+    F : ndarray
+        Fock matrix, NxN
+    S : ndarray
+        Overlap matrix, NxN
+    sig1 : ndarray
+        Left contact self-energy, vector (1xN) or matrix (NxN)
+    sig2 : ndarray
+        Right contact self-energy, vector (1xN) or matrix (NxN)
+
+    Returns
+    -------
+    tuple
+        (DOS, DOSList) where:
+        - DOS: Total density of states at each energy
+        - DOSList: Site-resolved DOS at each energy
+    """
     F = np.array(F)
     S = np.array(S)
     DOS = []
@@ -141,13 +320,36 @@ def DOS(Elist, F, S, sig1, sig2):
         Gr = LA.inv(E*S - F - sig)
         DOSList.append(-1*np.imag(np.diag(Gr))/np.pi)
         DOS.append(np.sum(DOSList[-1]))
-        #print("Energy:",E, "eV, DOS=", DOS[-1])
     return DOS, DOSList
 
 ## ENERGY DEPENDENT SIGMA:
 
 # F,S are NxN matrices, g is a surfG() object
 def cohTransE(Elist, F, S, g):
+    """
+    Calculate coherent transmission with energy-dependent self-energies.
+
+    Parameters
+    ----------
+    Elist : array_like
+        List of energies in eV to calculate transmission at
+    F : ndarray
+        Fock matrix
+    S : ndarray
+        Overlap matrix
+    g : surfG object
+        Surface Green's function calculator
+
+    Returns
+    -------
+    list
+        Transmission values at each energy
+
+    Notes
+    -----
+    Uses the surface Green's function calculator to compute energy-dependent
+    self-energies at each energy point.
+    """
     F = np.array(F)
     S = np.array(S)
     Tr = []
@@ -164,6 +366,29 @@ def cohTransE(Elist, F, S, g):
 
 # F,S are 2Nx2N matrices, g is a surfG() object size 2Nx2N
 def cohTransSpinE(Elist, F, S, g, spin='u'):
+    """
+    Calculate spin-dependent coherent transmission with energy-dependent self-energies.
+
+    Parameters
+    ----------
+    Elist : array_like
+        List of energies in eV to calculate transmission at
+    F : ndarray
+        Fock matrix
+    S : ndarray
+        Overlap matrix
+    g : surfG object
+        Surface Green's function calculator
+    spin : str, optional
+        Spin basis {'r', 'u', 'ro', or 'g'} (default: 'u')
+
+    Returns
+    -------
+    tuple
+        (Tr, Tspin) where:
+        - Tr: Total transmission at each energy
+        - Tspin: Array of spin-resolved transmissions [T↑↑, T↑↓, T↓↑, T↓↓]
+    """
     F = np.array(F)
     N = int(len(F)/2)
     S = np.array(S)
@@ -183,14 +408,14 @@ def cohTransSpinE(Elist, F, S, g, spin='u'):
             bInds = np.arange(1, 2*N, 2)
             GrQuad = [Gr[np.ix_(aInds, aInds)], Gr[np.ix_(aInds, bInds)],
                       Gr[np.ix_(bInds, aInds)], Gr[np.ix_(bInds, bInds)]]
-            # Use only main diagonal gamma, ordering from 10.1021/acs.jctc.9b01078
+            # Use only main diagonal gamma, ordering from JCTCpaper
             g1Quad = [gamma1[np.ix_(aInds, aInds)], gamma1[np.ix_(aInds, aInds)],
                       gamma1[np.ix_(bInds, bInds)], gamma1[np.ix_(bInds, bInds)]]
             g2Quad = [gamma2[np.ix_(aInds, aInds)], gamma2[np.ix_(bInds, bInds)],
                       gamma2[np.ix_(aInds, aInds)], gamma2[np.ix_(bInds, bInds)]]
         else:
             GrQuad = [Gr[:N, :N], Gr[:N, N:], Gr[N:, :N], Gr[N:, N:]]
-            # Use only main diagonal gamma, ordering from 10.1021/acs.jctc.9b01078
+            # Use only main diagonal gamma, ordering from JCTCpaper
             g1Quad = [gamma1[:N,:N], gamma1[:N,:N], gamma1[N:, N:], gamma1[N:,N:]]
             g2Quad = [gamma2[:N,:N], gamma2[N:,N:], gamma2[:N, :N], gamma2[N:,N:]]
         gam1Gr = [g1Quad[i]@GrQuad[i] for i in range(4)]     #Full Matrix Multiplication
@@ -198,9 +423,7 @@ def cohTransSpinE(Elist, F, S, g, spin='u'):
         for i in range(N):
             Ttot =  0
             for j in range(4):
-                #T_ = np.dot(gam1Gr[j][i,:],gam2Ga[j][:,i])
                 T_ = sum(gam1Gr[j][i,:]*gam2Ga[j][:,i])
-                #T_ = np.einsum('i,i->',gam1Gr[j][i,:],gam2Ga[j][:,i])
                 Ts[j] += T_
                 T+= T_
         T = np.real(T)
@@ -213,6 +436,27 @@ def cohTransSpinE(Elist, F, S, g, spin='u'):
                    
 # F,S are NxN matrices, g is a surfG() object
 def DOSE(Elist, F, S, g):
+    """
+    Calculate density of states with energy-dependent self-energies.
+
+    Parameters
+    ----------
+    Elist : array_like
+        List of energies in eV to calculate DOS at
+    F : ndarray
+        Fock matrix
+    S : ndarray
+        Overlap matrix
+    g : surfG object
+        Surface Green's function calculator
+
+    Returns
+    -------
+    tuple
+        (DOS, DOSList) where:
+        - DOS: Total density of states at each energy
+        - DOSList: Site-resolved DOS at each energy
+    """
     F = np.array(F)
     S = np.array(S)
     DOS = []

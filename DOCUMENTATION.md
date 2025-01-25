@@ -132,6 +132,38 @@ This package builds upon the foundation laid by the open-source ANT.Gaussian pac
    ```
 3. Install the gau-open package for Gaussian integration
 
+## Usage
+
+### Basic NEGF Calculation
+
+```python
+from scf import NEGF
+
+# Initialize NEGF calculation
+negf = NEGF("molecule", basis="lanl2dz", func="b3pw91")
+
+# Set contacts
+negf.setContacts(lContact=[1], rContact=[2])
+
+# Set voltage bias
+negf.setVoltage(qV=1.0)  # 1.0V bias
+
+# Run SCF calculation
+negf.SCF(conv=1e-5, maxcycles=100)
+```
+
+### Surface Green's Function Setup
+
+```python
+from surfGBethe import surfGB
+
+# Initialize surface Green's function
+surf = surfGB(F, S, contacts, bar, latFile='Au')
+
+# Calculate self-energy
+sigma = surf.sigma(E)
+```
+
 ## Key Parameters
 
 ### NEGF Class

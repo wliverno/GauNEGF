@@ -1,3 +1,17 @@
+"""
+Surface Green's function implementation for Bethe lattice contacts.
+
+This module provides a Bethe lattice implementation for modeling semi-infinite
+metallic contacts in quantum transport calculations. It supports:
+- FCC [111] surface geometry with proper orbital symmetries
+- Slater-Koster parameterization for s, p, and d orbitals
+- Temperature-dependent calculations
+- Spin-restricted and unrestricted calculations
+
+The implementation follows the ANT.Gaussian approach, using a minimal basis
+set with s, p, and d orbitals for each contact atom.
+"""
+
 # Python packages
 import numpy as np
 from numpy import linalg as LA
@@ -14,6 +28,51 @@ Eminf = -1e6            # Setting lower bound to -1e6 eV
 
 # Bethe lattice surface Green's function for a device with contacts
 class surfGB:
+    """
+    Surface Green's function calculator for Bethe lattice contacts.
+
+    This class implements the Bethe lattice approximation for modeling
+    semi-infinite metallic contacts. It handles:
+    - Contact geometry detection and setup
+    - Slater-Koster parameter management
+    - Energy-dependent self-energy calculations
+    - Temperature effects
+    - Spin configurations
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix
+    S : ndarray
+        Overlap matrix
+    contacts : list of lists
+        List of atom indices for each contact
+    bar : object
+        Gaussian interface object containing basis set information
+    latFile : str, optional
+        Filename for Bethe lattice parameters (default: 'Au')
+    spin : str, optional
+        Spin configuration ('r' for restricted) (default: 'r')
+    eta : float, optional
+        Broadening parameter in eV (default: 1e-9)
+    T : float, optional
+        Temperature in Kelvin (default: 0)
+
+    Attributes
+    ----------
+    cVecs : list
+        Normal vectors for each contact surface
+    latVecs : list
+        Lattice vectors for each contact
+    indsLists : list
+        Orbital indices for each contact atom
+    dirLists : list
+        Direction vectors for nearest neighbors
+    nIndLists : list
+        Nearest neighbor indices for each atom
+    gList : list
+        surfGBAt objects for each contact
+    """
     def __init__(self, F, S, contacts, bar,  latFile='Au', spin='r', eta=1e-9, T=0):
         #Read contact/orbital information and store
         self.cVecs = []
@@ -76,7 +135,7 @@ class surfGB:
 
         
         # Read Bethe lattice parameters and generate hopping/overlap matrices
-        self.read_bethe_params(latFile)
+        self.readBetheParams(latFile)
         self.Slists = []
         self.Vlists = []
         for dirList in self.dirLists: 
@@ -84,8 +143,8 @@ class surfGB:
             Slist = []
             Vlist = []
             for d in dirList:
-                Slist.append(self.construct_mat(self.Sdict, d))
-                Vlist.append(self.construct_mat(self.Vdict, d))
+                Slist.append(self.constructMat(self.Sdict, d))
+                Vlist.append(self.constructMat(self.Vdict, d))
             self.Slists.append(Slist)
             self.Vlists.append(Vlist)
         # Use surfGBAt() object to store the atomic Bethe lattice green's function for each contact
@@ -102,17 +161,23 @@ class surfGB:
 
     def genNeighbors(self, plane_normal, first_neighbor):
         """
-        Generate 12 neighbor unit vectors based on an FCC [111] surface:
-        - 6 in the plane forming a hexagonal pattern
-        - 6 in the following planes forming a triangular pattern
-        
-        Args:
-            plane_normal: Vector normal to the crystal plane (will be normalized)
-            first_neighbor: Vector to one nearest neighbor (will be normalized)
-            
-        Returns:
-            Tuple containing:
-                - Array of 3 in-plane and 3 out of plane unit vectors followed by their negatives
+        Generate 12 nearest neighbor unit vectors for an FCC [111] surface.
+
+        Creates a list of unit vectors representing the 12 nearest neighbors in an FCC lattice:
+        - 6 in-plane vectors forming a hexagonal pattern (3 pairs of opposite vectors)
+        - 6 out-of-plane vectors forming triangular patterns (3 pairs of opposite vectors)
+
+        Parameters
+        ----------
+        plane_normal : ndarray
+            Vector normal to the crystal plane (will be normalized)
+        first_neighbor : ndarray
+            Vector to one nearest neighbor (will be projected onto plane)
+
+        Returns
+        -------
+        list
+            12 unit vectors representing nearest neighbor directions
         """
         
         # Project first_neighbor onto plane perpendicular to plane_normal
@@ -172,7 +237,31 @@ class surfGB:
         return all_vectors
 
     # Read parameters from filename.bethe file, check values, store into dicts
-    def read_bethe_params(self, filename):
+    def readBetheParams(self, filename):
+        """
+        Read Slater-Koster parameters from a .bethe file.
+
+        Reads and validates parameters for minimal basis with single s, p, and d orbitals.
+        Parameters are stored in dictionaries for onsite energies, hopping integrals,
+        and overlap matrices.
+
+        Parameters
+        ----------
+        filename : str
+            Name of the .bethe file (without extension)
+
+        Raises
+        ------
+        AssertionError
+            If parameters are missing or invalid
+
+        Notes
+        -----
+        Parameters are sorted into:
+        - Edict: Onsite energies (converted from Hartrees to eV)
+        - Vdict: Hopping parameters (converted from Hartrees to eV)
+        - Sdict: Overlap parameters
+        """
         params = {}
 
         with open(filename+'.bethe', 'r') as f:
@@ -203,15 +292,34 @@ class surfGB:
         self.H0 = np.diag([self.Edict['s']]+ [self.Edict['p']]*3 + \
                      [self.Edict['dd']]+ [self.Edict['dt']]*2 + [self.Edict['dd'], self.Edict['dt']])
 
-    def construct_mat(self, Mdict, dirCosines):
-        """Construct hopping/overlap matrix using Slater-Koster formalism with proper phase factors.
-         
-        Args:
-            Mdict (dict): Dictionary of Slater-Koster parameters (ssσ, spσ, etc.)
-            dirCosines (tuple or list): Array [l,m,n] of direction cosines
+    def constructMat(self, Mdict, dirCosines):
+        """
+        Construct hopping/overlap matrix using Slater-Koster formalism.
 
-        Returns:
-            ndarray: The constructed matrix rotated to the given direction
+        Builds a 9x9 matrix for s, p, and d orbital interactions based on the
+        Slater-Koster two-center approximation. The matrix is first constructed
+        assuming a [0,0,1] bond direction, then rotated to the given direction
+        using direction cosines.
+
+        Parameters
+        ----------
+        Mdict : dict
+            Dictionary of Slater-Koster parameters (ssσ, spσ, ppσ, etc.)
+        dirCosines : ndarray
+            Array [l,m,n] of direction cosines for the bond
+
+        Returns
+        -------
+        ndarray
+            9x9 matrix containing orbital interactions in the rotated frame
+
+        Notes
+        -----
+        Matrix blocks:
+        - [0,0]: s-s interaction
+        - [0:4,0:4]: s-p block
+        - [0:4,4:9]: s-d and p-d blocks
+        - [4:9,4:9]: d-d block
         """
 
         M = np.zeros((dim, dim))
@@ -300,29 +408,103 @@ class surfGB:
         # Apply transformation 
         return tr @ M @ tr.T
     
-    def sigma(self, E, i, conv=1e-5):
-        sig = np.zeros((self.N, self.N), dtype=complex)
-        sigSurf = self.gList[i].sigma(E, None, conv)
-        # Apply self energies in first 9 directions that aren't attached to atom
-        for nInds, Finds in zip(self.nIndLists[i], self.indsLists[i]):
-            sigInds = list(set(range(9)) - set(nInds))
-            sigAtom = sum([sigSurf[j] for j in sigInds])
-            sig[np.ix_(Finds, Finds)] = sigAtom
-        # Apply de-orthonormalization technique from ANT.Gaussian if orthonormal
-        if self.Sdict['sss'] == 0:
-            sig = self.Xi @ sig @ self.Xi
-        if self.spin == 'u' or self.spin == 'ro':
-            sig = np.kron(np.eye(2), sig)
-        elif self.spin =='g':
-            sig = np.kron(sig, np.eye(2))
-        return sig
+    def sigma(self, E, inds=None, conv=1e-5, mix=0.5): 
+        """
+        Calculate surface self-energies for an FCC lattice.
+
+        Computes self-energies for atoms at the surface with the geometry:
+        [3x plane dir] - o - [3x plane dir]
+                        /|\     
+                [3x out of plane dir]
+
+        Uses a self-consistent iteration scheme with mixing to solve the Dyson equation.
+
+        Parameters
+        ----------
+        E : float
+            Energy point for Green's function calculation (in eV)
+        inds : list or int, optional
+            Indices of the sigma matrix to return. If None, returns full list (default: None)
+        conv : float, optional
+            Convergence criterion for Dyson equation (default: 1e-5)
+        mix : float, optional
+            Mixing factor for Dyson equation (default: 0.5)
+
+        Returns
+        -------
+        list
+            List of self-energy matrices for the surface atom. If inds is specified,
+            returns only the requested matrices.
+
+        Notes
+        -----
+        First calculates bulk self-energies using sigmaK, then iterates to find
+        surface self-energies for the 9 surface directions.
+        """
+        sigSurf = self.gList[0].sigmaK(E, conv, mix)[:9]
+        #Self-consistency loop 
+        count = 0
+        maxIter = 1000
+        diff = np.inf                             ## SET THIS TO 0 to BYPASS SECOND LOOP
+        A = (E - self.eta*1j)*np.eye(dim) - self.H0
+        planeVec = [0,1,2,6,7,8] # Location of vectors in plane
+        while diff > conv and count < maxIter:
+            sigSurf_ = sigSurf.copy()
+            sigTot = np.sum(sigSurf, axis=0)
+            g = LA.inv(A - sigTot) # subtracted from sigTot
+            for k in planeVec:
+                pair_k = (k + 6)%12 # Opposite direction vector
+                B = (E - self.eta*1j)*self.Slists[0][k] - self.Vlists[0][k]
+                sigSurf[k] = mix*(B@g@B.conj().T) + (1-mix)*sigSurf_[k]
+            
+            # Convergence Check
+            diff = np.max(np.abs(sigSurf - sigSurf_))/np.max(np.abs(sigSurf_))
+            count += 1
+
+        if diff>conv:
+            print(f'Warning: sigma() exceeded 1000 iterations! E: {E}, Conv: {diff}')
+        
+        if inds is None:
+            return sigSurf
+        else:
+            return [sigSurf[i] for i in inds]
     
     def sigmaTot(self, E, conv=1e-5):
+        """
+        Calculate total self-energy matrix for the extended system.
+
+        Computes self-energies for all sites in the extended system (12 neighbors + 1 center).
+        Used for compatibility with density.py methods.
+
+        Parameters
+        ----------
+        E : float
+            Energy point for Green's function calculation (in eV)
+        conv : float, optional
+            Convergence criterion for self-energy calculation (default: 1e-5)
+
+        Returns
+        -------
+        ndarray
+            Total self-energy matrix for the extended system
+        """
         sigs = [self.sigma(E, i, conv) for i in range(len(self.indsLists))]
         return sum(sigs)
     
-    # Update contact i with a new fermi energy (Ef) by shifting Hamiltonian
     def updateFermi(self, i, Ef):
+        """
+        Update Fermi energy for a specific contact.
+
+        Shifts the Hamiltonian of contact i to align its Fermi level with
+        the specified energy.
+
+        Parameters
+        ----------
+        i : int
+            Contact index
+        Ef : float
+            New Fermi energy in eV
+        """
         fermiPrev = self.gList[i].fermi +0.0
         #if i==-1:
         #    print(f'Changing right contact fermi energy: {fermiPrev} --> {Ef}')
@@ -333,8 +515,22 @@ class surfGB:
         # Onsite energies
         self.gList[i].updateH(Ef)
     
-    # Fermi levels used to update onsite energies, Fock matrix unused 
-    def setF(self,F, muL, muR):
+    def setF(self, F, muL, muR):
+        """
+        Update Fock matrix and contact chemical potentials.
+
+        Sets the Fock matrix and updates the Fermi levels of the left and
+        right contacts if they have changed.
+
+        Parameters
+        ----------
+        F : ndarray
+            New Fock matrix
+        muL : float
+            Chemical potential for left contact in eV
+        muR : float
+            Chemical potential for right contact in eV
+        """
         self.F = F
         if self.gList[0].fermi != muL:
             self.updateFermi(0, muL)
@@ -342,14 +538,21 @@ class surfGB:
             self.updateFermi(-1, muR) 
 
     ## TESTING METHODS FOR SLATER-KOSTER INTERACTIONS:
-    def test_d_orbital_functions(self):
-        """Test d orbital angular functions using surfGB parameter dictionaries"""
+    def testDOrbitalFunctions(self):
+        """
+        Test d orbital angular functions.
+
+        Validates the angular dependence of d orbital interactions by checking:
+        - dxy interaction along x-axis (should be zero)
+        - dx2-y2 interaction along x-axis (should be sqrt(3)/2 * sds)
+        - dz2 interaction along x-axis (should be -1/2 * sds)
+        """
     
         # Use values from the Bethe parameter dictionaries
         Vdict = self.Vdict  # Contains hopping parameters
     
         # Test along x-axis [1,0,0]
-        M = self.construct_mat(self.Vdict, [1, 0, 0])
+        M = self.constructMat(self.Vdict, [1, 0, 0])
     
         # dxy should be zero along x-axis
         np.testing.assert_almost_equal(M[0,8], 0.0,
@@ -365,15 +568,20 @@ class surfGB:
     
         print("d orbital angular function tests passed!")
     
-    def test_d_orbital_symmetry(self):
-        """Test d orbital symmetry properties using surfGB parameters"""
+    def testDOrbitalSymmetry(self):
+        """
+        Test d orbital symmetry properties.
+
+        Validates that d orbital interactions respect inversion symmetry
+        by comparing interactions along opposite directions.
+        """
     
         # Test inversion symmetry
         dir1 = [1/np.sqrt(2), 1/np.sqrt(2), 0]
         dir2 = [-1/np.sqrt(2), -1/np.sqrt(2), 0]
     
-        M1 = self.construct_mat(self.Vdict, dir1)
-        M2 = self.construct_mat(self.Vdict, dir2)
+        M1 = self.constructMat(self.Vdict, dir1)
+        M2 = self.constructMat(self.Vdict, dir2)
     
         # d-d block should be identical under inversion
         np.testing.assert_array_almost_equal(
@@ -382,13 +590,19 @@ class surfGB:
     
         print("d orbital symmetry tests passed!")
     
-    def test_pd_interaction(self):
-        """Test p-d orbital interactions using surfGB parameters"""
+    def testPDInteraction(self):
+        """
+        Test p-d orbital interactions.
+
+        Validates p-d orbital interactions by checking:
+        - px-dxy interaction along x-axis (should be zero)
+        - pz-dz2 interaction along z-axis (should be pure sigma)
+        """
     
         Vdict = self.Vdict
     
         # Test px-dxy interaction along x-axis
-        M = self.construct_mat(Vdict, [1, 0, 0])
+        M = self.constructMat(Vdict, [1, 0, 0])
     
         # px-dxy should be zero along x-axis
         np.testing.assert_almost_equal(
@@ -396,7 +610,7 @@ class surfGB:
             err_msg="px-dxy interaction incorrect along x-axis")
     
         # Test pz-dz2 interaction along z-axis
-        M = self.construct_mat(Vdict, [0, 0, 1])
+        M = self.constructMat(Vdict, [0, 0, 1])
         expected = Vdict['pds']  # Should be pure sigma
         np.testing.assert_almost_equal(
             M[3,4], expected,
@@ -404,13 +618,19 @@ class surfGB:
     
         print("p-d interaction tests passed!")
     
-    def test_dd_interaction(self):
-        """Test d-d orbital interactions using surfGB parameters"""
+    def testDDInteraction(self):
+        """
+        Test d-d orbital interactions.
+
+        Validates d-d orbital interactions by checking:
+        - dyz-dyz interaction along x-axis (should be pure delta)
+        - dz2-dz2 interaction along z-axis (should be pure sigma)
+        """
     
         Vdict = self.Vdict
     
         # Test dyz-dyz interaction along x-axis
-        M = self.construct_mat(Vdict, [1, 0, 0])
+        M = self.constructMat(Vdict, [1, 0, 0])
     
         # Should be pure delta interaction
         expected = Vdict['ddd']
@@ -419,7 +639,7 @@ class surfGB:
             err_msg="dyz-dyz interaction incorrect along x-axis")
     
         # Test dz2-dz2 interaction along x-axis
-        M = self.construct_mat(Vdict, [0, 0, 1])
+        M = self.constructMat(Vdict, [0, 0, 1])
         # Should be pure sigma interaction
         expected = Vdict['dds']
         np.testing.assert_almost_equal(
@@ -427,8 +647,15 @@ class surfGB:
             err_msg="dz2-dz2 interaction incorrect along z-axis")
     
         print("d-d interaction tests passed!")
-    def test_hopping_physics(self):
-        """ Test physical properties of hopping matrices for different bond directions"""
+    def testHoppingPhysics(self):
+        """
+        Test physical properties of hopping matrices.
+
+        Validates hopping matrix physics by checking:
+        - s-p hopping antisymmetry
+        - Conservation of total s-p hopping magnitude
+        - Proper angular dependence along principal axes and 45-degree rotations
+        """
         eps = 1e-10  # Tolerance for floating point comparisons
         
         # Get reference hopping values from [0,0,1] configuration
@@ -454,7 +681,7 @@ class surfGB:
             x, y, z = direction
             
             print(f"\nChecking {name} direction: [{x:.3f}, {y:.3f}, {z:.3f}]")
-            V = self.construct_mat(self.Vdict, direction)
+            V = self.constructMat(self.Vdict, direction)
             
             # Check s-p hopping antisymmetry
             for i in range(1, 4):  # Check all p orbitals
@@ -474,19 +701,87 @@ class surfGB:
     
         print("\nAll hopping physics tests passed!")    # Update run_all_tests to include new test
 
-    def run_all_tests(self):
-        """Run all validation tests for surfGB"""
+    def runAllTests(self):
+        """
+        Run all validation tests for surfGB.
+
+        Executes all test methods to validate:
+        - d orbital angular functions
+        - d orbital symmetry
+        - p-d interactions
+        - d-d interactions
+        - General hopping physics
+        """
         print("Running Slater-Koster projection tests...")
-        self.test_d_orbital_functions()
-        self.test_d_orbital_symmetry()
-        self.test_pd_interaction()
-        self.test_dd_interaction()
-        self.test_hopping_physics()
+        self.testDOrbitalFunctions()
+        self.testDOrbitalSymmetry()
+        self.testPDInteraction()
+        self.testDDInteraction()
+        self.testHoppingPhysics()
         print("\nAll tests passed!")
 
 # Bethe lattice surface Green's function for a single atom
 class surfGBAt:
+    """
+    Atomic-level Bethe lattice Green's function calculator.
+
+    This class implements the surface Green's function calculation for a single atom
+    in the Bethe lattice, handling:
+    - Onsite and hopping matrix construction
+    - Self-energy calculations for bulk and surface
+    - Temperature effects
+    - Fermi energy optimization
+
+    Parameters
+    ----------
+    H : ndarray
+        Onsite Hamiltonian matrix (9x9 for minimal basis)
+    Slist : list of ndarray
+        List of 12 overlap matrices for nearest neighbors
+    Vlist : list of ndarray
+        List of 12 hopping matrices for nearest neighbors
+    eta : float
+        Broadening parameter in eV
+    T : float, optional
+        Temperature in Kelvin (default: 0)
+
+    Attributes
+    ----------
+    NN : int
+        Number of nearest neighbors (fixed to 12 for FCC)
+    sigmaKprev : ndarray or None
+        Previous bulk self-energy for convergence
+    Eprev : float
+        Previous energy point for convergence
+    fermi : float
+        Current Fermi energy
+    F : ndarray
+        Extended Fock matrix including neighbors
+    S : ndarray
+        Extended overlap matrix including neighbors
+    """
     def __init__(self, H, Slist, Vlist, eta, T=0):
+        """
+        Initialize surfGBAt with Hamiltonian and neighbor matrices.
+
+        Parameters
+        ----------
+        H : ndarray
+            Onsite Hamiltonian matrix (9x9 for minimal basis)
+        Slist : list of ndarray
+            List of 12 overlap matrices for nearest neighbors
+        Vlist : list of ndarray
+            List of 12 hopping matrices for nearest neighbors
+        eta : float
+            Broadening parameter in eV
+        T : float, optional
+            Temperature in Kelvin (default: 0)
+
+        Raises
+        ------
+        AssertionError
+            If matrix dimensions are incorrect or number of neighbors != 12
+        """
         assert np.shape(H) == (dim,dim), f"Error with H dim, should be {dim}x{dim}"
         for S,V in zip(Slist, Vlist):
             assert np.shape(S) == (dim,dim), f"Error with S dim, should be {dim}x{dim}"
@@ -505,12 +800,25 @@ class surfGBAt:
         self.updateH()
 
     def updateH(self, fermi=None):
-        """Update onsite and hopping matrices, as well as extended lattice matrices
-        H0x and S0x include 13 sites total (12 neighbor sites followed by 1 onsite term)
-        Also stored as F and S for compatibility with density.py functions
+        """
+        Update Hamiltonian and extended matrices.
 
-        Args:
-            fermi (float): New Fermi energy setpoint if not None (default=None)
+        Updates onsite and hopping matrices, as well as extended lattice matrices.
+        The extended matrices H0x and S0x include 13 sites total (12 neighbor sites
+        followed by 1 onsite term). These are stored as F and S for compatibility
+        with density.py functions.
+
+        Parameters
+        ----------
+        fermi : float, optional
+            New Fermi energy setpoint in eV (default: None)
+
+        Notes
+        -----
+        When fermi is provided and different from current value:
+        - Shifts onsite energies by the Fermi level difference
+        - Updates hopping matrices with overlap contributions
+        - Rebuilds extended matrices for the full system
         """
         if fermi is not None and self.fermi is not None and fermi != self.fermi:
             # Shift fermi energy
@@ -536,22 +844,36 @@ class surfGBAt:
     
     # Calculate sigmaK for the bulk
     def sigmaK(self, E, conv=1e-5, mix=0.5):
-        """Calculate all self-energies of all 12 lattice directions in the bulk FCC lattice:
+        """
+        Calculate bulk self-energies for all 12 lattice directions.
 
+        Computes self-energies for an FCC lattice with the following geometry:
                 [3x out of plane dir]
                         \|/  
         [3x plane dir] - o - [3x plane dir]
                         /|\     
-                [3x out -f plane dir]
+                [3x out of plane dir]
 
-        Args:
-            E (float): Energy value for calculating Green's functions
-            conv (float): Convergence criteria for Dyson equation (default=1e-5)
-            mix (float): Mixing factor for Dyson equation (default=0.5)
-            
-        Returns:
-            list: A list of 12 self-energy matrices (ndarrays) in order by lattice direction 
+        Uses a self-consistent iteration scheme with mixing to solve the Dyson equation.
 
+        Parameters
+        ----------
+        E : float
+            Energy point for Green's function calculation (in eV)
+        conv : float, optional
+            Convergence criterion for Dyson equation (default: 1e-5)
+        mix : float, optional
+            Mixing factor for Dyson equation (default: 0.5)
+
+        Returns
+        -------
+        ndarray
+            Array of 12 self-energy matrices (9x9 each) in order by lattice direction
+
+        Notes
+        -----
+        Uses previous solution as initial guess when energy point is close to
+        previous calculation to improve convergence.
         """
         #Initialize sigmaK and A matrices for Dyson equation
         if self.sigmaKprev is not None and self.Eprev != Eminf and abs(self.Eprev - E) <1:
@@ -586,20 +908,37 @@ class surfGBAt:
         return sigmaK
 
     def sigma(self, E, inds=None, conv=1e-5, mix=0.5): 
-        """Calculate the self energies for atoms at the surface of the FCC lattice (9 directions):
+        """
+        Calculate surface self-energies for an FCC lattice.
 
+        Computes self-energies for atoms at the surface with the geometry:
         [3x plane dir] - o - [3x plane dir]
                         /|\     
                 [3x out of plane dir]
 
-        Args:
-            E (float): Energy value for calculating Green's functions
-            inds (list,int): indices of the sigma matrix used, if None returns full list (default=None)
-            conv (float): Convergence criteria for Dyson equation (default=1e-5)
-            mix (float): Mixing factor for Dyson equation (default=0.5)
-            
-        Returns:
-            list(ndarray): A listo of self-energy matrices for the surface atom
+        Uses a self-consistent iteration scheme with mixing to solve the Dyson equation.
+
+        Parameters
+        ----------
+        E : float
+            Energy point for Green's function calculation (in eV)
+        inds : list or int, optional
+            Indices of the sigma matrix to return. If None, returns full list (default: None)
+        conv : float, optional
+            Convergence criterion for Dyson equation (default: 1e-5)
+        mix : float, optional
+            Mixing factor for Dyson equation (default: 0.5)
+
+        Returns
+        -------
+        list
+            List of self-energy matrices for the surface atom. If inds is specified,
+            returns only the requested matrices.
+
+        Notes
+        -----
+        First calculates bulk self-energies using sigmaK, then iterates to find
+        surface self-energies for the 9 surface directions.
         """
         sigSurf = self.sigmaK(E, conv, mix)[:9]
         #Self-consistency loop 
@@ -631,6 +970,20 @@ class surfGBAt:
     
     # Empty function for compatibility with density.py methods
     def setF(self, F, mu1, mu2):
+        """
+        Empty function for compatibility with density.py methods.
+
+        Bethe lattice bulk properties are intrinsic (dependent on TB parameters).
+
+        Parameters
+        ----------
+        F : ndarray
+            Fock matrix (unused)
+        mu1 : float
+            First chemical potential (unused)
+        mu2 : float
+            Second chemical potential (unused)
+        """
         pass # Bethe lattice bulk properties are intrinsic (dependent on TB parameters)
     
     # Wrapper function for compatibility with density.py methods
@@ -645,46 +998,50 @@ class surfGBAt:
     
     # Get the bulk DOS of the Bethe lattice
     def DOS(self, E):
+        """
+        Calculate bulk density of states of the Bethe lattice.
+
+        Parameters
+        ----------
+        E : float
+            Energy point for DOS calculation (in eV)
+
+        Returns
+        -------
+        float
+            Density of states at energy E
+        """
         Gr = LA.inv((E-1j*self.eta)*np.eye(dim)- self.H - np.sum(self.sigma(E), axis=0))
         return -np.trace(Gr).imag/np.pi
 
     
     # Calculate fermi energy using bisection (to specified tolerance)
     def calcFermi(self, ne, fGuess=5, tol=1e-5):
-        # COPYING ANT.GAUSSIAN IMPLEMENTATION
-        #D, _ = LA.eig(LA.inv(self.S)@self.F)
-        ## Generate extended system 
-        #Emin = min(D.real)
-        #Emax = max(D.real)
-        #maxCycles = 40
-        #cycles = 0
-        #calcN = 0
-        #Nint = 200
-        #calcN_ = np.inf
-        ## Main loop for calculating Emin/Emax integration limits
-        #while abs(calcN - calcN_) > tol and cycles < maxCycles:
-        #    calcN_=calcN+0.0
-        #    Emin -= 10
-        #    Emax += 10
-        #    # recalculate integration limits each iteration to ensure accuracy
-        #    Nint = 8
-        #    MaxDP = np.inf
-        #    rho = np.eye(dim*(self.NN+1))
-        #    while MaxDP > tol and Nint < 1e3:
-        #        Nint *= 2
-        #        rho_ = rho.copy()
-        #        rho = np.real(densityComplex(self.F, self.S, self, Emin, Emax, Nint, self.T, showText=False))
-        #        MaxDP = max(np.diag(abs(rho_ - rho)))
-        #    if Nint > 1e3:
-        #        print(f'Warning: MaxDP above tolerance (val = {MaxDP:.3E})')
-        #    calcN = np.trace((rho@self.S)[-dim:, -dim:])
-        #    print(f"Range: {Emin}, {Emax} - calcN = {calcN}")
-        #if cycles == maxCycles:
-        #    print(f"Warning: Energy range ({Emin}, {Emax}) not converged (val = {calcN - dim})")
-        #print(ne)
-        #self.fermi = calcFermi(self, ne, Emin, Emax, fGuess, Nint, 1000, 
-        #                Eminf=Eminf, tol=tol, maxcycles=maxCycles, nOrbs=dim)[0]
-        # USING OUR IMPLEMENTATION:
+        """
+        Calculate Fermi energy using bisection method.
+
+        Uses getFermiContact from density.py to find the Fermi energy that gives
+        the correct number of electrons.
+
+        Parameters
+        ----------
+        ne : float
+            Target number of electrons
+        fGuess : float, optional
+            Initial guess for Fermi energy in eV (default: 5)
+        tol : float, optional
+            Convergence tolerance (default: 1e-5)
+
+        Returns
+        -------
+        float
+            Calculated Fermi energy in eV
+
+        Notes
+        -----
+        Previous implementation used ANT.Gaussian approach with complex contour
+        integration. Current version uses simpler bisection method from density.py.
+        """
         self.fermi = getFermiContact(self, ne, tol, Eminf, 40, nOrbs=dim)
         return self.fermi
 
