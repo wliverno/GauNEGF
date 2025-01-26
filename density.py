@@ -493,7 +493,7 @@ def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=300):
             sig = g.sigma(E, ind)
         Gamma = 1j*(sig - sig.conj().T)
         dFermi = fermi(E, muHi, T) - fermi(E, muLo, T)
-        den += mid*w[i]*(GrE@Gamma@GaE)*dFermi*dInt
+        den += (GrE@Gamma@GaE)*dFermi*dE
     print('Integration done!')
     
     return den/(2*np.pi)
