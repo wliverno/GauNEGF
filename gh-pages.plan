@@ -1,0 +1,99 @@
+# GitHub Pages Deployment Plan for GaussianNEGF Documentation
+
+## Phase 1: Documentation Preparation
+1. Clean up build directory:
+   ```bash
+   cd docs
+   rm -rf _build/  # Remove any existing build files
+   ```
+
+2. Update .gitignore:
+   - Add `docs/_build/` to prevent committing build files
+   - Add `__pycache__/` and `*.pyc` if not already there
+   - Add any other temporary files
+
+3. Test documentation build:
+   ```bash
+   sphinx-build -b html . _build/html
+   ```
+   - Fix any remaining formatting issues
+   - Ensure all links work correctly
+   - Test navigation between pages
+
+## Phase 2: Repository Structure
+1. Create documentation branch:
+   ```bash
+   git checkout -b documentation
+   ```
+   - Keep main branch clean
+   - Use this branch for documentation updates
+
+2. Update repository settings:
+   - Keep repository private for now
+   - Enable GitHub Pages in repository settings (when ready to publish)
+   - Select gh-pages branch as source (will create later)
+
+## Phase 3: Documentation Deployment
+1. Create gh-pages branch:
+   ```bash
+   git checkout --orphan gh-pages
+   git rm -rf .  # Remove all files from working directory
+   ```
+
+2. Add documentation files:
+   ```bash
+   # From gh-pages branch
+   cp -r docs/_build/html/* .
+   touch .nojekyll  # Prevent GitHub Pages from using Jekyll
+   ```
+
+3. Initial gh-pages commit:
+   ```bash
+   git add .
+   git commit -m "Initial documentation deployment"
+   ```
+
+## Phase 4: Automation (Optional)
+1. Create GitHub Action workflow:
+   ```yaml
+   name: Deploy Documentation
+   on:
+     push:
+       branches: [documentation]
+       paths:
+         - 'docs/**'
+   ```
+
+2. Add deployment script:
+   - Build documentation
+   - Deploy to gh-pages branch
+   - Only run when documentation changes
+
+## Important Considerations
+1. Privacy:
+   - Documentation will be public when hosted on GitHub Pages
+   - Review all documentation for sensitive information
+   - Consider using environment variables for any sensitive values
+   - Remove any private API keys or credentials
+
+2. Repository Status:
+   - Keep repository private until ready for publication
+   - When making public:
+     - Review all code for sensitive information
+     - Update documentation links
+     - Enable GitHub Pages
+
+3. Documentation Content:
+   - Add clear installation instructions
+   - Include license information
+   - Add contribution guidelines
+   - Link back to repository (when public)
+
+## Next Steps
+1. Start with Phase 1 to clean up and prepare documentation
+2. Create documentation branch for ongoing work
+3. Test builds locally
+4. When ready to publish:
+   - Review privacy considerations
+   - Follow Phase 3 steps
+   - Enable GitHub Pages 
