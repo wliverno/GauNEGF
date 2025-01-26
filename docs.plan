@@ -1,0 +1,106 @@
+# Documentation Plan for GaussianNEGF
+
+## 1. Source Code Documentation [COMPLETED]
+All Python modules have been documented with NumPy-style docstrings:
+- [x] scf.py: Core NEGF implementation
+- [x] scfE.py: Energy-dependent extensions
+- [x] density.py: Density matrix calculations and integration
+- [x] transport.py: Transport and transmission calculations
+- [x] surfGBethe.py: Bethe lattice surface Green's functions
+- [x] surfG1D.py: 1D chain contact implementation
+- [x] matTools.py: Matrix manipulation utilities
+- [x] fermiSearch.py: [DEPRECATED] DOS-based Fermi search
+
+## 2. Theory Documentation [NEXT STEPS]
+
+### 2.1 Core Concepts (from IntegralDemo.ipynb)
+1. NEGF Theory
+   - Green's function formalism
+   - Self-energy concepts
+   - Density matrix calculations
+
+2. Transport Theory
+   - Landauer formalism
+   - Transmission function
+   - Current calculations
+
+3. Implementation Details
+   - Integration methods
+   - Convergence strategies
+   - Numerical stability
+
+### 2.2 Examples and Tutorials (based on SiNEGF.py)
+1. Basic Usage
+   - Setting up calculations
+   - Running SCF
+   - Analyzing results
+
+2. Advanced Topics
+   - Temperature effects
+   - Bias voltage
+   - Contact configurations
+
+## 3. Sphinx Documentation [PENDING]
+
+### 3.1 Setup Steps
+1. Initialize Sphinx
+   ```bash
+   sphinx-quickstart docs
+   ```
+
+2. Create structure
+   ```
+   docs/
+   ├── source/
+   │   ├── conf.py
+   │   ├── index.rst
+   │   ├── installation.rst
+   │   ├── theory/
+   │   ├── examples/
+   │   └── api/
+   ```
+
+3. Convert notebooks
+   ```bash
+   jupyter nbconvert --to rst IntegralDemo.ipynb
+   ```
+
+### 3.2 Content Organization
+1. Getting Started
+   - Installation
+   - Basic usage
+   - Quick examples
+
+2. User Guide
+   - Theoretical background
+   - Step-by-step tutorials
+   - Best practices
+
+3. API Reference
+   - Complete function/class documentation
+   - Module organization
+   - Parameter descriptions
+
+4. Example Gallery
+   - Basic examples (molecule calculations)
+   - Advanced examples (Silicon nanowire)
+   - Case studies
+
+## 4. Documentation Maintenance
+1. Version Control
+   - Keep documentation versioned with code
+   - Update version numbers
+
+2. Testing
+   - Test code examples
+   - Verify docstring accuracy
+
+3. Review Process
+   - Technical review
+   - User feedback
+   - Example validation
+
+Next immediate steps:
+1. Begin converting IntegralDemo.ipynb to theory documentation
+2. Set up Sphinx infrastructure
+3. Create initial documentation structure 
