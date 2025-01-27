@@ -3,10 +3,11 @@ Density matrix calculation methods for quantum transport simulations.
 
 This module provides functions for calculating density matrices in quantum transport
 calculations using various integration methods:
-- Analytical integration for energy-independent self-energies
-- Complex contour integration for equilibrium calculations
-- Real-axis integration for non-equilibrium calculations
-- Parallel processing support for large systems
+
+    - Analytical integration for energy-independent self-energies
+    - Complex contour integration for equilibrium calculations
+    - Real-axis integration for non-equilibrium calculations
+    - Parallel processing support for large systems
 
 
 Notes
