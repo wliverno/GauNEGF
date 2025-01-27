@@ -8,8 +8,19 @@ metallic contacts in quantum transport calculations. It supports:
 - Temperature-dependent calculations
 - Spin-restricted and unrestricted calculations
 
-The implementation follows the ANT.Gaussian approach, using a minimal basis
-set with s, p, and d orbitals for each contact atom.
+The implementation follows the ANT.Gaussian approach [1], using a minimal basis
+set with s, p, and d orbitals for each contact atom. The Bethe lattice model
+provides an efficient way to describe bulk metallic electrodes while maintaining
+proper orbital symmetries and electronic structure. This approach allows for
+accurate modeling of metal-molecule interfaces without the computational cost
+of explicit periodic boundary conditions.
+
+References
+----------
+[1] Jacob, D., & Palacios, J. J. (2011). Critical comparison of electrode models 
+    in density functional theory based quantum transport calculations.
+    The Journal of Chemical Physics, 134(4), 044118.
+    DOI: 10.1063/1.3526044
 """
 
 # Python packages
@@ -38,6 +49,12 @@ class surfGB:
     - Energy-dependent self-energy calculations
     - Temperature effects
     - Spin configurations
+
+    The Bethe lattice model represents the contacts as a semi-infinite tree-like
+    structure with proper coordination number and orbital symmetries matching
+    those of bulk FCC metals. This provides an efficient way to compute surface
+    Green's functions and self-energies for the electrodes, as demonstrated by
+    Jacob & Palacios in their 2011 paper [1].
 
     Parameters
     ----------
@@ -72,6 +89,13 @@ class surfGB:
         Nearest neighbor indices for each atom
     gList : list
         surfGBAt objects for each contact
+
+    References
+    ----------
+    [1] Jacob, D., & Palacios, J. J. (2011). Critical comparison of electrode models 
+        in density functional theory based quantum transport calculations.
+        The Journal of Chemical Physics, 134(4), 044118.
+        DOI: 10.1063/1.3526044
     """
     def __init__(self, F, S, contacts, bar,  latFile='Au', spin='r', eta=1e-9, T=0):
         #Read contact/orbital information and store
@@ -408,73 +432,63 @@ class surfGB:
         # Apply transformation 
         return tr @ M @ tr.T
     
-    def sigma(self, E, inds=None, conv=1e-5, mix=0.5): 
+    def sigma(self, E, i, conv=1e-5):
         """
-        Calculate surface self-energies for an FCC lattice.
+        Calculate self-energy matrix for a specific contact.
 
-        Computes self-energies for atoms at the surface with the geometry:
-        [3x plane dir] - o - [3x plane dir]
-                        /|\     
-                [3x out of plane dir]
-
-        Uses a self-consistent iteration scheme with mixing to solve the Dyson equation.
+        Computes the self-energy matrix for contact i by:
+        1. Calculating surface self-energies for all 9 directions
+        2. Summing contributions from directions not connected to the device
+        3. Applying de-orthonormalization if needed
+        4. Handling spin configurations
 
         Parameters
         ----------
         E : float
-            Energy point for Green's function calculation (in eV)
-        inds : list or int, optional
-            Indices of the sigma matrix to return. If None, returns full list (default: None)
+            Energy point for self-energy calculation (in eV)
+        i : int
+            Index of the contact to calculate self-energy for
         conv : float, optional
-            Convergence criterion for Dyson equation (default: 1e-5)
-        mix : float, optional
-            Mixing factor for Dyson equation (default: 0.5)
+            Convergence criterion for self-energy calculation (default: 1e-5)
 
         Returns
         -------
-        list
-            List of self-energy matrices for the surface atom. If inds is specified,
-            returns only the requested matrices.
+        ndarray
+            Self-energy matrix for the specified contact, with dimensions:
+            - (N, N) for restricted calculations
+            - (2N, 2N) for unrestricted or generalized spin calculations
 
-        Notes
-        -----
-        First calculates bulk self-energies using sigmaK, then iterates to find
-        surface self-energies for the 9 surface directions.
+        References
+        ----------
+        [1] Jacob, D., & Palacios, J. J. (2011). Critical comparison of electrode models 
+            in density functional theory based quantum transport calculations.
+            The Journal of Chemical Physics, 134(4), 044118.
+            DOI: 10.1063/1.3526044  
         """
-        sigSurf = self.gList[0].sigmaK(E, conv, mix)[:9]
-        #Self-consistency loop 
-        count = 0
-        maxIter = 1000
-        diff = np.inf                             ## SET THIS TO 0 to BYPASS SECOND LOOP
-        A = (E - self.eta*1j)*np.eye(dim) - self.H0
-        planeVec = [0,1,2,6,7,8] # Location of vectors in plane
-        while diff > conv and count < maxIter:
-            sigSurf_ = sigSurf.copy()
-            sigTot = np.sum(sigSurf, axis=0)
-            g = LA.inv(A - sigTot) # subtracted from sigTot
-            for k in planeVec:
-                pair_k = (k + 6)%12 # Opposite direction vector
-                B = (E - self.eta*1j)*self.Slists[0][k] - self.Vlists[0][k]
-                sigSurf[k] = mix*(B@g@B.conj().T) + (1-mix)*sigSurf_[k]
-            
-            # Convergence Check
-            diff = np.max(np.abs(sigSurf - sigSurf_))/np.max(np.abs(sigSurf_))
-            count += 1
-
-        if diff>conv:
-            print(f'Warning: sigma() exceeded 1000 iterations! E: {E}, Conv: {diff}')
-        
-        if inds is None:
-            return sigSurf
-        else:
-            return [sigSurf[i] for i in inds]
+        sig = np.zeros((self.N, self.N), dtype=complex)
+        sigSurf = self.gList[i].sigma(E, None, conv)
+        # Apply self energies in first 9 directions that aren't attached to atom
+        for nInds, Finds in zip(self.nIndLists[i], self.indsLists[i]):
+            sigInds = list(set(range(9)) - set(nInds))
+            sigAtom = sum([sigSurf[j] for j in sigInds])
+            sig[np.ix_(Finds, Finds)] = sigAtom
+        # Apply de-orthonormalization technique from ANT.Gaussian if orthonormal
+        if self.Sdict['sss'] == 0:
+            sig = self.Xi @ sig @ self.Xi
+        if self.spin == 'u' or self.spin == 'ro':
+            sig = np.kron(np.eye(2), sig)
+        elif self.spin =='g':
+            sig = np.kron(sig, np.eye(2))
+        return sig
     
     def sigmaTot(self, E, conv=1e-5):
         """
         Calculate total self-energy matrix for the extended system.
 
         Computes self-energies for all sites in the extended system (12 neighbors + 1 center).
-        Used for compatibility with density.py methods.
+        The total self-energy is constructed following the Bethe lattice model described in
+        Jacob & Palacios [1], which provides an efficient representation of bulk metallic
+        electrodes while maintaining proper orbital symmetries.
 
         Parameters
         ----------
@@ -487,6 +501,13 @@ class surfGB:
         -------
         ndarray
             Total self-energy matrix for the extended system
+
+        References
+        ----------
+        [1] Jacob, D., & Palacios, J. J. (2011). Critical comparison of electrode models 
+            in density functional theory based quantum transport calculations.
+            The Journal of Chemical Physics, 134(4), 044118.
+            DOI: 10.1063/1.3526044
         """
         sigs = [self.sigma(E, i, conv) for i in range(len(self.indsLists))]
         return sum(sigs)
@@ -917,6 +938,9 @@ class surfGBAt:
                 [3x out of plane dir]
 
         Uses a self-consistent iteration scheme with mixing to solve the Dyson equation.
+        The implementation follows the Bethe lattice approach described in Jacob & Palacios (2011),
+        where the self-energy is computed recursively for a semi-infinite tree-like structure
+        that preserves the proper coordination number and orbital symmetries of bulk FCC metals.
 
         Parameters
         ----------
@@ -938,7 +962,16 @@ class surfGBAt:
         Notes
         -----
         First calculates bulk self-energies using sigmaK, then iterates to find
-        surface self-energies for the 9 surface directions.
+        surface self-energies for the 9 surface directions. The recursive method
+        ensures proper treatment of the metal-molecule interface while maintaining
+        computational efficiency.
+
+        References
+        ----------
+        [1] Jacob, D., & Palacios, J. J. (2011). Critical comparison of electrode models 
+            in density functional theory based quantum transport calculations.
+            The Journal of Chemical Physics, 134(4), 044118.
+            DOI: 10.1063/1.3526044
         """
         sigSurf = self.sigmaK(E, conv, mix)[:9]
         #Self-consistency loop 
