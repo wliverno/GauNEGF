@@ -2,22 +2,36 @@
 Self-consistent field (SCF) implementation for Non-Equilibrium Green's Function calculations.
 
 This module provides the base NEGF class for performing self-consistent DFT+NEGF
-calculations using Gaussian quantum chemistry package. It handles:
+calculations using Gaussian quantum chemistry package. It implements the energy-independent
+self-energy approach developed by Damle et al., which provides an efficient approximation
+for molecular transport calculations. The module handles:
     - Integration with Gaussian for DFT calculations
-    - SCF convergence with Pulay mixing
+    - SCF convergence with Pulay mixing [2]
     - Contact self-energy calculations
     - Voltage bias and electric field effects
     - Spin-polarized calculations
 
 The implementation follows the standard NEGF formalism where the density matrix
 is calculated self-consistently with the Fock matrix from Gaussian DFT calculations.
+Convergence is accelerated using the direct inversion in the iterative subspace (DIIS)
+method developed by Pulay [2]. The core NEGF-DFT implementation is based on the
+ANT.Gaussian approach developed by Palacios et al. [3], which pioneered the integration
+of NEGF with Gaussian-based DFT calculations.
 
 References
 ----------
-.. [1] Brandbyge, M., et al. "Density-functional method for nonequilibrium 
-   electron transport", Phys. Rev. B 65, 165401 (2002).
-.. [2] Taylor, J., et al. "Ab initio simulation of electron transport through 
-   molecules and self-assembled monolayers", J. Phys. Chem. B 110, 17160 (2006).
+[1] Damle, P., Ghosh, A. W., & Datta, S. (2002). First-principles analysis of molecular 
+    conduction using quantum chemistry software. Chemical Physics, 281(2-3), 171-187. 
+    DOI: 10.1016/S0301-0104(02)00496-2
+
+[2] Pulay, P. (1980). Convergence acceleration of iterative sequences. The case of SCF
+    iteration. Chemical Physics Letters, 73(2), 393-398.
+    DOI: 10.1016/0009-2614(80)80396-4
+
+[3] Palacios, J. J., Pérez-Jiménez, A. J., Louis, E., & Vergés, J. A. (2002).
+    Fullerene-based molecular nanobridges: A first-principles study.
+    Physical Review B, 66(3), 035322.
+    DOI: 10.1103/PhysRevB.66.035322
 """
 
 # Python packages
@@ -44,10 +58,23 @@ class NEGF(object):
     """
     Non-Equilibrium Green's Function calculator integrated with Gaussian DFT.
 
-    This class manages the self-consistent field calculation between NEGF
-    transport calculations and DFT electronic structure calculations using
-    Gaussian. It handles the interaction with Gaussian, manages the density
-    and Fock matrices, and implements Pulay mixing for convergence.
+    This class implements the energy-independent NEGF approach developed by Damle et al. [1]
+    for efficient molecular transport calculations. It manages the self-consistent field 
+    calculation between NEGF transport calculations and DFT electronic structure calculations 
+    using Gaussian.
+
+    The energy-independent approximation assumes constant self-energies,
+    which significantly reduces computational cost while maintaining accuracy for many
+    molecular systems.
+
+    The class handles:
+    - Interaction with Gaussian
+    - Management of density and Fock matrices
+    - Pulay mixing for convergence [2]
+    - Constant (energy-independent) contact self-energies
+    - Voltage bias effects
+
+    For energy-dependent calculations, see the NEGFE subclass.
 
     Parameters
     ----------
@@ -83,6 +110,15 @@ class NEGF(object):
         Fermi energy in eV
     nelec : float
         Number of electrons
+
+    References
+    ----------
+    [1] Damle, P., Ghosh, A. W., & Datta, S. (2002). First-principles analysis of molecular 
+        conduction using quantum chemistry software. Chemical Physics, 281(2-3), 171-187.
+        DOI: 10.1016/S0301-0104(02)00496-2
+
+    [2] Pulay, P. (1980). DOI: 10.1016/0009-2614(80)80396-4
+
     """
 
     def __init__(self, fn, basis="lanl2dz", func="b3pw91", spin="r", fullSCF=True, route="", nPulay=4):
@@ -467,6 +503,32 @@ class NEGF(object):
 
     # Calculate density matrix from stored Fock matrix
     def FockToP(self):
+        """
+        Calculate density matrix from Fock matrix using energy-independent approach.
+
+        This method implements the energy-independent density matrix calculation from
+        Damle et al. (2002). By assuming constant self-energies, the density matrix
+        can be calculated analytically without energy integration, significantly
+        reducing computational cost.
+
+        The method:
+        1. Transforms Fock and Gamma matrices to orthogonal basis
+        2. Diagonalizes the transformed Fock matrix
+        3. Updates Fermi energy if needed
+        4. Calculates density matrix analytically
+        5. Transforms back to non-orthogonal basis
+
+        Returns
+        -------
+        tuple
+            (eigenvalues, occupations) sorted by energy
+
+        References
+        ----------
+        [1] Damle, P., Ghosh, A. W., & Datta, S. (2002). First-principles analysis of molecular 
+            conduction using quantum chemistry software. Chemical Physics, 281(2-3), 171-187.
+            DOI: 10.1016/S0301-0104(02)00496-2
+        """
         # Prepare Variables for Analytical Integration
         X = np.array(self.X)
         self.F, self.locs = getFock(self.bar, self.spin)
@@ -512,7 +574,12 @@ class NEGF(object):
 
     def PMix(self, damping, Pulay=False):
         """
-        Mix old and new density matrices using damping or Pulay method.
+        Mix old and new density matrices using damping or Pulay DIIS method [2].
+
+        The Pulay mixing method (also known as DIIS - Direct Inversion in the 
+        Iterative Subspace) uses information from previous iterations to predict
+        the optimal density matrix. This method is particularly effective for
+        systems with challenging convergence behavior, and closely follows ANT.Gaussian approaches.
 
         Parameters
         ----------
@@ -525,6 +592,18 @@ class NEGF(object):
         -------
         tuple
             (RMSDP, MaxDP) - RMS and maximum density matrix differences
+
+        Notes
+        -----
+        The Pulay DIIS method [2] minimizes the error in the iterative subspace
+        spanned by previous density matrices. This often provides faster and more
+        stable convergence compared to simple damping, especially for systems
+        with strong electron correlation or near degeneracies [3].
+
+        References
+        ----------
+        .. [2] Pulay, P. (1980). DOI: 10.1016/0009-2614(80)80396-4
+        .. [3] Palacios, J. J., et al. (2002). DOI: 10.1103/PhysRevB.66.035322
         """
         # Store Old Density Info
         Pback = getDen(self.bar, self.spin)
@@ -591,6 +670,15 @@ class NEGF(object):
         """
         Run self-consistent field calculation until convergence.
 
+        The SCF cycle alternates between Fock matrix construction and density matrix
+        updates until convergence is reached. Convergence acceleration is achieved
+        through either simple damping or Pulay DIIS mixing [2]. The Pulay method
+        is applied every nPulay iterations (where nPulay is set in __init__) [3].
+
+        References
+        ----------
+        .. [3] Palacios, J. J., et al. (2002). DOI: 10.1103/PhysRevB.66.035322
+
         Parameters
         ----------
         conv : float, optional
@@ -602,12 +690,29 @@ class NEGF(object):
         plot : bool, optional
             Whether to plot convergence data (default: False)
         pulay : bool, optional
-            Whether to use Pulay mixing (default: True)
+            Whether to use Pulay DIIS mixing [2] (default: True)
 
         Returns
         -------
-        tuple
-            (iterations, electron_counts, energies)
+        bool
+            True if converged, False if maxcycles reached
+
+        Notes
+        -----
+        Convergence is determined by three criteria:
+        1. Energy change (dE)
+        2. RMS density matrix difference (RMSDP)
+        3. Maximum density matrix difference (MaxDP)
+        
+        All three must be below the convergence threshold.
+        
+        The Pulay DIIS method [2] is applied every nPulay iterations when enabled,
+        which often provides faster and more stable convergence compared to simple
+        damping, especially for challenging systems.
+
+        References
+        ----------
+        .. [2] Pulay, P. (1980). DOI: 10.1016/0009-2614(80)80396-4
         """
         # Check to make sure contacts and voltage set 
         assert hasattr(self, 'mu1') and hasattr(self, 'mu2'), "Voltage not set!"
