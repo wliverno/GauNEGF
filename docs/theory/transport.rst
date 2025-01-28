@@ -81,17 +81,29 @@ Generate current-voltage curves:
             qV=v
         ))
 
-Spin Transport
-------------
+Spin-Dependent Transport
+---------------------
 
 Theory
 ~~~~~
+Spin-dependent transport calculations account for the spin-selective transmission of electrons through molecular systems. This is particularly important for chiral molecules exhibiting the chiral-induced spin selectivity (CISS) effect [Zoellner2020]_.
+
+The spin-orbit coupling effects are included using an on-site approximation [Fernandez2006]_, which provides an efficient method for calculating relativistic effects in localized basis sets.
+
 For spin-dependent transport, we consider four transmission channels:
 
 .. math::
 
    T_{\text{total}} = T_{\uparrow\uparrow} + T_{\uparrow\downarrow} + 
                       T_{\downarrow\uparrow} + T_{\downarrow\downarrow}
+
+The spin-dependent transmission function for each channel can be calculated as:
+
+.. math::
+
+   T_{\sigma}(E) = \mathrm{Tr}[\Gamma_{1,\sigma}(E) G^r_{\sigma}(E) \Gamma_{2,\sigma}(E) G^a_{\sigma}(E)]
+
+where σ denotes the spin channel.
 
 Implementation
 ~~~~~~~~~~~~
@@ -210,3 +222,7 @@ Example of a comprehensive transport analysis:
 Next Steps
 --------
 Review :doc:`best_practices` for tips on production calculations. 
+
+.. [Zoellner2020] Zöllner, M. S., Varela, S., Medina, E., Mujica, V., & Herrmann, C. (2020). Insight into the Origin of Chiral-Induced Spin Selectivity from a Symmetry Analysis of Electronic Transmission. Journal of Chemical Theory and Computation, 16(5), 2914-2929. DOI: 10.1021/acs.jctc.9b01078 
+
+.. [Fernandez2006] Fernández-Seivane, L., Oliveira, M. A., Sanvito, S., & Ferrer, J. (2006). On-site approximation for spin–orbit coupling in linear combination of atomic orbitals density functional methods. Journal of Physics: Condensed Matter, 18(34), 7999-8013. DOI: 10.1088/0953-8984/18/34/012 

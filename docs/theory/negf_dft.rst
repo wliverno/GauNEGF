@@ -37,7 +37,7 @@ The gauNEGF package provides two main classes for NEGF-DFT calculations:
 
 1. **NEGF Class** (``scf.py``)
 
-   * Energy-independent self-energies
+   * Energy-independent self-energies [Damle2002]_
    * Constant broadening
    * Simple contact models
    * Faster calculations
@@ -47,7 +47,7 @@ The gauNEGF package provides two main classes for NEGF-DFT calculations:
 
    * Energy-dependent self-energies
    * Temperature effects
-   * Advanced contact models (Bethe lattice, 1D chain)
+   * Advanced contact models (Bethe lattice [Jacob2011]_, 1D chain)
    * More accurate results
    * Required for realistic transport calculations
 
@@ -111,13 +111,15 @@ Convergence Acceleration
 ~~~~~~~~~~~~~~~~~~~~~
 Density mixing strategies (applicable to both NEGF and NEGFE):
 
+The Pulay mixing method [Pulay1980]_ is a powerful convergence acceleration technique that uses information from previous iterations to predict the optimal density matrix. This method is particularly effective for systems with challenging convergence behavior.
+
 .. code-block:: python
 
     # Simple mixing
     negf.SCF(damping=0.02, pulay=False)
     
-    # Pulay mixing
-    negf.SCF(damping=0.02, pulay=True, nPulay=4)
+    # Pulay mixing (DIIS)
+    negf.SCF(damping=0.02, pulay=True, nPulay=4)  # Use 4 previous iterations
 
 Fermi Energy Search
 ~~~~~~~~~~~~~~~~
@@ -213,4 +215,8 @@ Accurate calculation with temperature effects:
 
 Next Steps
 ---------
-Continue to :doc:`transport` for details on calculating transport properties. 
+Continue to :doc:`transport` for details on calculating transport properties.
+
+.. [Damle2002] Damle, P., Ghosh, A. W., & Datta, S. (2002). First-principles analysis of molecular conduction using quantum chemistry software. Chemical Physics, 281(2-3), 171-187. DOI: 10.1016/S0301-0104(02)00496-2
+.. [Pulay1980] Pulay, P. (1980). Convergence acceleration of iterative sequences. The case of SCF iteration. Chemical Physics Letters, 73(2), 393-398. DOI: 10.1016/0009-2614(80)80396-4
+.. [Jacob2011] Jacob, D., & Palacios, J. J. (2011). Critical comparison of electrode models in density functional theory based quantum transport calculations. The Journal of Chemical Physics, 134(4), 044118. DOI: 10.1063/1.3526044 
