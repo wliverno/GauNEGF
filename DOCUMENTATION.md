@@ -10,7 +10,7 @@ This package builds upon the foundation laid by the open-source ANT.Gaussian pac
 
 ## Technical Implementation Details
 
-### Density Matrix Calculations (Confidence: High)
+### Density Matrix Calculations 
 - Multiple integration methods supported:
   - Real axis integration with Legendre quadrature
   - Complex contour integration with ANT-style quadrature points
@@ -19,7 +19,7 @@ This package builds upon the foundation laid by the open-source ANT.Gaussian pac
 - Temperature effects included via Fermi-Dirac statistics
 - Robust convergence handling with multiple Fermi search algorithms
 
-### SCF Implementation (Confidence: High)
+### SCF Implementation 
 - Base SCF implementation in `scf.py`
 - Extended energy-dependent implementation in `scfE.py`
 - Features:
@@ -28,7 +28,7 @@ This package builds upon the foundation laid by the open-source ANT.Gaussian pac
   - Automated integration parameter optimization
   - Robust error handling and convergence checks
 
-### Surface Green's Functions (Confidence: High)
+### Surface Green's Functions 
 - Bethe lattice implementation for metal contacts
   - Direct port of ANT.Gaussian's proven implementation
   - Supports FCC [111] surface geometry
@@ -36,13 +36,13 @@ This package builds upon the foundation laid by the open-source ANT.Gaussian pac
 - 1D chain contacts supported
 - Test contacts for validation
 
-### Transport Calculations (Confidence: Medium-High)
+### Transport Calculations 
 - Transmission function calculation
 - Current integration under bias
 - Temperature broadening effects
 - Adaptive energy grid selection
 
-### Integration with Gaussian (Confidence: High)
+### Integration with Gaussian 
 - Robust interface through gau-open
 - Handles all matrix operations:
   - Fock matrix extraction and modification
@@ -52,21 +52,21 @@ This package builds upon the foundation laid by the open-source ANT.Gaussian pac
 
 ## Core Modules
 
-### surfGBethe.py (Confidence: High)
+### surfGBethe.py 
 - Implements Bethe lattice surface Green's function calculations (adapted from ANT.Gaussian's Fortran implementation)
 - Handles contact-device interactions
 - Supports FCC [111] surface geometry only
 - Uses Slater-Koster parameterization for s, p, and d orbitals (imported from a custom file)
 - Includes temperature and broadening effects
 
-### scfE.py (Confidence: High)
+### scfE.py 
 - Extension of scf.py for energy-dependent contacts 
 - Includes temperature effects and broadening
 - Uses multiple methods for Fermi energy calculation
 - Automated integration grid fitting
 - Robust convergence handling with multiple algorithms
 
-### density.py (Confidence: High)
+### density.py 
 - Comprehensive density matrix calculations
 - Multiple integration schemes:
   - Real axis (Legendre quadrature)
@@ -75,48 +75,48 @@ This package builds upon the foundation laid by the open-source ANT.Gaussian pac
 - Parallel processing support
 - Temperature effects via Fermi-Dirac statistics
 
-### transport.py (Confidence: Medium-High)
+### transport.py 
 - Transmission calculations
 - Current integration
 - DOS calculations
 - Bias voltage handling
 
-### matTools.py (Confidence: High)
+### matTools.py 
 - Matrix operation utilities
 - Basis set transformations
 - Helper functions for Green's function calculations
 
 ## Integration Methods
 
-### Quadrature Implementations (Confidence: High)
+### Quadrature Implementations 
 1. Real Axis Integration
    - Legendre quadrature for equilibrium calculations
    - Adaptive grid selection based on DOS
    - Temperature broadening support
 
-2. Complex Contour Integration (Confidence: High)
+2. Complex Contour Integration 
    - ANT-style quadrature points
    - Optimized for equilibrium calculations
    - Efficient pole handling
 
-3. Non-equilibrium Integration (Confidence: Medium-High)
+3. Non-equilibrium Integration 
    - Real-axis grid methods
    - Adaptive grid selection
    - Bias window handling
 
 ## Performance Optimizations
 
-1. Integration Strategies (Confidence: High)
+1. Integration Strategies 
    - Automated grid point selection
    - Adaptive error control
    - Parallel processing support
 
-2. SCF Convergence (Confidence: High)
+2. SCF Convergence 
    - Multiple mixing schemes
    - Automated parameter selection
    - Robust error handling
 
-3. Memory Management (Confidence: Medium)
+3. Memory Management 
    - Efficient matrix operations
    - Parallel processing options
    - Resource monitoring
@@ -130,14 +130,18 @@ This package builds upon the foundation laid by the open-source ANT.Gaussian pac
    scipy
    matplotlib
    ```
-3. Install the gau-open package for Gaussian integration
+3. Install the gauopen package for Gaussian integration
+4. Run the install script:
+   ```bash
+   ./install.sh
+   ```
 
 ## Usage
 
 ### Basic NEGF Calculation
 
 ```python
-from scf import NEGF
+from gauNEGF.scf import NEGF
 
 # Initialize NEGF calculation
 negf = NEGF("molecule", basis="lanl2dz", func="b3pw91")
@@ -155,7 +159,7 @@ negf.SCF(conv=1e-5, maxcycles=100)
 ### Surface Green's Function Setup
 
 ```python
-from surfGBethe import surfGB
+from gauNEGF.surfGBethe import surfGB
 
 # Initialize surface Green's function
 surf = surfGB(F, S, contacts, bar, latFile='Au')
