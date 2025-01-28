@@ -22,7 +22,7 @@ Basic transmission calculation:
 
 .. code-block:: python
 
-    from transport import cohTrans
+    from gauNEGF.transport import cohTrans
     import numpy as np
     
     # Energy grid
@@ -50,7 +50,7 @@ Current calculation at finite bias:
 
 .. code-block:: python
 
-    from transport import quickCurrent
+    from gauNEGF.transport import quickCurrent
     
     # Calculate current
     I = quickCurrent(
@@ -111,7 +111,7 @@ Spin-resolved transmission:
 
 .. code-block:: python
 
-    from transport import cohTransSpin
+    from gauNEGF.transport import cohTransSpin
     
     # Calculate spin-resolved transmission
     T, Tspin = cohTransSpin(
@@ -135,7 +135,7 @@ Calculate and analyze DOS:
 
 .. code-block:: python
 
-    from transport import DOS
+    from gauNEGF.transport import DOS
     
     # Calculate DOS
     dos, dos_list = DOS(

@@ -42,7 +42,8 @@ All example files are available in the ``examples/`` directory:
 .. code-block:: none
 
     examples/
-    ├── ethane.gjf          # Ethane molecule input
-    ├── ethane.py          # Basic example script
-    ├── IntegralDemo.ipynb # Integration methods tutorial
-    └── SiNEGF.py         # Silicon nanowire example
+    ├── ethane.gjf          # Ethane molecule input file
+    ├── Si2.gjf             # Si2 input file 
+    ├── SiNanowire12.gjf    # 12-atom Si Nanowire input file
+    ├── IntegralDemo.ipynb  # Integration methods tutorial
+    └── SiNEGF.py           # Silicon nanowire example

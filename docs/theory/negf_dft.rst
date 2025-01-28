@@ -82,7 +82,7 @@ Energy-Independent Case (NEGF):
 
 .. code-block:: python
 
-    from scf import NEGF
+    from gauNEGF.scf import NEGF
     
     # Initialize with constant self-energies
     negf = NEGF('molecule', basis='lanl2dz')
@@ -93,7 +93,7 @@ Energy-Dependent Case (NEGFE):
 
 .. code-block:: python
 
-    from scfE import NEGFE
+    from gauNEGF.scfE import NEGFE
     
     # Initialize with energy-dependent self-energies
     negf = NEGFE('molecule', basis='lanl2dz')
@@ -167,17 +167,16 @@ Common problems and solutions:
    * Increase Pulay vectors
    * Check contact parameters
 
-2. **Energy Conservation**
+2. **Orbital Occupation Inaccurate**
 
    * Verify integration limits
-   * Check grid density
-   * Monitor total energy
+   * Increase integration Grid
 
-3. **Numerical Stability**
+3. **Slow convergence**
 
-   * Use appropriate broadening
-   * Monitor matrix condition
-   * Check basis set effects
+   * Add broadening (eta) to surfG
+   * Change fermi solver
+   * Reduce system/basis size
 
 Example Workflows
 --------------
@@ -188,7 +187,7 @@ Quick test with energy-independent self-energies:
 
 .. code-block:: python
 
-    from scf import NEGF
+    from gauNEGF.scf import NEGF
     
     # Initialize system
     negf = NEGF('molecule', basis='lanl2dz')
@@ -203,7 +202,7 @@ Accurate calculation with temperature effects:
 
 .. code-block:: python
 
-    from scfE import NEGFE
+    from gauNEGF.scfE import NEGFE
     
     # Initialize system
     negf = NEGFE('molecule', basis='lanl2dz')

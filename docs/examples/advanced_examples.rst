@@ -82,7 +82,7 @@ If you know what you are doing and want to parallelize *each* integration point 
 
 .. code-block:: python
 
-    from density import densityComplex
+    from gauNEGF.density import densityComplex
     
     # Parallel density calculation
     P = densityComplex(
@@ -106,7 +106,7 @@ Advanced analysis tools:
 
     import numpy as np
     import matplotlib.pyplot as plt
-    from transport import DOS, cohTransE
+    from gauNEGF.transport import DOS, cohTransE
     
     # Calculate DOS and transmission
     E = np.linspace(-5, 5, 1000)
@@ -127,24 +127,6 @@ Advanced analysis tools:
     
     plt.tight_layout()
     plt.show()
-
-Performance Tips
--------------
-
-1. **Memory Management**
-   - Use sparse matrices
-   - Clean up temporary files
-   - Monitor memory usage
-
-2. **Convergence**
-   - Start with small systems
-   - Validate each step
-   - Use appropriate tolerances
-
-3. **Parallelization**
-   - Choose optimal workers
-   - Balance load distribution
-   - Monitor scaling
 
 Next Steps
 --------
