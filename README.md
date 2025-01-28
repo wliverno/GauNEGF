@@ -39,8 +39,8 @@ Note: This package requires a licensed copy of Gaussian quantum chemistry softwa
 
 ```bash
 # Clone the repository
-git clone https://github.com/wliverno/GaussianNEGF.git
-cd GaussianNEGF
+git clone git@github.com:wliverno/GauNEGF.git
+cd GauNEGF
 
 # Run install script
 ./install.sh
