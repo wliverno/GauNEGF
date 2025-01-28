@@ -1,13 +1,13 @@
 API Reference
-=============
+============
 
 This section provides detailed API documentation for all gauNEGF modules.
 
 Core Modules
------------
+===========
 
 NEGF Base Class
-~~~~~~~~~~~~~~
+--------------
 
 .. automodule:: scf
    :members:
@@ -15,7 +15,7 @@ NEGF Base Class
    :show-inheritance:
 
 Energy-Dependent NEGF
-~~~~~~~~~~~~~~~~~~~
+-------------------
 
 .. automodule:: scfE
    :members:
@@ -23,7 +23,7 @@ Energy-Dependent NEGF
    :show-inheritance:
 
 Density Module
-~~~~~~~~~~~~
+------------
 
 .. automodule:: density
    :members:
@@ -31,7 +31,7 @@ Density Module
    :show-inheritance:
 
 Transport Module
-~~~~~~~~~~~~~
+--------------
 
 .. automodule:: transport
    :members:
@@ -39,10 +39,10 @@ Transport Module
    :show-inheritance:
 
 Contact Models
-------------
+============
 
 Bethe Lattice
-~~~~~~~~~~~
+------------
 
 .. automodule:: surfGBethe
    :members:
@@ -50,7 +50,7 @@ Bethe Lattice
    :show-inheritance:
 
 1D Chain
-~~~~~~~
+-------
 
 .. automodule:: surfG1D
    :members:
@@ -58,10 +58,10 @@ Bethe Lattice
    :show-inheritance:
 
 Testing
--------
+======
 
 Surface Green's Function Tester
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+----------------------------
 
 .. automodule:: surfGTester
    :members:
@@ -69,10 +69,10 @@ Surface Green's Function Tester
    :show-inheritance:
 
 Utilities
---------
+=======
 
 Matrix Tools
-~~~~~~~~~~
+----------
 
 .. automodule:: matTools
    :members:

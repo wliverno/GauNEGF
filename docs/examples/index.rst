@@ -3,15 +3,6 @@ Examples and Tutorials
 
 This section provides practical examples and tutorials for using gauNEGF.
 
-.. toctree::
-   :maxdepth: 2
-   :caption: Contents:
-
-   ethane
-   IntegralDemo
-   silicon_nanowire
-   advanced_examples
-
 Basic Examples
 ------------
 

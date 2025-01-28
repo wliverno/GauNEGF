@@ -1,23 +1,13 @@
 Welcome to gauNEGF's Documentation
-==================================
+================================
 
 gauNEGF is a Python package for performing Non-Equilibrium Green's Function (NEGF) calculations with Gaussian basis sets.
 
 .. note::
    This documentation assumes familiarity with quantum chemistry and DFT concepts. For background theory, see the Theory Guide section.
 
-.. toctree::
-   :maxdepth: 2
-   :caption: Contents:
-
-   installation
-   quickstart
-   examples/index
-   api/index
-   theory/index
-
 Getting Started
--------------
+==============
 
 To get started with gauNEGF:
 
@@ -31,15 +21,47 @@ To get started with gauNEGF:
 3. Read the :doc:`theory/index` for theoretical background
 4. Browse the :doc:`api/index` for detailed function documentation
 
-For theoretical background and implementation details, see the :doc:`theory/index`.
+Documentation Contents
+====================
+
+.. toctree::
+   :maxdepth: 1
+   :caption: User Guide
+
+   installation
+   quickstart
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Theory Guide
+
+   theory/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Examples
+
+   examples/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: API Reference
+
+   api/index
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Development
+
+   contributing
 
 Contributing
------------
+===========
 
 We welcome contributions! Please see our GitHub repository for guidelines.
 
 Indices and Tables
-----------------
+================
 
 * :ref:`genindex`
 * :ref:`modindex`
