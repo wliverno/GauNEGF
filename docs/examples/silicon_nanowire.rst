@@ -12,9 +12,9 @@ This approach uses a long chain (12 Si atoms) to approximate an infinite chain:
 
     import numpy as np
     import numpy.linalg as LA
-    from matTools import *
-    from scf import NEGF
-    from scfE import NEGFE
+    from gauNEGF.matTools import *
+    from gauNEGF.scf import NEGF
+    from gauNEGF.scfE import NEGFE
     from scipy import io
     from scipy.linalg import fractional_matrix_power
     import matplotlib.pyplot as plt

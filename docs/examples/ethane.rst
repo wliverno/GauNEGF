@@ -32,10 +32,10 @@ Create a Python script ``ethane.py``:
 
 .. code-block:: python
 
-    from scf import NEGF
+    from gauNEGF.scf import NEGF
     import numpy as np
     import matplotlib.pyplot as plt
-    from transport import cohTrans, quickCurrent
+    from gauNEGF.transport import cohTrans, quickCurrent
     
     # Initialize calculator
     negf = NEGF(
@@ -92,26 +92,6 @@ Add voltage calculations to your script:
     plt.ylabel('Current (A)')
     plt.title('Ethane IV Characteristic')
     plt.show()
-
-Analysis
--------
-
-The calculation demonstrates:
-
-1. **Transmission Function**
-   - HOMO-LUMO gap
-   - Resonant peaks
-   - Off-resonant tunneling
-
-2. **IV Characteristics**
-   - Linear regime
-   - Current saturation
-   - Voltage dependence
-
-3. **Contact Effects**
-   - Level broadening
-   - Contact coupling
-   - Voltage drop
 
 Next Steps
 --------

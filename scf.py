@@ -757,7 +757,7 @@ class NEGF(object):
         if plot==True:
             # Plot convergence data 
             plt.subplot(311)
-            plt.title('Fermi level is: '+ str(self.fermi) + 'eV   $\Delta V=$'+str(self.qV)+'V Method: '+ self.method + '/' + self.basis + "\n")
+            plt.title(r'Fermi level is: '+ str(self.fermi) + r'eV   $\Delta V=$'+str(self.qV)+'V Method: '+ self.method + '/' + self.basis + "\n")
             plt.ylabel(r'Max Change in $\rho$')
             plt.plot(count, PP, color='g', linestyle='solid' ,linewidth = 1, marker='x')
 

@@ -1,7 +1,7 @@
 Welcome to gauNEGF's Documentation
 ================================
 
-gauNEGF is a Python package for performing Non-Equilibrium Green's Function (NEGF) calculations with Gaussian basis sets.
+gauNEGF is a Python package for performing Non-Equilibrium Green's Function (NEGF) calculations with the Gaussian python interface.
 
 .. note::
    This documentation assumes familiarity with quantum chemistry and DFT concepts. For background theory, see the Theory Guide section.
@@ -11,11 +11,11 @@ Getting Started
 
 To get started with gauNEGF:
 
-1. Install the package using pip:
+1. Install the package using the install script, which uses pip:
 
    .. code-block:: bash
 
-      pip install gauNEGF
+      ./install.sh
 
 2. Check out the :doc:`examples/index` for practical tutorials
 3. Read the :doc:`theory/index` for theoretical background

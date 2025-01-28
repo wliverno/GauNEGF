@@ -96,42 +96,32 @@ SCF Convergence
 Integration Parameters
 ~~~~~~~~~~~~~~~~~~
 
-1. **Energy Range**
+1. **Automatic Integration Limits***
 
    .. code-block:: python
    
-       # Emin is detected automatically but can be 
-       # set manually as well (used as integration limit)
-       negf.setIntegralLimits(Emin=-50.0)
+       # tol = DOS cutoff value for Emin and
+       # limit to MaxDP for density generation
+       negf.integralCheck(tol=1e-4)
 
-2. **Number of Points**
-
-   .. code-block:: python
-   
-       # Increase points for accuracy
-       P = densityReal(F, S, g, N=500)
-
-3. **Temperature Effects**
+2. **Manually Set Integration Limits***
 
    .. code-block:: python
    
-       # Include finite temperature
-       negf.setIntegralLimits(T=300)
+       # Set grid size and Emin
+       negf.setIntegrationLimits(
+            N1=100, #Integration from Emin to mu
+            N2=50, #Integration from Eminf to Emin
+            Emin=-500
+       )
 
-File Management
-~~~~~~~~~~~~
 
-1. **Checkpoint Files**
+3. **Add Temperature**
 
-   * Save converged results
-   * Use for restart capabilities
-   * Maintain version control
-
-2. **Output Organization**
-
-   * Create systematic naming scheme
-   * Document calculation parameters
-   * Store raw data separately
+   .. code-block:: python
+   
+       # Include finite temperature (300 Kelvin)
+       negf.setSigma([1], [2], T=300)
 
 Troubleshooting Guide
 ------------------

@@ -57,11 +57,8 @@ Bethe Lattice
    :undoc-members:
    :show-inheritance:
 
-Testing
-======
-
-Surface Green's Function Tester
-----------------------------
+Constant Self Energy
+-------------------
 
 .. automodule:: surfGTester
    :members:
@@ -72,7 +69,7 @@ Utilities
 =======
 
 Matrix Tools
-----------
+-----------
 
 .. automodule:: matTools
    :members:

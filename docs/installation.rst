@@ -40,6 +40,8 @@ Gaussian Setup
        $env:GAUSSIAN_DIR = "C:\path\to\gaussian"
        $env:GAUSS_SCRDIR = "C:\path\to\scratch"
 
+3. Set up `gauopen` following the directions on the Gaussian website (*TODO*)
+
 Installing gauNEGF
 --------------
 Clone the repository and install:
@@ -48,7 +50,7 @@ Clone the repository and install:
 
     git clone https://github.com/your-username/gauNEGF.git
     cd gauNEGF
-    pip install -e .
+    ./install.sh
 
 Verification
 ----------

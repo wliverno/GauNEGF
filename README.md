@@ -5,6 +5,15 @@
 
 A Python package for performing Non-Equilibrium Green's Function (NEGF) calculations integrated with Gaussian quantum chemistry software.
 
+This package builds upon the foundation laid by the open-source ANT.Gaussian package. The Bethe lattice implementation and numerical quadrature methods are adapted from ANT.Gaussian's Fortran implementation (Palacios et al., 2002; Jacob & Palacios, 2011).
+
+The package incorporates methods from several key works in the field:
+- NEGF-DFT integration based on Damle et al. (2002)
+- SCF convergence acceleration using Pulay's method (1980) as implemented in ANT.Gaussian
+- Spin-dependent transport calculations inspired by Zöllner et al. (2020)
+
+Note: This package requires a licensed copy of Gaussian quantum chemistry software to run. Gaussian is a registered trademark of Gaussian, Inc.
+
 ## Features
 
 - Integration with Gaussian quantum chemistry package
@@ -19,7 +28,7 @@ A Python package for performing Non-Equilibrium Green's Function (NEGF) calculat
 ### Required Software
 - Python 3.7 or higher
 - Gaussian quantum chemistry package (licensed copy required)
-- gau-open Python interface for Gaussian
+- gauopen 3.0.0 Python interface for Gaussian
 
 ### Python Dependencies
 - numpy
@@ -33,8 +42,8 @@ A Python package for performing Non-Equilibrium Green's Function (NEGF) calculat
 git clone https://github.com/wliverno/GaussianNEGF.git
 cd GaussianNEGF
 
-# Install in development mode
-pip install -e .
+# Run install script
+./install.sh
 ```
 
 ## Quick Start
@@ -71,7 +80,7 @@ If you use GaussianNEGF in your research, please cite:
 
 ```bibtex
 @software{gaussianNEGF2024,
-  author       = {Your Name},
+  author       = {William Livernois}
   title        = {GaussianNEGF: A Python package for Non-Equilibrium Green's Function calculations},
   month        = jan,
   year         = 2024,
@@ -84,14 +93,10 @@ If you use GaussianNEGF in your research, please cite:
 
 ## Acknowledgments
 
-This package builds upon the foundation laid by the open-source ANT.Gaussian package. The Bethe lattice implementation and numerical quadrature methods are adapted from ANT.Gaussian's Fortran implementation (Palacios et al., 2002; Jacob & Palacios, 2011).
-
-The package incorporates methods from several key works in the field:
-- NEGF-DFT integration based on Damle et al. (2002)
-- SCF convergence acceleration using Pulay's method (1980)
-- Spin-dependent transport calculations inspired by Zöllner et al. (2020)
-
-Note: This package requires a licensed copy of Gaussian quantum chemistry software to run. Gaussian is a registered trademark of Gaussian, Inc.
+* Prof. M. P. Anantram (University of Washington) - Debugging and testing underlying NEGF framework and quantum transport physics
+* Dr. Mike Frisch (Gaussian Inc.) - Debugging and patching issues within Gaussian, theory and implementation for non-collinear spin treatment
+* Prof. Juan José Palacios (Universidad Autónoma de Madrid) - Theory and implementation for Fermi energy calculation and energy-dependent contacts
+* Alex Bernson - Technical editing and AI meta-framework development for documentation
 
 ## References
 
