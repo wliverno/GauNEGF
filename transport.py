@@ -355,7 +355,7 @@ def cohTransE(Elist, F, S, g):
     Tr = []
     for E in Elist:
         sig1 = g.sigma(E, 0)
-        sig2 = g.sigma(E, 1)
+        sig2 = g.sigma(E, -1)
         gamma1 = -1j*(sig1 - np.conj(sig1).T)
         gamma2 = -1j*(sig2 - np.conj(sig2).T)
         Gr = LA.inv(E*S - F - sig1 - sig2)
@@ -398,7 +398,7 @@ def cohTransSpinE(Elist, F, S, g, spin='u'):
         T = 0
         Ts = np.zeros(4)
         sig1 = g.sigma(E, 0)
-        sig2 = g.sigma(E, 1)
+        sig2 = g.sigma(E, -1)
         gamma1 = -1j*(sig1 - np.conj(sig1).T)
         gamma2 = -1j*(sig2 - np.conj(sig2).T)
         sigMat = sig1+sig2
