@@ -30,7 +30,7 @@ Run a basic NEGF-DFT calculation:
 
 .. code-block:: python
 
-    from scf import NEGF
+    from gauNEGF.scf import NEGF
     
     # Initialize calculator
     negf = NEGF(
@@ -54,7 +54,7 @@ Calculate and plot transmission:
 
     import numpy as np
     import matplotlib.pyplot as plt
-    from transport import cohTrans
+    from gauNEGF.transport import cohTrans
     
     # Energy grid
     Elist = np.linspace(-5, 5, 1000)
@@ -76,7 +76,7 @@ Calculate current at different voltages:
 
 .. code-block:: python
 
-    from transport import quickCurrent
+    from gauNEGF.transport import quickCurrent
     
     # Voltage range
     V = np.arange(-0.5, 0.5, 0.1)
