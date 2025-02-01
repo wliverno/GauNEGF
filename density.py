@@ -800,7 +800,7 @@ def getFermi1DContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
     Emax = max(orbs)
     return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, Eminf, tol, maxcycles)
 
-# Calculate the fermi energy of the surfG() object
+# Calculate the fermi energy of the surface Green's Function object
 def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e-4, maxcycles=20, nOrbs=0):
     """
     Calculate Fermi energy using bisection method.
@@ -879,6 +879,50 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e
     print(f'Finished after {counter} iterations, Ef = {fermi:.2f}')
     return fermi, Emin, N1, N2
 
+def calcFermiBisect(g, ne, Emin, Ef, N, tol=1e-3, maxcycles=10, T=0):
+    """
+    Calculate Fermi energy of system using bisection
+    """
+    assert ne < len(g.F), "Number of electrons cannot exceed number of basis functions!"
+    pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, N, T)
+    E = Ef + 0.0
+    uBound = None
+    lBound = None
+    P = None
+    Ncurr = ne+0
+    dE = tol
+    while None in [uBound, lBound]:
+        g.setF(g.F, E, E)
+        P = pMu(E)
+        Ncurr = np.trace(P@g.S).real
+        if Ncurr> ne:
+            uBound = E + 0.0
+            Ef = uBound
+            E -= dE
+        if Ncurr< ne:
+            lBound = E + 0.0
+            Ef = lBound
+            E += dE
+        #print(uBound, lBound, E, dE)
+        dE = max(2*abs(Ncurr-ne)/DOSg(g.F, g.S, g, E), dE)
+    counter = 0
+    while abs(ne - Ncurr) > tol and dE > tol and counter < maxcycles:
+        g.setF(g.F, Ef, Ef)
+        P = pMu(Ef)
+        Ncurr = np.trace(pMu(Ef)@g.S)
+        dN = ne-Ncurr
+        if dN > 0 and Ef > lBound:
+            lBound = Ef + 0.0
+        elif dN < 0 and Ef < uBound:
+            uBound = Ef + 0.0
+        Ef = (uBound + lBound)/2
+        dE = uBound - lBound
+        #print(uBound, lBound, dE, E)
+        counter += 1
+    if counter == maxcycles:
+        print(f'Warning: Max cycles reached, convergence = {abs(Ncurr-ne):.2E}')
+    return Ef, dE, P
+
 def calcFermiSecant(g, ne, Emin, Ef, N, tol=1e-3, maxcycles=10, T=0):
     """
     Calculate Fermi energy using Secant method, updating dE at each step
@@ -888,9 +932,9 @@ def calcFermiSecant(g, ne, Emin, Ef, N, tol=1e-3, maxcycles=10, T=0):
     g.setF(g.F, Ef, Ef)
     P = pMu(Ef)
     nCurr = np.trace(P@g.S).real
-    dE = 1.0
+    dE = tol
     counter = 0
-    while abs(nCurr-ne) > tol and counter < maxcycles:
+    while abs(nCurr-ne) > tol and abs(dE) > tol and counter < maxcycles:
         Ef += dE
         g.setF(g.F, Ef, Ef)
         P = pMu(Ef)
@@ -904,6 +948,7 @@ def calcFermiSecant(g, ne, Emin, Ef, N, tol=1e-3, maxcycles=10, T=0):
         dE = dE*((ne - nCurr)/(nNext-nCurr)) - dE
         nCurr = nNext + 0.0
         counter += 1
+        #print(Ef, dE)
     
     Ef += dE  
     if counter == maxcycles:
@@ -920,8 +965,8 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=1e-3, maxcycles=10, T=0):
 
     # Initialize three points around initial guess
     E2 = Ef
-    E1 = E2 - 0.5
-    E0 = E1 - 0.5
+    E1 = E2 - tol
+    E0 = E1 - tol
 
     # Get initial density matrices and electron counts
     g.setF(g.F, E2, E2)
@@ -971,7 +1016,7 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=1e-3, maxcycles=10, T=0):
         n2 = np.trace(P@g.S).real - ne
 
         # Check both relative error and absolute convergence
-        if abs(n2) < tol:
+        if abs(n2) < tol or abs(dE) < tol:
             break
 
         #print("E0 - ", E0, n0, "E1 - ", E1, n1, "E2 - ", E2, n2, " dE ", dE)

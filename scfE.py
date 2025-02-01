@@ -301,7 +301,7 @@ class NEGFE(NEGF):
         if self.updFermi:
             fermi_old = self.fermi+0.0
             conv= min(self.convLevel, 1e-3)
-            if self.fermiMethod=='predict':
+            if self.fermiMethod.lower() =='predict':
                 # Generate inputs for energy-independent density calculation
                 X = np.array(self.X)
                 sig1, sig2 = self.getSigma(self.fermi)
@@ -330,26 +330,55 @@ class NEGFE(NEGF):
                     print('Warning: Local sigma approximation not valid, Fermi energy not updated...')
                 print('Calculating equilibrium density matrix:') 
                 P += densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=self.N1, T=self.T)
-            elif self.fermiMethod=='secant':
-                ne = self.bar.ne
-                if self.spin =='r':
-                    ne /= 2
-                print('SECANT METHOD:')
-                self.fermi, dE, P2 = calcFermiSecant(self.g, ne-nLower, self.Emin, fermi_old, self.N1, tol=conv, T=self.T)  
-                print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
-                print('Setting equilibrium density matrix...') 
-                P += P2
-            elif self.fermiMethod=='muller':
+
+            # Full integration methods (progession: muller/secant --> bisect):
+            methodFail = False
+            if self.fermiMethod.lower() =='muller':
                 ne = self.bar.ne
                 if self.spin =='r':
                     ne /= 2
                 print('MULLER METHOD:')
-                self.fermi, dE, P2 = calcFermiMuller(self.g, ne-nLower, self.Emin, fermi_old, self.N1, tol=conv, T=self.T)
+                self.fermi, dE, P2 = calcFermiMuller(self.g, ne-nLower, self.Emin, fermi_old, 
+                                            self.N1, tol=conv, T=self.T)
+                print('Setting equilibrium density matrix...') 
+                methodFail = (abs(dE) > conv)
+                if methodFail:
+                    print(f'Switching to BISECT method (Fermi error = {dE:.2E} eV)')
+                    fermi_old = self.fermi + 0.0
+                else:
+                    print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
+                    P += P2
+
+            if self.fermiMethod.lower() =='secant':
+                ne = self.bar.ne
+                if self.spin =='r':
+                    ne /= 2
+                print('SECANT METHOD:')
+                self.fermi, dE, P2 = calcFermiSecant(self.g, ne-nLower, self.Emin, fermi_old, 
+                                            self.N1, tol=conv, T=self.T)
+                print('Setting equilibrium density matrix...') 
+                methodFail = (abs(dE) > conv)
+                if methodFail:
+                    print(f'Switching to BISECT method (Fermi error = {dE:.2E} eV)')
+                    fermi_old = self.fermi + 0.0
+                else:
+                    print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
+                    P += P2
+
+            if self.fermiMethod.lower() =='bisect' or methodFail:
+                ne = self.bar.ne
+                if self.spin =='r':
+                    ne /= 2
+                print('BISECT METHOD:')
+                self.fermi, dE, P2 = calcFermiBisect(self.g, ne-nLower, self.Emin, fermi_old, 
+                                            self.N1, tol=conv, T=self.T)  
                 print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
                 print('Setting equilibrium density matrix...') 
                 P += P2
-            else:
-                raise Exception('Error: invalid Fermi search method, needs to be \'muller\', \'secant\', or \'predict\'')
+            
+            if self.fermiMethod.lower() not in ['muller', 'secant', 'bisect', 'predict']:
+                raise Exception('Error: invalid Fermi search method, needs to be \'muller\',' + \
+                                                 '\'secant\', \'bisect\' or \'predict\'')
             # Shift Emin, mu1, and mu2 and update contact self-energies
             self.setVoltage(self.qV, fermiMethod=self.fermiMethod)
             self.Emin += self.fermi-fermi_old
