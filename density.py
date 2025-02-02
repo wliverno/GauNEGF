@@ -625,7 +625,7 @@ def densityComplexTrap(F, S, g, Emin, mu, N, T=300):
 
 
 ## INTEGRATION LIMIT FUNCTIONS
-def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
+def integralFit(F, S, g, mu, Eminf=-1e6, tol=1e-5, maxN=1000):
     """
     Optimize integration parameters for density calculations.
 
@@ -641,13 +641,13 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
     g : surfG object
         Surface Green's function calculator
     mu : float
-        Initial guess for chemical potential in eV
+        Equilibrium contact fermi energy in eV
     Eminf : float
-        Lower bound for integration in eV
+        Lower bound for integration in eV (default: -1e6)
     tol : float, optional
-        Convergence tolerance (default: 1e-6)
-    maxcycles : int, optional
-        Maximum number of iterations (default: 1000)
+        Convergence tolerance (default: 1e-5)
+    maxN : int, optional
+        Max grid points and Emin search iterations(default: 1000)
 
     Returns
     -------
@@ -669,39 +669,37 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
     Emin = min(D.real.flatten())-5
     counter = 0
     dP = DOSg(F,S,g,Emin)
-    while dP>tol and counter<maxcycles:
+    while dP>tol and counter<maxN:
         Emin -= 1
         dP = abs(DOSg(F,S,g,Emin))
         print(Emin, dP)
         counter += 1
-    if counter == maxcycles:
-        print(f'Warning: Emin still not within tolerance (final value = {dP}) after {maxcycles} energy samples')
+    if counter == maxN:
+        print(f'Warning: Emin still not within tolerance (final value = {dP}) after {maxN} energy samples')
     print(f'Final Emin: {Emin} eV, DOS = {dP:.2E}') 
     
     #Determine grid using dP
-    counter = 0
     Ncomplex = 4
-    dP = 100
+    dP = np.inf
     rho = np.zeros(np.shape(F))
-    while dP > tol and Ncomplex < 1000:
+    while dP > tol and Ncomplex < maxN:
         Ncomplex *= 2 # Start with 8 points, double each time
         rho_ = np.real(densityComplex(F, S, g, Emin,  mu, Ncomplex, T=0))
         dP = max(abs(np.diag(rho_ - rho)))
         print(f"MaxDP = {dP:.2E}, N = {sum(np.diag(rho_).real):2f}")
         rho = rho_
-        counter += 1
     if dP < tol:
         Ncomplex /= 2
-    elif Ncomplex >  maxcycles and dP > tol:
+    elif Ncomplex >= maxN and dP > tol:
         print(f'Warning: Ncomplex still not within tolerance (final value = {dP})')
     print(f'Final Ncomplex: {Ncomplex}') 
 
     #Determine grid using dP
     counter = 0
     Nreal = 8
-    dP = 100
+    dP = np.inf
     rho = np.zeros(np.shape(F))
-    while dP > tol and Nreal < 1000:
+    while dP > tol and Nreal < maxN:
         Nreal *= 2 # Start with 16 points, double each time
         rho_ = np.real(densityReal(F, S, g, Eminf, Emin, Nreal, T=0))
         dP = max(abs(np.diag(rho_ - rho)))
@@ -710,11 +708,59 @@ def integralFit(F, S, g, mu, Eminf, tol=1e-6, maxcycles=1000):
         counter += 1
     if dP < tol:
         Nreal /= 2
-    elif Nreal >  maxcycles and dP > tol:
+    elif Nreal >=  maxN and dP > tol:
         print(f'Warning: Nreal still not within tolerance (final value = {dP})')
     print(f'Final Nreal: {Nreal}') 
 
     return Emin, Ncomplex, Nreal
+
+def integralFitNEGF(F, S, g, mu1, mu2, Eminf=-1e6, tol=1e-5, maxGrid=1000):
+    """
+    Determines number of  for non-equilibrium density calculations.
+
+    Same procedure as `integralFit()` but applied to `densityGrid()`
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix
+    S : ndarray
+        Overlap matrix
+    g : surfG object
+        Surface Green's function calculator
+    mu1 : float
+        Left contact Fermi energy in eV
+    mu2 : float
+        Right contact Fermi energy in eV
+    Eminf : float
+        Lower bound for integration in eV (default: -1e6)
+    tol : float, optional
+        Convergence tolerance (default: 1e-5)
+    maxGrid : int, optional
+        Maximum number of gridpoints (default: 1000)
+
+    Returns
+    -------
+    int
+        Number of grid points
+    """
+    #Determine grid using dP
+    N = 8
+    dP = np.inf
+    rho = np.zeros(np.shape(F))
+    while dP > tol and N < maxGrid:
+        N *= 2 # Start with 16 points, double each time
+        rho_ = np.real(densityGrid(F, S, g, mu1, mu2, ind=1, N=N, T=0))
+        dP = max(abs(np.diag(rho_ - rho)))
+        print(f"MaxDP = {dP:.2E}")
+        rho = rho_
+    if dP < tol:
+        N /= 2
+    elif N >= maxGrid and dP > tol:
+        print(f'Warning: N still not within tolerance (final value = {dP})')
+    print(f'Final Nnegf: {N}') 
+    return N
+
 
 def getFermiContact(g, ne, tol=1e-4, Eminf=-1e6, maxcycles=1000, nOrbs=0):
     """
