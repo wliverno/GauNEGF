@@ -1075,6 +1075,6 @@ class surfGBAt:
         Previous implementation used ANT.Gaussian approach with complex contour
         integration. Current version uses simpler bisection method from density.py.
         """
-        self.fermi = getFermiContact(self, ne, tol, Eminf, 40, nOrbs=dim)
+        self.fermi = getFermiContact(self, ne, tol, Eminf, 1000, nOrbs=dim)
         return self.fermi
 
