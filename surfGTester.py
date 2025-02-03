@@ -4,7 +4,7 @@ from matTools import formSigma
 
 # Class for generating an energy-independent green's function for scfE.py
 class surfGTest:
-    def __init__(self, Fock, Overlap, indsList, sig1=None, sig2=False):
+    def __init__(self, Fock, Overlap, indsList, sig1=None, sig2=None):
         self.F = Fock
         self.S = Overlap
         self.X = fractional_matrix_power(Overlap, -0.5)
@@ -13,7 +13,7 @@ class surfGTest:
         self.sig = [np.array(np.zeros((self.N, self.N)), dtype=complex)]*2
         if sig1 is not None:
             self.sig[0] = formSigma(indsList[0], sig1, self.N, self.S)
-            if isinstance(sig2, bool):
+            if sig2 is None:
                 self.sig[1] = formSigma(indsList[1], sig1, self.N, self.S)
             else:
                 self.sig[1] = formSigma(indsList[1], sig2, self.N, self.S)

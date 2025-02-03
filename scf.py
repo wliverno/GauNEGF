@@ -552,7 +552,7 @@ class NEGF(object):
             print(f'Fermi Energy set to {self.fermi:.2f} eV')
 
         #Integrate to get density matrix
-        if self.qV == 0:
+        if self.mu1 != self.mu2:
             P = density(V, Vc, D, GamBar1+GamBar2, self.Eminf, self.fermi)
         else:
             P1 = density(V, Vc, D, GamBar1, self.Eminf, self.mu1)

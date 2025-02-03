@@ -399,7 +399,7 @@ def densityReal(F, S, g, Emin, mu, N=100, T=300, parallel=False,
     if showText:
         print('Integration done!')
     
-    return (-1+0j)*np.imag(defInt)/(np.pi)
+    return (1+0j)*np.imag(defInt)/(np.pi)
 
 def densityGrid(F, S, g, mu1, mu2, ind=None, N=100, T=300, parallel=False,
                 numWorkers=None, showText=True):
@@ -672,7 +672,7 @@ def integralFit(F, S, g, mu, Eminf=-1e6, tol=1e-5, maxN=1000):
     while dP>tol and counter<maxN:
         Emin -= 1
         dP = abs(DOSg(F,S,g,Emin))
-        print(Emin, dP)
+        #print(Emin, dP)
         counter += 1
     if counter == maxN:
         print(f'Warning: Emin still not within tolerance (final value = {dP}) after {maxN} energy samples')
