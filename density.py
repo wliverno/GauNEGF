@@ -58,7 +58,7 @@ def Gr(F, S, g, E):
 
     Returns
     -------
-    ndarray
+    ndarrayh
         Retarded Green's function G(E) = [ES - F - Σ(E)]^(-1)
     """
     return LA.inv(E*S - F - g.sigmaTot(E))
@@ -399,7 +399,7 @@ def densityReal(F, S, g, Emin, mu, N=100, T=300, parallel=False,
     if showText:
         print('Integration done!')
     
-    return (1+0j)*np.imag(defInt)/(np.pi)
+    return (-1+0j)*np.imag(defInt)/(np.pi)
 
 def densityGrid(F, S, g, mu1, mu2, ind=None, N=100, T=300, parallel=False,
                 numWorkers=None, showText=True):
@@ -795,7 +795,7 @@ def getFermiContact(g, ne, tol=1e-4, Eminf=-1e6, maxcycles=1000, nOrbs=0):
     orbs, _ = LA.eig(LA.inv(S)@F)
     orbs = np.sort(np.real(orbs))
     fermi = (orbs[int(ne)-1] + orbs[int(ne)])/2
-    Emin, N1, N2 = integralFit(g.F, g.S, g, fermi, Eminf, tol, maxcycles)
+    Emin, N1, N2 = integralFit(F, S, g, fermi, Eminf, tol, maxcycles)
     Emax = max(orbs)
     return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, 
                         Eminf, tol, maxcycles, nOrbs)[0]
