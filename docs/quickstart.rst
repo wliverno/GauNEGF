@@ -43,8 +43,11 @@ Run a basic NEGF-DFT calculation:
     # Attach contacts to carbon atoms
     negf.setSigma([1], [2], -0.05j)
     
+    # Set Voltage to zero
+    negf.setVoltage(0.0)
+    
     # Run SCF calculation
-    negf.SCF(1e-3, 0.02, 100)
+    negf.SCF(1e-3, 0.01, 100)
 
 Transmission Function
 ------------------
@@ -60,7 +63,8 @@ Calculate and plot transmission:
     Elist = np.linspace(-5, 5, 1000)
     
     # Calculate transmission
-    T = cohTrans(Elist, negf.F, negf.S, -0.05j, -0.05j)
+    sig1, sig2 = negf.getSigma()
+    T = cohTrans(Elist, negf.F, negf.S, sig1, sig2)
     
     # Plot
     plt.figure()
@@ -86,7 +90,8 @@ Calculate current at different voltages:
     for v in V:
         negf.setVoltage(v)
         negf.SCF(1e-3, 0.02, 100)
-        I.append(quickCurrent(negf.F, negf.S, -0.05j, -0.05j, qV=v))
+        I.append(quickCurrent(negf.F, negf.S, sig1, sig2, 
+                              qV=v, fermi=negf.fermi))
     
     # Plot IV curve
     plt.figure()
