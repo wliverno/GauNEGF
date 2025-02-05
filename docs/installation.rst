@@ -68,6 +68,7 @@ Test the installation by first creating a Gaussian input file, for example 'H2.g
     H    0.000000    0.000000    0.7414
 
 Then you can run the following code to test the installation:
+
 .. code-block:: python
 
     from gauNEGF.scf import NEGF

@@ -27,10 +27,15 @@ Example of spin-dependent transport:
     sig2 = np.diag(sig_down*len(inds[1]) + sig_up*len(inds[1]))
     negf.setSigma([1], [2], sig1, sig2)
     
+    # Run at equilibrium
+    negf.setVoltage(0.0)
+    negf.SCF(1e-3, 0.01)
+    
     # Calculate spin-resolved transmission
+    sigma1, sigma1 = negf.getSigma()
     T, Tspin = cohTransSpin(
         E, negf.F, negf.S,
-        sig1, sig2,
+        sigma1, sigma2,
         spin='u'
     )
 
@@ -40,21 +45,21 @@ Temperature Effects
 Including finite temperature:
 
 .. code-block:: python
+ 
+    # Set basic temperature-dependent contact
+    negf.setSigma(
+        [1], [2],  
+        -0.05j, 
+        T=300     # Temperature in Kelvin
+    )
 
-    # Set up temperature-dependent contacts
+    # Set up temperature-dependent Bethe Lattice contacts
     negf.setContactBethe(
-        contactList=[1, 6],
+        contactList=[[1,2,3], [4,5,6]],
         latFile='Au',
         T=300  # Temperature in Kelvin
     )
-    
-    # Configure integration
-    negf.setIntegralLimits(
-        N1=100,    # Complex contour points
-        N2=50,     # Real axis points
-        T=300     # Temperature
-    )
-
+   
 Energy-Dependent Contacts
 ---------------------
 
@@ -62,17 +67,19 @@ Using realistic contact models:
 
 .. code-block:: python
 
-    # Bethe lattice contacts
+    # Bethe lattice contacts at atoms {1,2,3} and {6,7,8}
     negf.setContactBethe(
-        contactList=[1, 6],
-        latFile='Au',
-        eta=1e-6
+        contactList=[[1,2,3], [6,7,8]],
+        latFile='Au', # Slater coster parameters define in Au.bethe
+        eta=1e-6      # Broadening term (eV)
     )
     
-    # 1D chain contacts
+    # 1D chain contacts attached to atoms 1 and 6
     negf.setContact1D(
-        contactList=[1, 6],
-        taus=[2,5]
+        contactList= [[1],[6]],
+        tauList = [[2], [5]],   # hopping calculated from 1 to 2 and 6 to 5
+        neList = [4,  4],       # 4 electrons per cell
+        eta = 1e-6              # Broadening term (eV)
     )
 
 Parallel Processing
@@ -94,8 +101,7 @@ If you know what you are doing and want to parallelize *each* integration point 
         numWorkers=4
     )
 
-Note this is usually slower than the default numpy parallelization.
-
+Note this is usually slower than the default numpy parallelization. *Only proceed if you know what you are doing*
 
 Custom Analysis
 ------------
@@ -108,9 +114,11 @@ Advanced analysis tools:
     import matplotlib.pyplot as plt
     from gauNEGF.transport import DOS, cohTransE
     
+    #... run energy dependent NEGFE() calculation
+
     # Calculate DOS and transmission
     E = np.linspace(-5, 5, 1000)
-    dos, dos_list = DOS(E, negf.F, negf.S, sig1, sig2)
+    dos, dos_list = DOSE(E, negf.F, negf.S, g)
     T = cohTransE(E, negf.F, negf.S, negf.g)
     
     # Plot correlation
