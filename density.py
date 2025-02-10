@@ -582,7 +582,7 @@ def densityComplex(F, S, g, Emin, mu, N=100, T=300, parallel=False, numWorkers=N
             E = broadening * (x_fermi[i]) + mu
             return broadening*w[i]*Gr(F, S, g, E)*fermi(E, mu, T)
     
-        lineInt += integratePoints(computePoint, int(N//8), parallel, numWorkers)
+        lineInt += integratePoints(computePointBroadening, int(N//8), parallel, numWorkers)
 
     if showText:
         print('Integration done!')
@@ -625,7 +625,7 @@ def densityComplexTrap(F, S, g, Emin, mu, N, T=300):
 
 
 ## INTEGRATION LIMIT FUNCTIONS
-def integralFit(F, S, g, mu, Eminf=-1e6, tol=1e-5, maxN=1000):
+def integralFit(F, S, g, mu, Eminf=-1e6, tol=1e-5, T=0, maxN=1000):
     """
     Optimize integration parameters for density calculations.
 
@@ -646,6 +646,8 @@ def integralFit(F, S, g, mu, Eminf=-1e6, tol=1e-5, maxN=1000):
         Lower bound for integration in eV (default: -1e6)
     tol : float, optional
         Convergence tolerance (default: 1e-5)
+    T : float
+        Temperature in Kelvin for Fermi broadening (default: 0)
     maxN : int, optional
         Max grid points and Emin search iterations(default: 1000)
 
@@ -684,7 +686,7 @@ def integralFit(F, S, g, mu, Eminf=-1e6, tol=1e-5, maxN=1000):
     rho = np.zeros(np.shape(F))
     while dP > tol and Ncomplex < maxN:
         Ncomplex *= 2 # Start with 8 points, double each time
-        rho_ = np.real(densityComplex(F, S, g, Emin,  mu, Ncomplex, T=0))
+        rho_ = np.real(densityComplex(F, S, g, Emin,  mu, Ncomplex, T=T))
         dP = max(abs(np.diag(rho_ - rho)))
         print(f"MaxDP = {dP:.2E}, N = {sum(np.diag(rho_).real):2f}")
         rho = rho_
@@ -714,7 +716,7 @@ def integralFit(F, S, g, mu, Eminf=-1e6, tol=1e-5, maxN=1000):
 
     return Emin, Ncomplex, Nreal
 
-def integralFitNEGF(F, S, g, mu1, mu2, Eminf=-1e6, tol=1e-5, maxGrid=1000):
+def integralFitNEGF(F, S, g, fermi, qV, Eminf=-1e6, tol=1e-5, T=0, maxGrid=1000):
     """
     Determines number of  for non-equilibrium density calculations.
 
@@ -736,6 +738,8 @@ def integralFitNEGF(F, S, g, mu1, mu2, Eminf=-1e6, tol=1e-5, maxGrid=1000):
         Lower bound for integration in eV (default: -1e6)
     tol : float, optional
         Convergence tolerance (default: 1e-5)
+    T : float
+        Temperature in Kelvin for Fermi broadening (default: 0)
     maxGrid : int, optional
         Maximum number of gridpoints (default: 1000)
 
@@ -750,7 +754,8 @@ def integralFitNEGF(F, S, g, mu1, mu2, Eminf=-1e6, tol=1e-5, maxGrid=1000):
     rho = np.zeros(np.shape(F))
     while dP > tol and N < maxGrid:
         N *= 2 # Start with 16 points, double each time
-        rho_ = np.real(densityGrid(F, S, g, mu1, mu2, ind=1, N=N, T=0))
+        rho_ = np.real(densityGrid(F, S, g, fermi, fermi+(qV/2), ind=0, N=N, T=T))
+        rho_ += np.real(densityGrid(F, S, g, fermi, fermi-(qV/2), ind=-1, N=N, T=T))
         dP = max(abs(np.diag(rho_ - rho)))
         print(f"MaxDP = {dP:.2E}")
         rho = rho_
@@ -795,7 +800,7 @@ def getFermiContact(g, ne, tol=1e-4, Eminf=-1e6, maxcycles=1000, nOrbs=0):
     orbs, _ = LA.eig(LA.inv(S)@F)
     orbs = np.sort(np.real(orbs))
     fermi = (orbs[int(ne)-1] + orbs[int(ne)])/2
-    Emin, N1, N2 = integralFit(F, S, g, fermi, Eminf, tol, maxcycles)
+    Emin, N1, N2 = integralFit(F, S, g, fermi, Eminf, tol, T=0, maxN=maxcycles)
     Emax = max(orbs)
     return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, 
                         Eminf, tol, maxcycles, nOrbs)[0]
@@ -842,7 +847,7 @@ def getFermi1DContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
     orbs, _ = LA.eig(LA.inv(Sorbs)@Forbs)
     orbs = np.sort(np.real(orbs))
     fermi = (orbs[2*int(ne)-1] + orbs[2*int(ne)])/2
-    Emin, N1, N2 = integralFit(Forbs, Sorbs, gorbs, fermi, Eminf, tol, maxcycles)
+    Emin, N1, N2 = integralFit(Forbs, Sorbs, gorbs, fermi, Eminf, tol, T=0, maxN=maxcycles)
     Emax = max(orbs)
     return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, Eminf, tol, maxcycles)
 
@@ -937,10 +942,13 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=1e-3, maxcycles=10, T=0):
     P = None
     Ncurr = ne+0
     dE = tol
+    counter = 0
     while None in [uBound, lBound]:
         g.setF(g.F, E, E)
         P = pMu(E)
         Ncurr = np.trace(P@g.S).real
+        if counter==maxcycles:
+            dE = 1e3
         if Ncurr> ne:
             uBound = E + 0.0
             Ef = uBound
@@ -951,6 +959,7 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=1e-3, maxcycles=10, T=0):
             E += dE
         #print(uBound, lBound, E, dE)
         dE = max(2*abs(Ncurr-ne)/DOSg(g.F, g.S, g, E), dE)
+        counter += 1
     counter = 0
     while abs(ne - Ncurr) > tol and dE > tol and counter < maxcycles:
         g.setF(g.F, Ef, Ef)

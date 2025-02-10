@@ -201,7 +201,7 @@ class NEGFE(NEGF):
         """
         super().setVoltage(qV, fermi, Emin, Eminf)
         if self.mu1 != self.mu2:
-            self.Nnegf=100 # Default grid
+            self.Nnegf=50 # Default grid
         if self.updFermi:
             self.fermiMethod = fermiMethod
     
@@ -251,15 +251,18 @@ class NEGFE(NEGF):
                 print(f'RUNNING SCF FOR {cycles} CYCLES USING DEFAULT GRID: ')
                 self.SCF(1e-10,damp,cycles)
         print('SETTING INTEGRATION LIMITS... ')
-        self.Emin, self.N1, self.N2 = integralFit(self.F*har_to_eV, self.S, self.g, self.fermi, self.Eminf, tol)
-        PLower = densityReal(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
+        self.Emin, self.N1, self.N2 = integralFit(self.F*har_to_eV, self.S, self.g,
+                                                  self.fermi, self.Eminf, tol)
+        PLower = densityReal(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, self.T)
         nLower = np.trace(self.S@PLower).real
         if self.mu1 != self.mu2:
-            self.Nnegf = integralFitNEGF(self.F*har_to_eV, self.S, self.g, self.mu1, self.mu2, self.Eminf, tol)
+            self.Nnegf = integralFitNEGF(self.F*har_to_eV, self.S, self.g, self.fermi, 
+                                         self.qV, self.Eminf, tol, self.T)
         if self.updFermi:
                 print('CALCULATING FERMI ENERGY')
                 ne = self.nae if self.spin is 'r' else self.nae+self.nbe
-                self.fermi, dE, P = calcFermiSecant(self.g, ne-nLower, self.Emin, self.fermi, self.N1, tol=tol, maxcycles=20)
+                self.fermi, dE, P = calcFermiSecant(self.g, ne-nLower, self.Emin, self.fermi, 
+                                                    self.N1, tol=tol, maxcycles=20)
                 print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
                 self.setVoltage(self.qV, fermiMethod=self.fermiMethod)
                 self.P = P
@@ -333,7 +336,7 @@ class NEGFE(NEGF):
                 else:
                     print('Warning: Local sigma approximation not valid, Fermi energy not updated...')
                 print('Calculating equilibrium density matrix:') 
-                P += densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=self.N1, T=self.T)
+                P += densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.fermi, N=self.N1, T=self.T)
 
             # Full integration methods (progession: muller/secant --> bisect):
             methodFail = False
@@ -389,12 +392,17 @@ class NEGFE(NEGF):
             self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
         else:
             print('Calculating equilibrium density matrix:') 
-            P += densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.mu1, N=self.N1, T=self.T)
+            P += densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, self.fermi, 
+                                N=self.N1, T=self.T)
          
         # If bias applied, need to integrate G<
         if self.mu1 != self.mu2:
-            print('Calculating non-equilibrium density matrix:')
-            P += densityGrid(self.F*har_to_eV, self.S, self.g, self.mu1, self.mu2, ind=1, N=self.Nnegf, T=self.T)
+            print('Calculating left contact non-equilibrium density matrix:')
+            P += densityGrid(self.F*har_to_eV, self.S, self.g, self.fermi, self.mu1, ind=0, 
+                                N=self.Nnegf, T=self.T)
+            print('Calculating right contact non-equilibrium density matrix:')
+            P += densityGrid(self.F*har_to_eV, self.S, self.g, self.fermi, self.mu2, ind=-1, 
+                                N=self.Nnegf, T=self.T)
             #P2 = self.g.densityComplex(self.Emin, self.mu2, 1)
        
         # Calculate Level Occupation, Lowdin TF,  Return
