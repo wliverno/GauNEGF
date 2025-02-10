@@ -45,15 +45,17 @@ Create a Python script ``ethane.py``:
         spin='r'              # Restricted calculation
     )
     
-    # Attach contacts to carbon atoms
+    # Attach contacts to carbon atoms, set voltage to zero
     negf.setSigma([1], [2], -0.05j)
+    negf.setVoltage(0.0)
     
     # Run SCF calculation
-    negf.SCF(mix=0.02)
+    negf.SCF(conv=1e-3, damping=0.01)
     
     # Calculate transmission
     E = np.linspace(-5, 5, 1000)
-    T = cohTrans(E, negf.F, negf.S, -0.05j, -0.05j)
+    sig1, sig2 = negf.getSigma()
+    T = cohTrans(E, negf.F, negf.S, sig1, sig2)
     
     # Plot transmission
     plt.figure()
@@ -80,7 +82,7 @@ Add voltage calculations to your script:
         negf.SCF()
         I.append(quickCurrent(
             negf.F, negf.S,
-            -0.05j, -0.05j,
+            sig1, sig2
             fermi=negf.fermi,
             qV=v
         ))

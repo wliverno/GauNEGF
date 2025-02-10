@@ -21,9 +21,9 @@ This approach uses a long chain (12 Si atoms) to approximate an infinite chain:
     from gauopen import QCOpMat as qco
     from gauopen import QCBinAr as qcb
     from gauopen import QCUtil as qcu
-    from surfG1D import surfG
-    from density import *
-    from transport import *
+    from gauNEGF.surfG1D import surfG
+    from gauNEGF.density import *
+    from gauNEGF.transport import *
 
     hartree_to_eV = 27.211386
 
@@ -70,7 +70,6 @@ This approach uses self-consistent field calculations with different temperature
 
 .. code-block:: python
 
-    print(' ====== PART 2 ====== ')
     negf = NEGFE(fn='Si2', func='b3lyp', basis='lanl2dz')
     inds = negf.setContact1D([[1],[2]], eta=1e4)  # Added broadening to speed up convergence
     negf.setVoltage(0)
