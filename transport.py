@@ -25,11 +25,11 @@ from matTools import *
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
 eoverh = 3.874e-5       # A/eV
-kT = 0.025              # eV @ 20degC
+kB = 8.617e-5           # eV/Kelvin
 V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 
 # Calculate Coherent Current at T=0K using NEGF
-def quickCurrent(F, S, sig1, sig2, fermi, qV, spin="r",dE=0.01):
+def quickCurrent(F, S, sig1, sig2, fermi, qV, T=0, spin="r",dE=0.01):
     """
     Calculate coherent current at T=0K using NEGF with energy-independent self-energies.
 
@@ -47,6 +47,8 @@ def quickCurrent(F, S, sig1, sig2, fermi, qV, spin="r",dE=0.01):
         Fermi energy in eV
     qV : float
         Applied bias voltage in eV
+    T : float
+        Temperature in Kelvin (default: 0)
     spin : str, optional
         Spin configuration ('r' for restricted) (default: 'r')
     dE : float, optional
@@ -61,14 +63,24 @@ def quickCurrent(F, S, sig1, sig2, fermi, qV, spin="r",dE=0.01):
         dE = -1*abs(dE)
     else:
         dE = abs(dE)
-    Elist = np.arange(fermi-(qV/2), fermi+(qV/2), dE)
-    Tr = cohTrans(Elist, F, S, sig1, sig2)
-    curr = eoverh * np.trapz(Tr, Elist)
+    muL = fermi - qV/2
+    muR = fermi + qV/2
+    if T== 0:
+        Elist = np.arange(muL, muR, dE)
+        Tr = cohTrans(Elist, F, S, sig1, sig2)
+        curr = eoverh * np.trapz(Tr, Elist)
+    else:
+        kT = kB*T
+        spread = np.sign(dE)*5*kT
+        Elist = np.arange(muL-spread, muR+spread, dE)
+        Tr = cohTrans(Elist, F, S, sig1, sig2)
+        dfermi = np.abs(1/(np.exp((Elist - muR)/kT)+1) -  1/(np.exp((Elist-muL)/kT)+1))
+        curr = eoverh * np.trapz(Tr*dfermi, Elist)
     if spin=="r":
         curr *= 2
     return curr
 
-def quickCurrentE(F, S, g, fermi, qV, spin="r",dE=0.01):
+def quickCurrentE(F, S, g, fermi, qV, T=0, spin="r",dE=0.01):
     """
     Calculate coherent current at T=0K using NEGF with energy-dependent self-energies.
 
@@ -84,6 +96,8 @@ def quickCurrentE(F, S, g, fermi, qV, spin="r",dE=0.01):
         Fermi energy in eV
     qV : float
         Applied bias voltage in eV
+    T : float
+        Temperature in Kelvin (default: 0)
     spin : str, optional
         Spin configuration ('r' for restricted) (default: 'r')
     dE : float, optional
@@ -98,15 +112,25 @@ def quickCurrentE(F, S, g, fermi, qV, spin="r",dE=0.01):
         dE = -1*abs(dE)
     else:
         dE = abs(dE)
-    Elist = np.arange(fermi-(qV/2), fermi+(qV/2), dE)
-    Tr = cohTransE(Elist, F, S, g)
-    curr = eoverh * np.trapz(Tr, Elist)
+    muL = fermi - qV/2
+    muR = fermi + qV/2
+    if T== 0:
+        Elist = np.arange(muL, muR, dE)
+        Tr = cohTrans(Elist, F, S, sig1, sig2)
+        curr = eoverh * np.trapz(Tr, Elist)
+    else:
+        kT = kB*T
+        spread = np.sign(dE)*5*kT
+        Elist = np.arange(muL-spread, muR+spread, dE)
+        Tr = cohTransE(Elist, F, S, g)
+        dfermi = np.abs(1/(np.exp((Elist - muR)/kT)+1) -  1/(np.exp((Elist-muL)/kT)+1))
+        curr = eoverh * np.trapz(Tr*dfermi, Elist)
     if spin=="r":
         curr *= 2
     return curr
 
 # Calculate current from SCF mat file
-def qCurrentF(fn, dE=0.01):
+def qCurrentF(fn, dE=0.01, T=0):
     """
     Calculate current from saved SCF matrix file.
 
@@ -134,7 +158,7 @@ def qCurrentF(fn, dE=0.01):
     """
     matfile = io.loadmat(fn)
     return quickCurrent(matfile["F"], matfile["S"], matfile["sig1"],matfile["sig2"],
-            matfile["fermi"][0,0], matfile["qV"][0,0], matfile["spin"][0], dE=dE)
+            matfile["fermi"][0,0], matfile["qV"][0,0], T, matfile["spin"][0], dE=dE)
 
 # F,S are NxN matrices, sig1 and sig2 are Nx1 vectors or NxN Matrices
 def cohTrans(Elist, F, S, sig1, sig2):
