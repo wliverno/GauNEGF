@@ -39,6 +39,7 @@ import numpy as np
 from scipy import linalg as LA
 from scipy.linalg import fractional_matrix_power
 from scipy import io
+import os
 import time
 import matplotlib.pyplot as plt
 
@@ -666,7 +667,7 @@ class NEGF(object):
 
     # Main SCF loop, runs Fock <-> Density cycle until convergence reached
     # Convergence criteria: dE, RMSDP, and MaxDP < conv, or maxcycles reached
-    def SCF(self, conv=1e-5, damping=0.1, maxcycles=100, plot=False, pulay=True):
+    def SCF(self, conv=1e-5, damping=0.1, maxcycles=100, checkpoint=True, pulay=True):
         """
         Run self-consistent field calculation until convergence.
 
@@ -687,15 +688,15 @@ class NEGF(object):
             Mixing parameter between 0 and 1 (default: 0.1)
         maxcycles : int, optional
             Maximum number of SCF cycles (default: 100)
-        plot : bool, optional
-            Whether to plot convergence data (default: False)
+        checkpoint : bool, optional
+            Save density matrix at each iteration and load if job interrupted (default: True)
         pulay : bool, optional
             Whether to use Pulay DIIS mixing [2] (default: True)
 
         Returns
         -------
-        bool
-            True if converged, False if maxcycles reached
+        tuple
+            (count, PP, TotalE) - cycle number, number of electrons, and DFT energy at each cycle
 
         Notes
         -----
@@ -717,6 +718,13 @@ class NEGF(object):
         # Check to make sure contacts and voltage set 
         assert hasattr(self, 'mu1') and hasattr(self, 'mu2'), "Voltage not set!"
         assert hasattr(self, 'rInd') and hasattr(self,'lInd'), "Contacts not set!"
+        
+        # Find saved data from midrun
+        checkpoint_file = self.ifile[:-4]+"_P.mat"
+        final_file = self.ifile[:-4]+"_Final.mat"
+        if os.path.exists(checkpoint_file) and checkpoint:
+            print(f"Found checkpoint file {checkpoint_file}, loading...")
+            self.setDen(io.loadmat(checkpoint_file)['den'])
 
         #Main SCF Loop
         Loop = True
@@ -726,6 +734,7 @@ class NEGF(object):
         TotalE=[]
         print('Entering NEGF-SCF loop at: '+str(time.asctime()))
         print('###################################')
+
         while Loop:
             print()
             print('Iteration '+str(Niter)+':')
@@ -752,28 +761,14 @@ class NEGF(object):
                 print('##########################################')
                 print('WARNING: Convergence criterion not met, maxcycles reached!')
                 Loop = False
+
+            # Save progress
+            if checkpoint:
+                io.savemat(checkpoint_file, {'den':self.P}) 
             Niter += 1
 
-        if plot==True:
-            # Plot convergence data 
-            plt.subplot(311)
-            plt.title(r'Fermi level is: '+ str(self.fermi) + r'eV   $\Delta V=$'+str(self.qV)+'V Method: '+ self.method + '/' + self.basis + "\n")
-            plt.ylabel(r'Max Change in $\rho$')
-            plt.plot(count, PP, color='g', linestyle='solid' ,linewidth = 1, marker='x')
-
-            plt.subplot(312)
-            plt.ylabel('Total # of electrons')
-            plt.xlabel('Iteration')
-            plt.plot(count, TotalE, color='black', linestyle='solid' ,linewidth = 1, marker='o')
-
-            plt.subplot(313)
-            plt.plot(EList, occList, color ='r', marker='o')
-            plt.xlabel('Energy')
-            plt.ylabel('Occupation')
-            plt.xlim([self.Emin, 0])
-            plt.savefig('debug.png')
-            plt.close()
- 
+        if checkpoint:
+            os.system(f'mv {checkpoint_file} {final_file}') 
         print("--- %s seconds ---" % (time.time() - self.start_time))
         print('')
         print('SCF Loop exited at', time.asctime())
