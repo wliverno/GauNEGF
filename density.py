@@ -192,7 +192,7 @@ def integratePoints(computePointFunc, numPoints, parallel=False, numWorkers=None
         print(f'Number of CPU cores: {numCores}')
     
     # Use process-level parallelization for large workloads or when requested
-    useProcessParallel = parallel or (
+    useProcessParallel = parallel and (
         numPoints >= 100 and numCores >= 32
     )
     
