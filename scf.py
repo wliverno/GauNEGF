@@ -219,8 +219,8 @@ class NEGF(object):
         """
         if fullSCF:
             try:
-                self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock=True,chkname=self.chkfile, miscroute=self.otherRoute)
                 print('Checking '+self.chkfile+' for saved data...');
+                self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock=True,chkname=self.chkfile, miscroute=self.otherRoute)
             except:
                 print('Checkpoint not loaded, running full SCF...');
                 self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="scf",chkname=self.chkfile, miscroute=self.otherRoute)
@@ -360,16 +360,18 @@ class NEGF(object):
         self.mu2 =  fermi - (qV/2)
     
         # Calculate electric field to apply during SCF
-        lAtom = self.bar.c[int(self.lContact[0]-1)*3:int(self.lContact[0])*3]
-        rAtom = self.bar.c[int(self.rContact[0]-1)*3:int(self.rContact[0])*3]
-        vec  = np.array(lAtom-rAtom)
+        lAtoms = [self.bar.c[int(i-1)*3:int(i)*3] for i in self.lContact]
+        rAtoms = [self.bar.c[int(i-1)*3:int(i)*3] for i in self.rContact]
+        lCenter = np.mean(lAtoms, axis=0)
+        rCenter = np.mean(rAtoms, axis=0) 
+        vec  = lCenter-rCenter
         dist = LA.norm(vec)
-        vecNorm = vec/dist
         
         if dist == 0:
             print("WARNING: left and right contact atoms identical, E-field set to zero!")
             field = [0,0,0]
         else:
+            vecNorm = vec/dist
             field = -1*vecNorm*qV*V_to_au/(dist*0.0001)
         self.bar.scalar("X-EFIELD", int(field[0]))
         self.bar.scalar("Y-EFIELD", int(field[1]))
@@ -377,7 +379,7 @@ class NEGF(object):
         if not self.updFermi:
             print("E-field set to "+str(LA.norm(field))+" au")
     
-    def setContacts(self, lContact=-1, rContact=-1):
+    def setContacts(self, lContact=None, rContact=None):
         """
         Set contact atoms and get corresponding orbital indices.
 
@@ -387,31 +389,31 @@ class NEGF(object):
         Parameters
         ----------
         lContact : int or array-like, optional
-            Atom number(s) for left contact. -1 means all atoms. (default: -1)
+            Atom number(s) for left contact. None means all atoms. (default: None)
         rContact : int or array-like, optional
-            Atom number(s) for right contact. -1 means all atoms. (default: -1)
+            Atom number(s) for right contact. None means all atoms. (default: None)
 
         Returns
         -------
         tuple of ndarrays
             (left_orbital_indices, right_orbital_indices)
         """
-        if lContact == -1:
-            self.lContact = np.arange(self.nsto)
+        if lContact is None:
+            self.lContact = np.arange(self.bar.natoms) + 1
         else:
             self.lContact=np.array(lContact)
-        if rContact == -1:
-            self.rContact = np.arange(self.nsto)
+        if rContact is None:
+            self.rContact = np.arange(self.bar.natoms) + 1
         else:
             self.rContact=np.array(rContact)
         lInd = np.where(np.isin(abs(self.locs), self.lContact))[0]
         rInd = np.where(np.isin(abs(self.locs), self.rContact))[0]
-        contInds = list(lContact) + list(rContact)
+        contInds = list(set(self.lContact).union(set(self.rContact)))
         self.nelecContacts = sum([self.bar.atmchg[i-1] for i in contInds])
         return lInd, rInd
     
     # Set self-energies of left and right contacts (TODO: n>2 terminal device?)
-    def setSigma(self, lContact, rContact, sig=-0.1j, sig2=None): 
+    def setSigma(self, lContact=None, rContact=None, sig=-0.1j, sig2=None): 
         """
         Set self-energies for left and right contacts.
 
@@ -422,9 +424,9 @@ class NEGF(object):
         Parameters
         ----------
         lContact : array-like
-            Atom numbers for left contact
+            Atom numbers for left contact, all atoms if None (default: None)
         rContact : array-like
-            Atom numbers for right contact
+            Atom numbers for right contact, all atoms if None (default: None)
         sig : scalar or array-like, optional
             Self-energy for left contact. Can be:
             - scalar: same value for all orbitals
@@ -434,6 +436,11 @@ class NEGF(object):
         sig2 : scalar, array-like, or None, optional
             Self-energy for right contact. If None, uses sig.
             Same format options as sig. (default: None)
+
+        Returns
+        -------
+        tuple
+            Left and right contact orbital indices
 
         Notes
         -----
@@ -466,6 +473,7 @@ class NEGF(object):
                     sig = np.kron([1, 1], sig)
                     sig2 = np.kron([1, 1], sig2)
             else:
+                print("Debug shape (sig1, inds1, sig2, inds2): ", sig.shape, lInd.shape, sig2.shape, rInd.shape)
                 raise Exception('Sigma matrix dimension mismatch!')
         elif np.ndim(sig) == 2 and np.ndim(sig2) == 2:
             if len(sig) == len(lInd) and len(sig2) == len(rInd):
@@ -478,6 +486,7 @@ class NEGF(object):
                     sig = np.kron(np.eye(2), sig)
                     sig2 = np.kron(np.eye(2), sig2)
             else:
+                print("Debug shape (sig1, inds1, sig2, inds2): ", sig.shape, lInd.shape, sig2.shape, rInd.shape)
                 raise Exception('Sigma matrix dimension mismatch!')
             
         else:
@@ -498,6 +507,8 @@ class NEGF(object):
         print('Max imag sigma:', str(np.max(np.abs(np.imag(self.sigma12)))));
         self.Gam1 = (self.sigma1 - self.sigma1.conj().T)*1j
         self.Gam2 = (self.sigma2 - self.sigma2.conj().T)*1j
+        
+        return lInd, rInd
         
     def getSigma(self, E=0): #E only used by NEGFE() object, function inherited
         return (self.sigma1, self.sigma2)
@@ -767,7 +778,7 @@ class NEGF(object):
                 io.savemat(checkpoint_file, {'den':self.P}) 
             Niter += 1
 
-        if checkpoint:
+        if self.convLevel < conv and checkpoint:
             os.system(f'mv {checkpoint_file} {final_file}') 
         print("--- %s seconds ---" % (time.time() - self.start_time))
         print('')

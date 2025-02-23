@@ -511,6 +511,30 @@ class surfGB:
         """
         sigs = [self.sigma(E, i, conv) for i in range(len(self.indsLists))]
         return sum(sigs)
+
+    def getSigma(self, Elist=[None, None], conv=1e-5):
+        """
+        Helper method for getting the left and right contact self-energies
+ 
+        Parameters
+        ----------
+        Elist : tuple, optional
+            A list of contact energies for selecting sigma, 
+            (default: use contact ermi energy)
+        conv: float, optional
+            Convergence criterial for the self-energy matrix
+
+        Returns
+        -------
+        tuple
+            A tuple of both self-energy matrices (ndarrays)
+        """
+        if Elist[0] is None:
+            Elist[0] = self.gList[0].fermi
+        if Elist[1] is None:
+            Elist[1] = self.gList[-1].fermi
+        return (self.sigma(Elist[0], 0, conv), self.sigma(Elist[1], -1, conv))
+
     
     def updateFermi(self, i, Ef):
         """
@@ -558,6 +582,7 @@ class surfGB:
         if self.gList[-1].fermi != muR:
             self.updateFermi(-1, muR) 
 
+   
     ## TESTING METHODS FOR SLATER-KOSTER INTERACTIONS:
     def testDOrbitalFunctions(self):
         """

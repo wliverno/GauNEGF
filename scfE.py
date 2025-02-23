@@ -150,16 +150,16 @@ class NEGFE(NEGF):
         return inds
    
     # Set constant sigma contact for testing or adding non-zero temperature
-    def setSigma(self, lContact, rContact, sig=-0.1j, sig2=None, T=0):
+    def setSigma(self, lContact=None, rContact=None, sig=-0.1j, sig2=None, T=0):
         """
         Set constant self-energy contacts with temperature.
 
         Parameters
         ----------
         lContact : list
-            Left contact atom indices
-        rContact : list
-            Right contact atom indices
+            Atom numbers for left contact, all atoms if None (default: None)
+        rContact : array-like
+            Atom numbers for right contact, all atoms if None (default: None)
         sig : complex, optional
             Left contact self-energy (default: -0.1j)
         sig2 : complex or None, optional
@@ -173,7 +173,7 @@ class NEGFE(NEGF):
             Left and right contact orbital indices
         """
         super().setSigma(lContact, rContact, sig, sig2)
-        inds = [self.lInd, self.rInd]
+        inds = (self.lInd, self.rInd)
         self.g = surfGTest(self.F*har_to_eV, self.S, inds, sig, sig2)
         
         # Update other variables
