@@ -59,20 +59,19 @@ io.savemat('SiNanowire_TnoSCF.mat', {'Elist':Elist, 'fermi':fermi, 'T':T, 'Torth
 #PART 2 - TRANSPORT WITH SCF
 print(' ====== PART 2 ====== ')
 negf = NEGFE(fn='Si2', func='b3lyp', basis='lanl2dz')
-inds = negf.setContact1D([[1],[2]], eta=1e4) #Again, some broadening to speed up convergence
-negf.setVoltage(0)
+inds = negf.setContact1D([[1],[2]], eta=1e-4) #Again, some broadening to speed up convergence
+negf.setVoltage(0, fermiMethod='bisect')
 # This type of contact is unstable, setting a low damping value
-negf.integralCheck(tol=1e-4, damp=0.005)
-negf.SCF(1e-3, 0.005, 200)
+negf.setIntegralLimits(512, 128, Emin=-24)
+negf.SCF(1e-2, 0.005, 200)
 negf.saveMAT('SiNanowire_ESCF.mat')
 
 Torth = cohTransE(Elist+negf.fermi, negf.F, negf.S, negf.g)
 io.savemat('SiNanowire_TESCF.mat', {'Elist':Elist, 'fermi':negf.fermi, 'T':T})
 
 
-inds = negf.setContact1D([[1],[2]], T=300)
-negf.integralCheck(tol=1e-4, damp=0.001)
-negf.SCF(1e-3, 0.001, 200)
+inds = negf.setContact1D([[1],[2]], T=300, eta=1e-4)
+negf.SCF(1e-3, 0.002, 200)
 negf.saveMAT('SiNanowire_ESCF_300K.mat')
 
 Torth = cohTransE(Elist+negf.fermi, negf.F, negf.S, negf.g)
