@@ -28,10 +28,10 @@ eoverh = 3.874e-5       # A/eV
 kB = 8.617e-5           # eV/Kelvin
 V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 
-# Calculate Coherent Current at T=0K using NEGF
-def quickCurrent(F, S, sig1, sig2, fermi, qV, T=0, spin="r",dE=0.01):
+## CURRENT FUNCTIONS
+def current(F, S, sig1, sig2, fermi, qV, T=0, spin="r",dE=0.01):
     """
-    Calculate coherent current at T=0K using NEGF with energy-independent self-energies.
+    Calculate coherent current using NEGF with energy-independent self-energies.
 
     Parameters
     ----------
@@ -80,7 +80,57 @@ def quickCurrent(F, S, sig1, sig2, fermi, qV, T=0, spin="r",dE=0.01):
         curr *= 2
     return curr
 
-def quickCurrentE(F, S, g, fermi, qV, T=0, spin="r",dE=0.01):
+def currentSpin(F, S, sig1, sig2, fermi, qV, T=0, spin="r",dE=0.01):
+    """
+    Calculate coherent spin current using NEGF with energy-independent self-energies.
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix
+    S : ndarray
+        Overlap matrix
+    sig1 : ndarray
+        Left contact self-energy (vector or matrix)
+    sig2 : ndarray
+        Right contact self-energy (vector or matrix)
+    fermi : float
+        Fermi energy in eV
+    qV : float
+        Applied bias voltage in eV
+    T : float
+        Temperature in Kelvin (default: 0)
+    spin : str, optional
+        Spin configuration ('r' for restricted) (default: 'r')
+    dE : float, optional
+        Energy step for integration in eV (default: 0.01)
+
+    Returns
+    -------
+    list
+        Spin-currents (in Amperes) [I↑↑, I↑↓, I↓↑, I↓↓]
+    """
+    if qV < 0:
+        dE = -1*abs(dE)
+    else:
+        dE = abs(dE)
+    muL = fermi - qV/2
+    muR = fermi + qV/2
+    if T== 0:
+        Elist = np.arange(muL, muR, dE)
+        _, Tspin = cohTransSpin(Elist, F, S, sig1, sig2, spin)
+        curr = [eoverh * np.trapz(T, Elist) for T in Tspin]
+    else:
+        kT = kB*T
+        spread = np.sign(dE)*5*kT
+        Elist = np.arange(muL-spread, muR+spread, dE)
+        _, Tspin = cohTransSpin(Elist, F, S, sig1, sig2, spin)
+        dfermi = np.abs(1/(np.exp((Elist - muR)/kT)+1) -  1/(np.exp((Elist-muL)/kT)+1))
+        curr = [eoverh * np.trapz(T*dfermi, Elist) for T in Tspin]
+    return curr
+
+
+def currentE(F, S, g, fermi, qV, T=0, spin="r",dE=0.01):
     """
     Calculate coherent current at T=0K using NEGF with energy-dependent self-energies.
 
@@ -116,7 +166,7 @@ def quickCurrentE(F, S, g, fermi, qV, T=0, spin="r",dE=0.01):
     muR = fermi + qV/2
     if T== 0:
         Elist = np.arange(muL, muR, dE)
-        Tr = cohTrans(Elist, F, S, sig1, sig2)
+        Tr = cohTransE(Elist, F, S, g)
         curr = eoverh * np.trapz(Tr, Elist)
     else:
         kT = kB*T
@@ -129,8 +179,7 @@ def quickCurrentE(F, S, g, fermi, qV, T=0, spin="r",dE=0.01):
         curr *= 2
     return curr
 
-# Calculate current from SCF mat file
-def qCurrentF(fn, dE=0.01, T=0):
+def currentF(fn, dE=0.01, T=0):
     """
     Calculate current from saved SCF matrix file.
 
@@ -157,10 +206,10 @@ def qCurrentF(fn, dE=0.01, T=0):
     - spin: Spin configuration
     """
     matfile = io.loadmat(fn)
-    return quickCurrent(matfile["F"], matfile["S"], matfile["sig1"],matfile["sig2"],
+    return current(matfile["F"], matfile["S"], matfile["sig1"],matfile["sig2"],
             matfile["fermi"][0,0], matfile["qV"][0,0], T, matfile["spin"][0], dE=dE)
 
-# F,S are NxN matrices, sig1 and sig2 are Nx1 vectors or NxN Matrices
+## ENERGY INDEPENDENT SIGMA
 def cohTrans(Elist, F, S, sig1, sig2):
     """
     Calculate coherent transmission with energy-independent self-energies.
@@ -214,7 +263,6 @@ def cohTrans(Elist, F, S, sig1, sig2):
         Tr.append(T)
     return Tr
 
-# F,S are NxN matrices, sig1 and sig2 are Nx1 vectors or NxN Matrices
 def cohTransSpin(Elist, F, S, sig1, sig2, spin='u'):
     """
     Calculate spin-dependent coherent transmission with energy-independent self-energies.
@@ -348,7 +396,6 @@ def DOS(Elist, F, S, sig1, sig2):
 
 ## ENERGY DEPENDENT SIGMA:
 
-# F,S are NxN matrices, g is a surfG() object
 def cohTransE(Elist, F, S, g):
     """
     Calculate coherent transmission with energy-dependent self-energies.
@@ -388,7 +435,6 @@ def cohTransE(Elist, F, S, g):
         Tr.append(T)
     return Tr
 
-# F,S are 2Nx2N matrices, g is a surfG() object size 2Nx2N
 def cohTransSpinE(Elist, F, S, g, spin='u'):
     """
     Calculate spin-dependent coherent transmission with energy-dependent self-energies.
@@ -458,7 +504,6 @@ def cohTransSpinE(Elist, F, S, g, spin='u'):
     return Tr, Tspin
 
                    
-# F,S are NxN matrices, g is a surfG() object
 def DOSE(Elist, F, S, g):
     """
     Calculate density of states with energy-dependent self-energies.
