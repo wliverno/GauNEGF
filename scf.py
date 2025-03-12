@@ -82,7 +82,7 @@ class NEGF(object):
     fn : str
         Base filename for Gaussian input/output files (without extension)
     basis : str, optional
-        Gaussian basis set name (default: 'lanl2dz')
+        Gaussian basis set name (default: 'chkbasis')
     func : str, optional
         DFT functional to use (default: 'b3pw91')
     spin : {'r', 'u', 'ro', 'g'}, optional
@@ -122,7 +122,7 @@ class NEGF(object):
 
     """
 
-    def __init__(self, fn, basis="lanl2dz", func="b3pw91", spin="r", fullSCF=True, route="", nPulay=4):
+    def __init__(self, fn, basis="chkbasis", func="b3pw91", spin="r", fullSCF=True, route="", nPulay=4):
         """
         Initialize NEGF calculator and run initial DFT calculation.
 
@@ -152,9 +152,9 @@ class NEGF(object):
     
         # Start calculation: Load Initial Matrices from Gaussian
         print('Calculation started at '+str(time.asctime()))
+        print('Filename:',fn)
         self.start_time = time.time()
         self.bar = qcb.BinAr(debug=False,lenint=8,inputfile=self.ifile)
-        self.bar.write('debug.baf')
         self.runDFT(fullSCF)
         self.nae = int(self.bar.ne/2 + (self.bar.multip-1)/2)
         self.nbe = int(self.bar.ne/2 - (self.bar.multip-1)/2)
