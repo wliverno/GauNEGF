@@ -678,7 +678,7 @@ class NEGF(object):
 
     # Main SCF loop, runs Fock <-> Density cycle until convergence reached
     # Convergence criteria: dE, RMSDP, and MaxDP < conv, or maxcycles reached
-    def SCF(self, conv=1e-5, damping=0.1, maxcycles=100, checkpoint=True, pulay=True):
+    def SCF(self, conv=1e-5, damping=0.02, maxcycles=100, checkpoint=True, pulay=True):
         """
         Run self-consistent field calculation until convergence.
 
@@ -696,7 +696,7 @@ class NEGF(object):
         conv : float, optional
             Convergence criterion for energy and density (default: 1e-5)
         damping : float, optional
-            Mixing parameter between 0 and 1 (default: 0.1)
+            Mixing parameter between 0 and 1 (default: 0.02)
         maxcycles : int, optional
             Maximum number of SCF cycles (default: 100)
         checkpoint : bool, optional
@@ -740,6 +740,7 @@ class NEGF(object):
         #Main SCF Loop
         Loop = True
         Niter = 0
+        minConv = 9999
         PP=[]
         count=[]
         TotalE=[]
@@ -774,8 +775,10 @@ class NEGF(object):
                 Loop = False
 
             # Save progress
-            if checkpoint:
-                io.savemat(checkpoint_file, {'den':self.P}) 
+            if self.convLevel < minConv and checkpoint:
+                print('Saving density checkpoint...')
+                io.savemat(checkpoint_file, {'den':self.P, 'conv':self.convLevel})
+                minConv = self.convLevel + 0.0 
             Niter += 1
 
         if self.convLevel < conv and checkpoint:
