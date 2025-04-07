@@ -12,17 +12,7 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/wliverno/GaussianNEGF",
-    py_modules=[
-        "scf",
-        "scfE",
-        "density",
-        "transport",
-        "surfGBethe",
-        "surfG1D",
-        "surfGTester",
-        "matTools",
-        "fermiSearch",
-    ],
+    packages=["gauNEGF"],
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Science/Research",

@@ -20,14 +20,14 @@ from gauopen import QCBinAr as qcb
 from gauopen import QCUtil as qcu
 
 # Developed Packages 
-from matTools import *
-from density import *
-from transport import DOS
-from fermiSearch import DOSFermiSearch
-from scf import NEGF
-from surfG1D import surfG
-from surfGBethe import surfGB
-from surfGTester import surfGTest
+from gauNEGF.matTools import *
+from gauNEGF.density import *
+from gauNEGF.transport import DOS
+from gauNEGF.fermiSearch import DOSFermiSearch
+from gauNEGF.scf import NEGF
+from gauNEGF.surfG1D import surfG
+from gauNEGF.surfGBethe import surfGB
+from gauNEGF.surfGTester import surfGTest
 
 # Matrix Headers
 AlphaDen = "ALPHA DENSITY MATRIX"

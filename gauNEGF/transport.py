@@ -20,7 +20,7 @@ References
 import numpy as np
 from numpy import linalg as LA
 import scipy.io as io
-from matTools import *
+from gauNEGF.matTools import *
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
@@ -116,17 +116,20 @@ def currentSpin(F, S, sig1, sig2, fermi, qV, T=0, spin="r",dE=0.01):
         dE = abs(dE)
     muL = fermi - qV/2
     muR = fermi + qV/2
+    curr = 0
     if T== 0:
         Elist = np.arange(muL, muR, dE)
         _, Tspin = cohTransSpin(Elist, F, S, sig1, sig2, spin)
-        curr = [eoverh * np.trapz(Tspin[:, i], Elist) for i in range(4)]
+        if len(Elist)>0:
+            curr = [eoverh * np.trapz(Tspin[:, i], Elist) for i in range(4)]
     else:
         kT = kB*T
         spread = np.sign(dE)*5*kT
         Elist = np.arange(muL-spread, muR+spread, dE)
         _, Tspin = cohTransSpin(Elist, F, S, sig1, sig2, spin)
         dfermi = np.abs(1/(np.exp((Elist - muR)/kT)+1) -  1/(np.exp((Elist-muL)/kT)+1))
-        curr = [eoverh * np.trapz(Tspin[:, i]*dfermi, Elist) for i in range(4)]
+        if len(Elist)>0:
+            curr = [eoverh * np.trapz(Tspin[:, i]*dfermi, Elist) for i in range(4)]
     return curr
 
 

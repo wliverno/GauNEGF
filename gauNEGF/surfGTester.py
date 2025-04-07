@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.linalg import fractional_matrix_power
-from matTools import formSigma
+from gauNEGF.matTools import formSigma
 
 # Class for generating an energy-independent green's function for scfE.py
 class surfGTest:
