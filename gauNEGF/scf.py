@@ -47,8 +47,8 @@ import matplotlib.pyplot as plt
 from gauopen import QCBinAr as qcb
 
 # Developed packages
-from matTools import *
-from density import * 
+from gauNEGF.matTools import *
+from gauNEGF.density import * 
 
 
 # CONSTANTS:

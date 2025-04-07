@@ -42,8 +42,8 @@ Note: This package requires a licensed copy of Gaussian quantum chemistry softwa
 git clone git@github.com:wliverno/GauNEGF.git
 cd GauNEGF
 
-# Run install script
-./install.sh
+# Install using pip
+pip install -e .
 ```
 
 ## Quick Start
@@ -79,11 +79,11 @@ For usage examples, see the files in the `examples/` directory.
 If you use GaussianNEGF in your research, please cite:
 
 ```bibtex
-@software{gaussianNEGF2024,
+@software{gaussianNEGF2025,
   author       = {William Livernois}
   title        = {GaussianNEGF: A Python package for Non-Equilibrium Green's Function calculations},
-  month        = jan,
-  year         = 2024,
+  month        = April,
+  year         = 2025,
   publisher    = {Zenodo},
   version      = {v1.0.0},
   doi          = {10.5281/zenodo.XXXXXXX},

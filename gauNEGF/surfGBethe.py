@@ -29,7 +29,7 @@ from numpy import linalg as LA
 from scipy.linalg import fractional_matrix_power
 
 # Developed packages
-from density import *
+from gauNEGF.density import *
 
 #Constants
 kB = 8.617e-5           # eV/Kelvin

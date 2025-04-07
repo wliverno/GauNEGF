@@ -32,8 +32,8 @@ from multiprocessing import Pool
 import os
 
 # Developed Packages:
-from fermiSearch import DOSFermiSearch
-from surfG1D import surfG
+from gauNEGF.fermiSearch import DOSFermiSearch
+from gauNEGF.surfG1D import surfG
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
