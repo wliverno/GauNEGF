@@ -1,25 +1,22 @@
+
+
 <!DOCTYPE html>
-<html class="writer-html5" lang="en">
+<html class="writer-html5" lang="en" data-content_root="../">
 <head>
-  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Best Practices for Production Calculations &mdash; gauNEGF  documentation</title>
-      <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
-      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css" />
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
 
   
-  <!--[if lt IE 9]>
-    <script src="../_static/js/html5shiv.min.js"></script>
-  <![endif]-->
-  
-        <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
-        <script src="../_static/jquery.js"></script>
-        <script src="../_static/underscore.js"></script>
-        <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
-        <script src="../_static/doctools.js"></script>
-        <script src="../_static/sphinx_highlight.js"></script>
-        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9a2dae69"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+      <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
     <script src="../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
@@ -122,12 +119,12 @@
            <div itemprop="articleBody">
              
   <section id="best-practices-for-production-calculations">
-<h1>Best Practices for Production Calculations<a class="headerlink" href="#best-practices-for-production-calculations" title="Permalink to this heading"></a></h1>
+<h1>Best Practices for Production Calculations<a class="headerlink" href="#best-practices-for-production-calculations" title="Link to this heading"></a></h1>
 <p>This section provides guidelines for setting up and running production-quality NEGF-DFT calculations, focusing on accuracy, efficiency, and troubleshooting.</p>
 <section id="system-preparation">
-<h2>System Preparation<a class="headerlink" href="#system-preparation" title="Permalink to this heading"></a></h2>
+<h2>System Preparation<a class="headerlink" href="#system-preparation" title="Link to this heading"></a></h2>
 <section id="geometry-optimization">
-<h3>Geometry Optimization<a class="headerlink" href="#geometry-optimization" title="Permalink to this heading"></a></h3>
+<h3>Geometry Optimization<a class="headerlink" href="#geometry-optimization" title="Link to this heading"></a></h3>
 <ol class="arabic simple">
 <li><p><strong>Initial Structure</strong></p>
 <ul class="simple">
@@ -154,31 +151,28 @@
 </section>
 </section>
 <section id="dft-setup">
-<h2>DFT Setup<a class="headerlink" href="#dft-setup" title="Permalink to this heading"></a></h2>
+<h2>DFT Setup<a class="headerlink" href="#dft-setup" title="Link to this heading"></a></h2>
 <section id="functional-selection">
-<h3>Functional Selection<a class="headerlink" href="#functional-selection" title="Permalink to this heading"></a></h3>
+<h3>Functional Selection<a class="headerlink" href="#functional-selection" title="Link to this heading"></a></h3>
 <p>Honestly, there are hundreds of DFT functionals out there. Find one that works for your system and doesn’t make the reviewers too mad. People seem to like pure functionals for metals and hybrid functionals for organics, if you want both you are SOL.</p>
 </section>
 <section id="contact-models">
-<h3>Contact Models<a class="headerlink" href="#contact-models" title="Permalink to this heading"></a></h3>
+<h3>Contact Models<a class="headerlink" href="#contact-models" title="Link to this heading"></a></h3>
 <ol class="arabic">
-<li><p><strong>Energy-Independent</strong></p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Start with simple diagonal self-energies</span>
-<span class="n">negf</span><span class="o">.</span><span class="n">setSigma</span><span class="p">([</span><span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="o">-</span><span class="mf">0.05</span><span class="n">j</span><span class="p">)</span>
-</pre></div>
-</div>
-</li>
+<li><p><strong>Energy-Independent</strong></p></li>
 <li><p><strong>Bethe Lattice</strong></p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Use realistic metallic contacts</span>
-<span class="n">g</span> <span class="o">=</span> <span class="n">surfGB</span><span class="p">(</span><span class="n">F</span><span class="p">,</span> <span class="n">S</span><span class="p">,</span> <span class="n">contacts</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span><span class="mi">2</span><span class="p">])</span>
-<span class="n">negf</span><span class="o">.</span><span class="n">setSigma</span><span class="p">([</span><span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">g</span><span class="p">)</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Use realistic metallic contacts with extended system</span>
+<span class="n">negf</span> <span class="o">=</span> <span class="n">scfE</span><span class="o">.</span><span class="n">NEGFE</span><span class="p">(</span><span class="s1">&#39;molContacts&#39;</span><span class="p">)</span>
+<span class="c1"># Assuming triangular contacts on 1,2,3,4 and 5,6,7,8</span>
+<span class="n">inds</span> <span class="o">=</span> <span class="n">setContactBethe</span><span class="p">([[</span><span class="mi">1</span><span class="p">,</span><span class="mi">2</span><span class="p">,</span><span class="mi">3</span><span class="p">],[</span><span class="mi">6</span><span class="p">,</span><span class="mi">7</span><span class="p">,</span><span class="mi">8</span><span class="p">]],</span> <span class="n">latFile</span><span class="o">=</span><span class="s1">&#39;Au2&#39;</span><span class="p">,</span> <span class="n">eta</span><span class="o">=</span><span class="mf">1e-5</span><span class="p">,</span> <span class="n">T</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>
 </pre></div>
 </div>
 </li>
 <li><p><strong>1D Chain</strong></p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># For molecular wire systems</span>
-<span class="n">g</span> <span class="o">=</span> <span class="n">surfG</span><span class="p">(</span><span class="n">F</span><span class="p">,</span> <span class="n">S</span><span class="p">,</span> <span class="n">taus</span><span class="p">,</span> <span class="n">staus</span><span class="p">)</span>
-<span class="n">negf</span><span class="o">.</span><span class="n">setSigma</span><span class="p">([</span><span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">g</span><span class="p">)</span>
+<span class="n">negf</span> <span class="o">=</span> <span class="n">scfE</span><span class="o">.</span><span class="n">NEGFE</span><span class="p">(</span><span class="s1">&#39;molContacts&#39;</span><span class="p">)</span>
+<span class="c1"># Assuming repeating infinite chain extending atoms [1,2] and [3,4]</span>
+<span class="n">inds</span> <span class="o">=</span> <span class="n">setContact1D</span><span class="p">([[</span><span class="mi">2</span><span class="p">],[</span><span class="mi">3</span><span class="p">]],</span> <span class="p">[[</span><span class="mi">1</span><span class="p">],[</span><span class="mi">4</span><span class="p">]],</span> <span class="n">eta</span><span class="o">=</span><span class="mf">1e-5</span><span class="p">,</span> <span class="n">T</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>
 </pre></div>
 </div>
 </li>
@@ -186,16 +180,16 @@
 </section>
 </section>
 <section id="convergence-strategies">
-<h2>Convergence Strategies<a class="headerlink" href="#convergence-strategies" title="Permalink to this heading"></a></h2>
+<h2>Convergence Strategies<a class="headerlink" href="#convergence-strategies" title="Link to this heading"></a></h2>
 <section id="scf-convergence">
-<h3>SCF Convergence<a class="headerlink" href="#scf-convergence" title="Permalink to this heading"></a></h3>
+<h3>SCF Convergence<a class="headerlink" href="#scf-convergence" title="Link to this heading"></a></h3>
 <ol class="arabic">
 <li><p><strong>Mixing Parameters</strong></p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Start with conservative mixing</span>
-<span class="n">negf</span><span class="o">.</span><span class="n">runSCF</span><span class="p">(</span><span class="n">mix</span><span class="o">=</span><span class="mf">0.005</span><span class="p">)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">SCF</span><span class="p">(</span><span class="n">damping</span><span class="o">=</span><span class="mf">0.005</span><span class="p">,</span> <span class="n">maxcycles</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span>
 
 <span class="c1"># Increase if convergence is slow</span>
-<span class="n">negf</span><span class="o">.</span><span class="n">runSCF</span><span class="p">(</span><span class="n">mix</span><span class="o">=</span><span class="mf">0.02</span><span class="p">)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">runSCF</span><span class="p">(</span><span class="n">mix</span><span class="o">=</span><span class="mf">0.02</span><span class="p">,</span> <span class="n">maxcycles</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
 
 <span class="c1"># Values over 0.05 will be unstable!</span>
 </pre></div>
@@ -205,19 +199,23 @@
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Pulay mixing as implemented works well</span>
 <span class="c1"># Increase nPulay if you have cyclical convergence values</span>
 <span class="n">negf</span> <span class="o">=</span> <span class="n">NEGF</span><span class="p">(</span><span class="n">fn</span><span class="o">=</span><span class="s1">&#39;system&#39;</span><span class="p">,</span> <span class="n">nPulay</span><span class="o">=</span><span class="mi">9</span><span class="p">)</span>
+<span class="c1"># Note: increasing nPulay will have a similar effect as</span>
+<span class="c1"># lowering mixing in the SCF cycle</span>
 </pre></div>
 </div>
 </li>
-<li><p><strong>Convergence Criteria</strong></p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Tight convergence for production</span>
-<span class="n">negf</span><span class="o">.</span><span class="n">runSCF</span><span class="p">(</span><span class="n">conv</span><span class="o">=</span><span class="mf">1e-4</span><span class="p">,</span> <span class="n">damping</span><span class="o">=</span><span class="mf">0.02</span><span class="p">,</span> <span class="n">maxcycles</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
+<li><p><strong>Change Initial Wavefunction Guess</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">negf</span><span class="o">.</span><span class="n">setDen</span><span class="p">(</span><span class="n">density_guess</span><span class="p">)</span>
+<span class="c1"># Typical values for convergence, don&#39;t read checkpoint</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">SCF</span><span class="p">(</span><span class="n">conv</span><span class="o">=</span><span class="mf">1e-4</span><span class="p">,</span> <span class="n">damping</span><span class="o">=</span><span class="mf">0.02</span><span class="p">,</span> <span class="n">maxcycles</span><span class="o">=</span><span class="mi">300</span><span class="p">,</span> <span class="n">checkpoint</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 </pre></div>
 </div>
 </li>
 </ol>
 </section>
 <section id="integration-parameters">
-<h3>Integration Parameters<a class="headerlink" href="#integration-parameters" title="Permalink to this heading"></a></h3>
+<h3>Integration Parameters<a class="headerlink" href="#integration-parameters" title="Link to this heading"></a></h3>
+<p>Note that integration is only used by the NEGFE() class:</p>
 <ol class="arabic">
 <li><p><strong>Automatic Integration Limits*</strong></p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># tol = DOS cutoff value for Emin and</span>
@@ -238,7 +236,8 @@
 </li>
 <li><p><strong>Add Temperature</strong></p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Include finite temperature (300 Kelvin)</span>
-<span class="n">negf</span><span class="o">.</span><span class="n">setSigma</span><span class="p">([</span><span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">T</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>
+<span class="c1"># even for energy-independent contacts</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setSigma</span><span class="p">([</span><span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">sig</span><span class="o">=-</span><span class="mf">0.05</span><span class="n">j</span><span class="p">,</span> <span class="n">T</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>
 </pre></div>
 </div>
 </li>
@@ -246,9 +245,9 @@
 </section>
 </section>
 <section id="troubleshooting-guide">
-<h2>Troubleshooting Guide<a class="headerlink" href="#troubleshooting-guide" title="Permalink to this heading"></a></h2>
+<h2>Troubleshooting Guide<a class="headerlink" href="#troubleshooting-guide" title="Link to this heading"></a></h2>
 <section id="common-issues">
-<h3>Common Issues<a class="headerlink" href="#common-issues" title="Permalink to this heading"></a></h3>
+<h3>Common Issues<a class="headerlink" href="#common-issues" title="Link to this heading"></a></h3>
 <ol class="arabic simple">
 <li><p><strong>SCF Convergence</strong></p>
 <ul class="simple">
@@ -267,7 +266,7 @@
 </ol>
 </section>
 <section id="validation-checks">
-<h3>Validation Checks<a class="headerlink" href="#validation-checks" title="Permalink to this heading"></a></h3>
+<h3>Validation Checks<a class="headerlink" href="#validation-checks" title="Link to this heading"></a></h3>
 <ol class="arabic simple">
 <li><p><strong>Zero Bias</strong></p>
 <ul class="simple">

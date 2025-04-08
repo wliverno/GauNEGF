@@ -1,27 +1,24 @@
+
+
 <!DOCTYPE html>
-<html class="writer-html5" lang="en">
+<html class="writer-html5" lang="en" data-content_root="../">
 <head>
-  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Transport Calculations &mdash; gauNEGF  documentation</title>
-      <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
-      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css" />
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
 
   
-  <!--[if lt IE 9]>
-    <script src="../_static/js/html5shiv.min.js"></script>
-  <![endif]-->
-  
-        <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
-        <script src="../_static/jquery.js"></script>
-        <script src="../_static/underscore.js"></script>
-        <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
-        <script src="../_static/doctools.js"></script>
-        <script src="../_static/sphinx_highlight.js"></script>
-        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
-        <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true, "displayMath": [["$$", "$$"], ["\\[", "\\]"]]}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
-        <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9a2dae69"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+      <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+      <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true, "displayMath": [["$$", "$$"], ["\\[", "\\]"]]}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+      <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <script src="../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
@@ -131,49 +128,51 @@
            <div itemprop="articleBody">
              
   <section id="transport-calculations">
-<h1>Transport Calculations<a class="headerlink" href="#transport-calculations" title="Permalink to this heading"></a></h1>
+<h1>Transport Calculations<a class="headerlink" href="#transport-calculations" title="Link to this heading"></a></h1>
 <p>This section covers the calculation and analysis of quantum transport properties, including transmission functions, current-voltage characteristics, and spin-dependent transport.</p>
 <section id="transmission-function">
-<h2>Transmission Function<a class="headerlink" href="#transmission-function" title="Permalink to this heading"></a></h2>
+<h2>Transmission Function<a class="headerlink" href="#transmission-function" title="Link to this heading"></a></h2>
 <section id="theory">
-<h3>Theory<a class="headerlink" href="#theory" title="Permalink to this heading"></a></h3>
+<h3>Theory<a class="headerlink" href="#theory" title="Link to this heading"></a></h3>
 <p>The transmission function <span class="math notranslate nohighlight">\(T(E)\)</span> gives the probability of electron transmission at energy E:</p>
 <div class="math notranslate nohighlight">
 \[T(E) = \mathrm{Tr}[\Gamma_1(E) G^r(E) \Gamma_2(E) G^a(E)]\]</div>
 <p>where <span class="math notranslate nohighlight">\(\Gamma_{1,2}\)</span> are the contact broadening matrices.</p>
 </section>
 <section id="implementation">
-<h3>Implementation<a class="headerlink" href="#implementation" title="Permalink to this heading"></a></h3>
+<h3>Implementation<a class="headerlink" href="#implementation" title="Link to this heading"></a></h3>
 <p>Basic transmission calculation:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">gauNEGF.transport</span> <span class="kn">import</span> <span class="n">cohTrans</span>
-<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">cohTrans</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
 
 <span class="c1"># Energy grid</span>
 <span class="n">E</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">1000</span><span class="p">)</span>
 
 <span class="c1"># Calculate transmission</span>
-<span class="n">T</span> <span class="o">=</span> <span class="n">cohTrans</span><span class="p">(</span><span class="n">E</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span> <span class="n">sig1</span><span class="p">,</span> <span class="n">sig2</span><span class="p">)</span>
+<span class="n">F_eV</span> <span class="o">=</span> <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="o">*</span><span class="mf">27.211386</span> <span class="c1">#Convert from hartrees to eV</span>
+<span class="n">T</span> <span class="o">=</span> <span class="n">cohTrans</span><span class="p">(</span><span class="n">E</span><span class="p">,</span> <span class="n">F_eV</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span> <span class="n">sig1</span><span class="p">,</span> <span class="n">sig2</span><span class="p">)</span>
 </pre></div>
 </div>
 </section>
 </section>
 <section id="current-calculations">
-<h2>Current Calculations<a class="headerlink" href="#current-calculations" title="Permalink to this heading"></a></h2>
+<h2>Current Calculations<a class="headerlink" href="#current-calculations" title="Link to this heading"></a></h2>
 <section id="landauer-formula">
-<h3>Landauer Formula<a class="headerlink" href="#landauer-formula" title="Permalink to this heading"></a></h3>
+<h3>Landauer Formula<a class="headerlink" href="#landauer-formula" title="Link to this heading"></a></h3>
 <p>The current is calculated using the Landauer formula:</p>
 <div class="math notranslate nohighlight">
 \[I = \frac{2e}{h} \int_{-\infty}^{\infty} T(E)[f_1(E) - f_2(E)]dE\]</div>
 <p>where <span class="math notranslate nohighlight">\(f_{1,2}(E)\)</span> are the Fermi functions for the contacts.</p>
 </section>
 <section id="id1">
-<h3>Implementation<a class="headerlink" href="#id1" title="Permalink to this heading"></a></h3>
+<h3>Implementation<a class="headerlink" href="#id1" title="Link to this heading"></a></h3>
 <p>Current calculation at finite bias:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">gauNEGF.transport</span> <span class="kn">import</span> <span class="n">quickCurrent</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">quickCurrent</span>
 
 <span class="c1"># Calculate current</span>
+<span class="n">F_eV</span> <span class="o">=</span> <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="o">*</span><span class="mf">27.211386</span> <span class="c1">#Convert from hartrees to eV</span>
 <span class="n">I</span> <span class="o">=</span> <span class="n">quickCurrent</span><span class="p">(</span>
-    <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span>
+    <span class="n">F_eV</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span>
     <span class="n">sig1</span><span class="p">,</span> <span class="n">sig2</span><span class="p">,</span>
     <span class="n">fermi</span><span class="o">=</span><span class="n">negf</span><span class="o">.</span><span class="n">fermi</span><span class="p">,</span>
     <span class="n">qV</span><span class="o">=</span><span class="mf">0.1</span>
@@ -182,7 +181,7 @@
 </div>
 </section>
 <section id="iv-characteristics">
-<h3>IV Characteristics<a class="headerlink" href="#iv-characteristics" title="Permalink to this heading"></a></h3>
+<h3>IV Characteristics<a class="headerlink" href="#iv-characteristics" title="Link to this heading"></a></h3>
 <p>Generate current-voltage curves:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Voltage range</span>
 <span class="n">V</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">)</span>
@@ -192,8 +191,9 @@
 <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">V</span><span class="p">:</span>
     <span class="n">negf</span><span class="o">.</span><span class="n">setVoltage</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
     <span class="n">negf</span><span class="o">.</span><span class="n">SCF</span><span class="p">()</span>
+    <span class="n">F_eV</span> <span class="o">=</span> <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="o">*</span><span class="mf">27.211386</span> <span class="c1">#Convert from hartrees to eV</span>
     <span class="n">I</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">quickCurrent</span><span class="p">(</span>
-        <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span>
+        <span class="n">F_eV</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span>
         <span class="n">sig1</span><span class="p">,</span> <span class="n">sig2</span><span class="p">,</span>
         <span class="n">fermi</span><span class="o">=</span><span class="n">negf</span><span class="o">.</span><span class="n">fermi</span><span class="p">,</span>
         <span class="n">qV</span><span class="o">=</span><span class="n">v</span>
@@ -203,9 +203,9 @@
 </section>
 </section>
 <section id="spin-dependent-transport">
-<h2>Spin-Dependent Transport<a class="headerlink" href="#spin-dependent-transport" title="Permalink to this heading"></a></h2>
+<h2>Spin-Dependent Transport<a class="headerlink" href="#spin-dependent-transport" title="Link to this heading"></a></h2>
 <section id="id2">
-<h3>Theory<a class="headerlink" href="#id2" title="Permalink to this heading"></a></h3>
+<h3>Theory<a class="headerlink" href="#id2" title="Link to this heading"></a></h3>
 <p>Spin-dependent transport calculations account for the spin-selective transmission of electrons through molecular systems. This is particularly important for chiral molecules exhibiting the chiral-induced spin selectivity (CISS) effect <a class="reference internal" href="#zoellner2020" id="id3"><span>[Zoellner2020]</span></a>.</p>
 <p>The spin-orbit coupling effects are included using an on-site approximation <a class="reference internal" href="#fernandez2006" id="id4"><span>[Fernandez2006]</span></a>, which provides an efficient method for calculating relativistic effects in localized basis sets.</p>
 <p>For spin-dependent transport, we consider four transmission channels:</p>
@@ -218,9 +218,9 @@
 <p>where σ denotes the spin channel.</p>
 </section>
 <section id="id5">
-<h3>Implementation<a class="headerlink" href="#id5" title="Permalink to this heading"></a></h3>
+<h3>Implementation<a class="headerlink" href="#id5" title="Link to this heading"></a></h3>
 <p>Spin-resolved transmission:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">gauNEGF.transport</span> <span class="kn">import</span> <span class="n">cohTransSpin</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">cohTransSpin</span>
 
 <span class="c1"># Calculate spin-resolved transmission</span>
 <span class="n">T</span><span class="p">,</span> <span class="n">Tspin</span> <span class="o">=</span> <span class="n">cohTransSpin</span><span class="p">(</span>
@@ -239,11 +239,11 @@
 </section>
 </section>
 <section id="analysis-tools">
-<h2>Analysis Tools<a class="headerlink" href="#analysis-tools" title="Permalink to this heading"></a></h2>
+<h2>Analysis Tools<a class="headerlink" href="#analysis-tools" title="Link to this heading"></a></h2>
 <section id="density-of-states">
-<h3>Density of States<a class="headerlink" href="#density-of-states" title="Permalink to this heading"></a></h3>
+<h3>Density of States<a class="headerlink" href="#density-of-states" title="Link to this heading"></a></h3>
 <p>Calculate and analyze DOS:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">gauNEGF.transport</span> <span class="kn">import</span> <span class="n">DOS</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">DOS</span>
 
 <span class="c1"># Calculate DOS</span>
 <span class="n">dos</span><span class="p">,</span> <span class="n">dos_list</span> <span class="o">=</span> <span class="n">DOS</span><span class="p">(</span>
@@ -254,7 +254,7 @@
 </div>
 </section>
 <section id="transmission-analysis">
-<h3>Transmission Analysis<a class="headerlink" href="#transmission-analysis" title="Permalink to this heading"></a></h3>
+<h3>Transmission Analysis<a class="headerlink" href="#transmission-analysis" title="Link to this heading"></a></h3>
 <p>Analyze transmission features:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Plot transmission vs energy</span>
 <span class="n">plt</span><span class="o">.</span><span class="n">semilogy</span><span class="p">(</span><span class="n">E</span><span class="p">,</span> <span class="n">T</span><span class="p">)</span>
@@ -270,13 +270,14 @@
 </section>
 </section>
 <section id="example-analysis">
-<h2>Example Analysis<a class="headerlink" href="#example-analysis" title="Permalink to this heading"></a></h2>
+<h2>Example Analysis<a class="headerlink" href="#example-analysis" title="Link to this heading"></a></h2>
 <section id="complete-analysis-workflow">
-<h3>Complete Analysis Workflow<a class="headerlink" href="#complete-analysis-workflow" title="Permalink to this heading"></a></h3>
+<h3>Complete Analysis Workflow<a class="headerlink" href="#complete-analysis-workflow" title="Link to this heading"></a></h3>
 <p>Example of a comprehensive transport analysis:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Initialize system</span>
 <span class="n">negf</span> <span class="o">=</span> <span class="n">NEGF</span><span class="p">(</span><span class="s1">&#39;molecule&#39;</span><span class="p">,</span> <span class="n">basis</span><span class="o">=</span><span class="s1">&#39;lanl2dz&#39;</span><span class="p">)</span>
-<span class="n">negf</span><span class="o">.</span><span class="n">setContactBethe</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span><span class="mi">2</span><span class="p">,</span><span class="mi">3</span><span class="p">],</span> <span class="p">[</span><span class="mi">6</span><span class="p">,</span><span class="mi">7</span><span class="p">,</span><span class="mi">8</span><span class="p">],</span> <span class="s1">&#39;Au&#39;</span><span class="p">)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setContactBethe</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span><span class="mi">2</span><span class="p">,</span><span class="mi">3</span><span class="p">],</span> <span class="p">[</span><span class="mi">6</span><span class="p">,</span><span class="mi">7</span><span class="p">,</span><span class="mi">8</span><span class="p">],</span> <span class="s1">&#39;Au2&#39;</span><span class="p">)</span>
+<span class="n">har_to_eV</span> <span class="o">=</span> <span class="mf">27.211386</span>
 
 <span class="c1"># Run NEGF-DFT to get quilibrium density</span>
 <span class="n">negf</span><span class="o">.</span><span class="n">setVoltage</span><span class="p">(</span><span class="mf">0.0</span><span class="p">)</span>
@@ -284,10 +285,10 @@
 
 <span class="c1"># Calculate transmission</span>
 <span class="n">E</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">1000</span><span class="p">)</span>
-<span class="n">T</span> <span class="o">=</span> <span class="n">cohTransE</span><span class="p">(</span><span class="n">E</span><span class="o">+</span><span class="n">negf</span><span class="o">.</span><span class="n">fermi</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">g</span><span class="p">)</span>
+<span class="n">T</span> <span class="o">=</span> <span class="n">cohTransE</span><span class="p">(</span><span class="n">E</span><span class="o">+</span><span class="n">negf</span><span class="o">.</span><span class="n">fermi</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="o">*</span><span class="n">har_to_eV</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">g</span><span class="p">)</span>
 
 <span class="c1"># Calculate DOS</span>
-<span class="n">dos</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">DOSE</span><span class="p">(</span><span class="n">E</span><span class="o">+</span><span class="n">negf</span><span class="o">.</span><span class="n">fermi</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">g</span><span class="p">)</span>
+<span class="n">dos</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">DOSE</span><span class="p">(</span><span class="n">E</span><span class="o">+</span><span class="n">negf</span><span class="o">.</span><span class="n">fermi</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="o">*</span><span class="n">har_to_eV</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">g</span><span class="p">)</span>
 
 <span class="c1"># Generate IV curve</span>
 <span class="n">V</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">21</span><span class="p">)</span>
@@ -296,14 +297,14 @@
     <span class="n">negf</span><span class="o">.</span><span class="n">setVoltage</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
     <span class="n">negf</span><span class="o">.</span><span class="n">SCF</span><span class="p">()</span>
     <span class="n">I</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">quickCurrent</span><span class="p">(</span>
-        <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span>
+        <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="o">*</span><span class="n">har_to_eV</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span>
         <span class="n">sig1</span><span class="p">,</span> <span class="n">sig2</span><span class="p">,</span>
         <span class="n">fermi</span><span class="o">=</span><span class="n">negf</span><span class="o">.</span><span class="n">fermi</span><span class="p">,</span>
         <span class="n">qV</span><span class="o">=</span><span class="n">v</span>
     <span class="p">))</span>
 
 <span class="c1"># Plot results</span>
-<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
 
 <span class="n">fig</span><span class="p">,</span> <span class="p">(</span><span class="n">ax1</span><span class="p">,</span> <span class="n">ax2</span><span class="p">,</span> <span class="n">ax3</span><span class="p">)</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">15</span><span class="p">,</span> <span class="mi">5</span><span class="p">))</span>
 
@@ -329,7 +330,7 @@
 </section>
 </section>
 <section id="next-steps">
-<h2>Next Steps<a class="headerlink" href="#next-steps" title="Permalink to this heading"></a></h2>
+<h2>Next Steps<a class="headerlink" href="#next-steps" title="Link to this heading"></a></h2>
 <p>Review <a class="reference internal" href="best_practices.html"><span class="doc">Best Practices for Production Calculations</span></a> for tips on production calculations.</p>
 <div role="list" class="citation-list">
 <div class="citation" id="zoellner2020" role="doc-biblioentry">

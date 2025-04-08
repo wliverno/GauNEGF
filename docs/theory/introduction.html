@@ -1,27 +1,24 @@
+
+
 <!DOCTYPE html>
-<html class="writer-html5" lang="en">
+<html class="writer-html5" lang="en" data-content_root="../">
 <head>
-  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Introduction to NEGF-DFT &mdash; gauNEGF  documentation</title>
-      <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
-      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css" />
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
 
   
-  <!--[if lt IE 9]>
-    <script src="../_static/js/html5shiv.min.js"></script>
-  <![endif]-->
-  
-        <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
-        <script src="../_static/jquery.js"></script>
-        <script src="../_static/underscore.js"></script>
-        <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
-        <script src="../_static/doctools.js"></script>
-        <script src="../_static/sphinx_highlight.js"></script>
-        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
-        <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true, "displayMath": [["$$", "$$"], ["\\[", "\\]"]]}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
-        <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9a2dae69"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+      <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+      <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true, "displayMath": [["$$", "$$"], ["\\[", "\\]"]]}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+      <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <script src="../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
@@ -62,7 +59,6 @@
 <li class="toctree-l3"><a class="reference internal" href="#mathematical-framework">Mathematical Framework</a></li>
 <li class="toctree-l3"><a class="reference internal" href="#key-equations">Key Equations</a></li>
 <li class="toctree-l3"><a class="reference internal" href="#contact-models-and-testing">Contact Models and Testing</a></li>
-<li class="toctree-l3"><a class="reference internal" href="#utility-functions-mattools-py">Utility Functions (<cite>matTools.py</cite>)</a></li>
 <li class="toctree-l3"><a class="reference internal" href="#next-steps">Next Steps</a></li>
 <li class="toctree-l3"><a class="reference internal" href="#references">References</a></li>
 </ul>
@@ -113,14 +109,14 @@
            <div itemprop="articleBody">
              
   <section id="introduction-to-negf-dft">
-<h1>Introduction to NEGF-DFT<a class="headerlink" href="#introduction-to-negf-dft" title="Permalink to this heading"></a></h1>
+<h1>Introduction to NEGF-DFT<a class="headerlink" href="#introduction-to-negf-dft" title="Link to this heading"></a></h1>
 <p>This section provides an overview of the Non-Equilibrium Green’s Function (NEGF) method combined with Density Functional Theory (DFT) for quantum transport calculations.</p>
 <section id="historical-context">
-<h2>Historical Context<a class="headerlink" href="#historical-context" title="Permalink to this heading"></a></h2>
+<h2>Historical Context<a class="headerlink" href="#historical-context" title="Link to this heading"></a></h2>
 <p>The gauNEGF package builds upon the foundational work of ANT.Gaussian <a class="reference internal" href="#palacios2002" id="id1"><span>[Palacios2002]</span></a>, which pioneered the implementation of NEGF-DFT calculations using Gaussian basis sets. This approach has proven particularly effective for molecular electronics and nanoscale transport calculations.</p>
 </section>
 <section id="core-functionality">
-<h2>Core Functionality<a class="headerlink" href="#core-functionality" title="Permalink to this heading"></a></h2>
+<h2>Core Functionality<a class="headerlink" href="#core-functionality" title="Link to this heading"></a></h2>
 <p>The gauNEGF package provides:</p>
 <ul class="simple">
 <li><p>Energy-independent and energy-dependent NEGF calculations <a class="reference internal" href="negf_dft.html#damle2002" id="id2"><span>[Damle2002]</span></a></p></li>
@@ -131,15 +127,15 @@
 </ul>
 </section>
 <section id="mathematical-framework">
-<h2>Mathematical Framework<a class="headerlink" href="#mathematical-framework" title="Permalink to this heading"></a></h2>
+<h2>Mathematical Framework<a class="headerlink" href="#mathematical-framework" title="Link to this heading"></a></h2>
 </section>
 <section id="key-equations">
-<h2>Key Equations<a class="headerlink" href="#key-equations" title="Permalink to this heading"></a></h2>
+<h2>Key Equations<a class="headerlink" href="#key-equations" title="Link to this heading"></a></h2>
 <p>The central quantities in NEGF-DFT are:</p>
 <ol class="arabic">
 <li><p><strong>Green’s Functions</strong></p>
 <div class="math notranslate nohighlight" id="equation-eq-retarded-gf">
-<span class="eqno">(1)<a class="headerlink" href="#equation-eq-retarded-gf" title="Permalink to this equation"></a></span>\[G^r(E) = [(E+i\eta)S - F - \Sigma(E)]^{-1}\]</div>
+<span class="eqno">(1)<a class="headerlink" href="#equation-eq-retarded-gf" title="Link to this equation"></a></span>\[G^r(E) = [(E+i\eta)S - F - \Sigma(E)]^{-1}\]</div>
 <p>where:</p>
 <ul class="simple">
 <li><p><span class="math notranslate nohighlight">\(G^r(E)\)</span> is the retarded Green’s function</p></li>
@@ -151,7 +147,7 @@
 </ul>
 <p>The lesser Green’s function is given by:</p>
 <div class="math notranslate nohighlight" id="equation-eq-lesser-gf">
-<span class="eqno">(2)<a class="headerlink" href="#equation-eq-lesser-gf" title="Permalink to this equation"></a></span>\[G^\lt(E) = G^r(E) [\Gamma_L f(E-\mu_L) + \Gamma_R f(E-\mu_R)] G^{r\dagger}(E)\]</div>
+<span class="eqno">(2)<a class="headerlink" href="#equation-eq-lesser-gf" title="Link to this equation"></a></span>\[G^\lt(E) = G^r(E) [\Gamma_L f(E-\mu_L) + \Gamma_R f(E-\mu_R)] G^{r\dagger}(E)\]</div>
 <p>where:</p>
 <ul class="simple">
 <li><p><span class="math notranslate nohighlight">\(G^\lt(E)\)</span> is the lesser Green’s function</p></li>
@@ -178,7 +174,7 @@
 </ol>
 </section>
 <section id="contact-models-and-testing">
-<h2>Contact Models and Testing<a class="headerlink" href="#contact-models-and-testing" title="Permalink to this heading"></a></h2>
+<h2>Contact Models and Testing<a class="headerlink" href="#contact-models-and-testing" title="Link to this heading"></a></h2>
 <p>The package includes several contact models:</p>
 <ol class="arabic simple">
 <li><p><strong>Bethe Lattice</strong> (<cite>surfGBethe.py</cite>)</p>
@@ -204,22 +200,12 @@
 </li>
 </ol>
 </section>
-<section id="utility-functions-mattools-py">
-<h2>Utility Functions (<cite>matTools.py</cite>)<a class="headerlink" href="#utility-functions-mattools-py" title="Permalink to this heading"></a></h2>
-<p>Helper functions for common tasks:</p>
-<ul class="simple">
-<li><p>Matrix operations and transformations</p></li>
-<li><p>Integration routines</p></li>
-<li><p>Density and transmission calculations</p></li>
-<li><p>File I/O and checkpointing</p></li>
-</ul>
-</section>
 <section id="next-steps">
-<h2>Next Steps<a class="headerlink" href="#next-steps" title="Permalink to this heading"></a></h2>
+<h2>Next Steps<a class="headerlink" href="#next-steps" title="Link to this heading"></a></h2>
 <p>Continue to <a class="reference internal" href="negf_dft.html"><span class="doc">Self-Consistent NEGF-DFT</span></a> for details on the self-consistent procedure.</p>
 </section>
 <section id="references">
-<h2>References<a class="headerlink" href="#references" title="Permalink to this heading"></a></h2>
+<h2>References<a class="headerlink" href="#references" title="Link to this heading"></a></h2>
 <div role="list" class="citation-list">
 <div class="citation" id="palacios2002" role="doc-biblioentry">
 <span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id1">Palacios2002</a><span class="fn-bracket">]</span></span>

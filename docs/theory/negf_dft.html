@@ -1,27 +1,24 @@
+
+
 <!DOCTYPE html>
-<html class="writer-html5" lang="en">
+<html class="writer-html5" lang="en" data-content_root="../">
 <head>
-  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Self-Consistent NEGF-DFT &mdash; gauNEGF  documentation</title>
-      <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
-      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css" />
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
 
   
-  <!--[if lt IE 9]>
-    <script src="../_static/js/html5shiv.min.js"></script>
-  <![endif]-->
-  
-        <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
-        <script src="../_static/jquery.js"></script>
-        <script src="../_static/underscore.js"></script>
-        <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
-        <script src="../_static/doctools.js"></script>
-        <script src="../_static/sphinx_highlight.js"></script>
-        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
-        <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true, "displayMath": [["$$", "$$"], ["\\[", "\\]"]]}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
-        <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9a2dae69"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+      <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+      <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true, "displayMath": [["$$", "$$"], ["\\[", "\\]"]]}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+      <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <script src="../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
@@ -131,12 +128,12 @@
            <div itemprop="articleBody">
              
   <section id="self-consistent-negf-dft">
-<h1>Self-Consistent NEGF-DFT<a class="headerlink" href="#self-consistent-negf-dft" title="Permalink to this heading"></a></h1>
+<h1>Self-Consistent NEGF-DFT<a class="headerlink" href="#self-consistent-negf-dft" title="Link to this heading"></a></h1>
 <p>This section details the self-consistent procedure combining NEGF and DFT calculations, including density matrix construction, convergence strategies, and practical considerations.</p>
 <section id="theory-overview">
-<h2>Theory Overview<a class="headerlink" href="#theory-overview" title="Permalink to this heading"></a></h2>
+<h2>Theory Overview<a class="headerlink" href="#theory-overview" title="Link to this heading"></a></h2>
 <section id="basic-procedure">
-<h3>Basic Procedure<a class="headerlink" href="#basic-procedure" title="Permalink to this heading"></a></h3>
+<h3>Basic Procedure<a class="headerlink" href="#basic-procedure" title="Link to this heading"></a></h3>
 <p>The self-consistent NEGF-DFT cycle:</p>
 <ol class="arabic simple">
 <li><p><strong>Initial Guess</strong></p>
@@ -165,7 +162,7 @@
 </section>
 </section>
 <section id="implementation-classes">
-<h2>Implementation Classes<a class="headerlink" href="#implementation-classes" title="Permalink to this heading"></a></h2>
+<h2>Implementation Classes<a class="headerlink" href="#implementation-classes" title="Link to this heading"></a></h2>
 <p>The gauNEGF package provides two main classes for NEGF-DFT calculations:</p>
 <ol class="arabic simple">
 <li><p><strong>NEGF Class</strong> (<code class="docutils literal notranslate"><span class="pre">scf.py</span></code>)</p>
@@ -182,31 +179,32 @@
 <li><p>Energy-dependent self-energies</p></li>
 <li><p>Temperature effects</p></li>
 <li><p>Advanced contact models (Bethe lattice <a class="reference internal" href="#jacob2011" id="id2"><span>[Jacob2011]</span></a>, 1D chain)</p></li>
-<li><p>More accurate results</p></li>
-<li><p>Required for realistic transport calculations</p></li>
+<li><p>Not approximate</p></li>
+<li><p>Longer calculations (10-100x compute)</p></li>
 </ul>
 </li>
 </ol>
 </section>
 <section id="mathematical-details">
-<h2>Mathematical Details<a class="headerlink" href="#mathematical-details" title="Permalink to this heading"></a></h2>
+<h2>Mathematical Details<a class="headerlink" href="#mathematical-details" title="Link to this heading"></a></h2>
 <section id="density-matrix">
-<h3>Density Matrix<a class="headerlink" href="#density-matrix" title="Permalink to this heading"></a></h3>
+<h3>Density Matrix<a class="headerlink" href="#density-matrix" title="Link to this heading"></a></h3>
 <p>The non-equilibrium density matrix has two components:</p>
 <div class="math notranslate nohighlight">
 \[P = P_{eq} + P_{neq}\]</div>
-<p>where:</p>
+<p>which are given by the definite integrals (assuming T=0):</p>
 <div class="math notranslate nohighlight">
-\[ \begin{align}\begin{aligned}P_{eq} = -\frac{1}{\pi} \Im \int_{-\infty}^{E_F-V/2} G^r(E) dE\\P_{neq} = -\frac{1}{2\pi} \int_{E_F-V/2}^{E_F+V/2} G^r(E)\Gamma(E)G^a(E) dE\end{aligned}\end{align} \]</div>
+\[ \begin{align}\begin{aligned}P_{eq} = -\frac{1}{\pi} \Im \int_{-\infty}^{E_F} G^r(E) dE\\P_{neq} = -\frac{1}{2\pi} \int_{E_F}^{E_F+V/2} G^r(E)\Gamma(E)G^a(E) dE
+        + -\frac{1}{2\pi} \int_{E_F}^{E_F-V/2} G^r(E)\Gamma(E)G^a(E) dE\end{aligned}\end{align} \]</div>
 <p>For the energy-independent case (NEGF), Γ(E) is constant. For the energy-dependent case (NEGFE), both G(E) and Γ(E) vary with energy.</p>
 </section>
 </section>
 <section id="implementation">
-<h2>Implementation<a class="headerlink" href="#implementation" title="Permalink to this heading"></a></h2>
+<h2>Implementation<a class="headerlink" href="#implementation" title="Link to this heading"></a></h2>
 <section id="integration-methods">
-<h3>Integration Methods<a class="headerlink" href="#integration-methods" title="Permalink to this heading"></a></h3>
+<h3>Integration Methods<a class="headerlink" href="#integration-methods" title="Link to this heading"></a></h3>
 <p>Energy-Independent Case (NEGF):</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">gauNEGF.scf</span> <span class="kn">import</span> <span class="n">NEGF</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.scf</span><span class="w"> </span><span class="kn">import</span> <span class="n">NEGF</span>
 
 <span class="c1"># Initialize with constant self-energies</span>
 <span class="n">negf</span> <span class="o">=</span> <span class="n">NEGF</span><span class="p">(</span><span class="s1">&#39;molecule&#39;</span><span class="p">,</span> <span class="n">basis</span><span class="o">=</span><span class="s1">&#39;lanl2dz&#39;</span><span class="p">)</span>
@@ -214,7 +212,7 @@
 </pre></div>
 </div>
 <p>Energy-Dependent Case (NEGFE):</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">gauNEGF.scfE</span> <span class="kn">import</span> <span class="n">NEGFE</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.scfE</span><span class="w"> </span><span class="kn">import</span> <span class="n">NEGFE</span>
 
 <span class="c1"># Initialize with energy-dependent self-energies</span>
 <span class="n">negf</span> <span class="o">=</span> <span class="n">NEGFE</span><span class="p">(</span><span class="s1">&#39;molecule&#39;</span><span class="p">,</span> <span class="n">basis</span><span class="o">=</span><span class="s1">&#39;lanl2dz&#39;</span><span class="p">)</span>
@@ -231,7 +229,7 @@
 </div>
 </section>
 <section id="convergence-acceleration">
-<h3>Convergence Acceleration<a class="headerlink" href="#convergence-acceleration" title="Permalink to this heading"></a></h3>
+<h3>Convergence Acceleration<a class="headerlink" href="#convergence-acceleration" title="Link to this heading"></a></h3>
 <p>Density mixing strategies (applicable to both NEGF and NEGFE):</p>
 <p>The Pulay mixing method <a class="reference internal" href="#pulay1980" id="id3"><span>[Pulay1980]</span></a> is a powerful convergence acceleration technique that uses information from previous iterations to predict the optimal density matrix. This method is particularly effective for systems with challenging convergence behavior.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Simple mixing</span>
@@ -243,7 +241,7 @@
 </div>
 </section>
 <section id="fermi-energy-search">
-<h3>Fermi Energy Search<a class="headerlink" href="#fermi-energy-search" title="Permalink to this heading"></a></h3>
+<h3>Fermi Energy Search<a class="headerlink" href="#fermi-energy-search" title="Link to this heading"></a></h3>
 <p>Methods for finding the Fermi energy (NEGFE only):</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Constant self-energy approximation</span>
 <span class="n">negf</span><span class="o">.</span><span class="n">setVoltage</span><span class="p">(</span><span class="n">qV</span><span class="p">,</span> <span class="n">fermiMethod</span><span class="o">=</span><span class="s1">&#39;predict&#39;</span><span class="p">)</span>
@@ -258,9 +256,9 @@
 </section>
 </section>
 <section id="practical-considerations">
-<h2>Practical Considerations<a class="headerlink" href="#practical-considerations" title="Permalink to this heading"></a></h2>
+<h2>Practical Considerations<a class="headerlink" href="#practical-considerations" title="Link to this heading"></a></h2>
 <section id="choosing-between-negf-and-negfe">
-<h3>Choosing Between NEGF and NEGFE<a class="headerlink" href="#choosing-between-negf-and-negfe" title="Permalink to this heading"></a></h3>
+<h3>Choosing Between NEGF and NEGFE<a class="headerlink" href="#choosing-between-negf-and-negfe" title="Link to this heading"></a></h3>
 <p>Guidelines for selecting the appropriate class:</p>
 <ol class="arabic simple">
 <li><p><strong>Use NEGF when:</strong></p>
@@ -282,7 +280,7 @@
 </ol>
 </section>
 <section id="convergence-issues">
-<h3>Convergence Issues<a class="headerlink" href="#convergence-issues" title="Permalink to this heading"></a></h3>
+<h3>Convergence Issues<a class="headerlink" href="#convergence-issues" title="Link to this heading"></a></h3>
 <p>Common problems and solutions:</p>
 <ol class="arabic simple">
 <li><p><strong>Charge Oscillations</strong></p>
@@ -309,39 +307,40 @@
 </section>
 </section>
 <section id="example-workflows">
-<h2>Example Workflows<a class="headerlink" href="#example-workflows" title="Permalink to this heading"></a></h2>
+<h2>Example Workflows<a class="headerlink" href="#example-workflows" title="Link to this heading"></a></h2>
 <section id="basic-negf-calculation">
-<h3>Basic NEGF Calculation<a class="headerlink" href="#basic-negf-calculation" title="Permalink to this heading"></a></h3>
+<h3>Basic NEGF Calculation<a class="headerlink" href="#basic-negf-calculation" title="Link to this heading"></a></h3>
 <p>Quick test with energy-independent self-energies:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">gauNEGF.scf</span> <span class="kn">import</span> <span class="n">NEGF</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.scfE</span><span class="w"> </span><span class="kn">import</span> <span class="n">NEGFE</span>
 
 <span class="c1"># Initialize system</span>
-<span class="n">negf</span> <span class="o">=</span> <span class="n">NEGF</span><span class="p">(</span><span class="s1">&#39;molecule&#39;</span><span class="p">,</span> <span class="n">basis</span><span class="o">=</span><span class="s1">&#39;lanl2dz&#39;</span><span class="p">)</span>
-<span class="n">negf</span><span class="o">.</span><span class="n">setContactBethe</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span><span class="mi">2</span><span class="p">,</span><span class="mi">3</span><span class="p">],</span> <span class="p">[</span><span class="mi">4</span><span class="p">,</span><span class="mi">5</span><span class="p">,</span><span class="mi">6</span><span class="p">])</span>
+<span class="n">negf</span> <span class="o">=</span> <span class="n">NEGF</span><span class="p">(</span><span class="s1">&#39;molContact&#39;</span><span class="p">,</span> <span class="n">basis</span><span class="o">=</span><span class="s1">&#39;lanl2dz&#39;</span><span class="p">)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setContacts</span><span class="p">([</span><span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">sig</span><span class="o">=-</span><span class="mf">0.05</span><span class="n">j</span><span class="p">)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setVoltage</span><span class="p">(</span><span class="mf">0.0</span><span class="p">)</span>
 
 <span class="c1"># Run SCF</span>
-<span class="n">negf</span><span class="o">.</span><span class="n">SCF</span><span class="p">(</span><span class="n">conv</span><span class="o">=</span><span class="mf">1e-4</span><span class="p">,</span> <span class="n">damping</span><span class="o">=</span><span class="mf">0.05</span><span class="p">)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">SCF</span><span class="p">(</span><span class="n">conv</span><span class="o">=</span><span class="mf">1e-4</span><span class="p">,</span> <span class="n">damping</span><span class="o">=</span><span class="mf">0.02</span><span class="p">)</span>
 </pre></div>
 </div>
 </section>
 <section id="production-negfe-calculation">
-<h3>Production NEGFE Calculation<a class="headerlink" href="#production-negfe-calculation" title="Permalink to this heading"></a></h3>
+<h3>Production NEGFE Calculation<a class="headerlink" href="#production-negfe-calculation" title="Link to this heading"></a></h3>
 <p>Accurate calculation with temperature effects:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">gauNEGF.scfE</span> <span class="kn">import</span> <span class="n">NEGFE</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.scfE</span><span class="w"> </span><span class="kn">import</span> <span class="n">NEGFE</span>
 
 <span class="c1"># Initialize system</span>
 <span class="n">negf</span> <span class="o">=</span> <span class="n">NEGFE</span><span class="p">(</span><span class="s1">&#39;molecule&#39;</span><span class="p">,</span> <span class="n">basis</span><span class="o">=</span><span class="s1">&#39;lanl2dz&#39;</span><span class="p">)</span>
-<span class="n">negf</span><span class="o">.</span><span class="n">setContactBethe</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span><span class="mi">2</span><span class="p">,</span><span class="mi">3</span><span class="p">],</span> <span class="p">[</span><span class="mi">4</span><span class="p">,</span><span class="mi">5</span><span class="p">,</span><span class="mi">6</span><span class="p">],</span> <span class="n">latFile</span><span class="o">=</span><span class="s1">&#39;Au&#39;</span><span class="p">,</span> <span class="n">T</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setContactBethe</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span><span class="mi">2</span><span class="p">,</span><span class="mi">3</span><span class="p">],</span> <span class="p">[</span><span class="mi">4</span><span class="p">,</span><span class="mi">5</span><span class="p">,</span><span class="mi">6</span><span class="p">],</span> <span class="n">latFile</span><span class="o">=</span><span class="s1">&#39;Au2&#39;</span><span class="p">,</span> <span class="n">T</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>
 
 <span class="c1"># Set voltage and run SCF</span>
-<span class="n">negf</span><span class="o">.</span><span class="n">setVoltage</span><span class="p">(</span><span class="mf">0.1</span><span class="p">,</span> <span class="n">fermiMethod</span><span class="o">=</span><span class="s1">&#39;secant&#39;</span><span class="p">)</span>
-<span class="n">negf</span><span class="o">.</span><span class="n">SCF</span><span class="p">(</span><span class="n">conv</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">,</span> <span class="n">damping</span><span class="o">=</span><span class="mf">0.02</span><span class="p">)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setVoltage</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">fermiMethod</span><span class="o">=</span><span class="s1">&#39;predict&#39;</span><span class="p">)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">SCF</span><span class="p">(</span><span class="n">conv</span><span class="o">=</span><span class="mf">1e-4</span><span class="p">,</span> <span class="n">damping</span><span class="o">=</span><span class="mf">0.02</span><span class="p">)</span>
 </pre></div>
 </div>
 </section>
 </section>
 <section id="next-steps">
-<h2>Next Steps<a class="headerlink" href="#next-steps" title="Permalink to this heading"></a></h2>
+<h2>Next Steps<a class="headerlink" href="#next-steps" title="Link to this heading"></a></h2>
 <p>Continue to <a class="reference internal" href="transport.html"><span class="doc">Transport Calculations</span></a> for details on calculating transport properties.</p>
 <div role="list" class="citation-list">
 <div class="citation" id="damle2002" role="doc-biblioentry">

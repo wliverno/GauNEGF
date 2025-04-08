@@ -48,8 +48,8 @@ The gauNEGF package provides two main classes for NEGF-DFT calculations:
    * Energy-dependent self-energies
    * Temperature effects
    * Advanced contact models (Bethe lattice [Jacob2011]_, 1D chain)
-   * More accurate results
-   * Required for realistic transport calculations
+   * Not approximate
+   * Longer calculations (10-100x compute)
 
 Mathematical Details
 -----------------
@@ -62,13 +62,14 @@ The non-equilibrium density matrix has two components:
 
    P = P_{eq} + P_{neq}
 
-where:
+which are given by the definite integrals (assuming T=0):
 
 .. math::
 
-   P_{eq} = -\frac{1}{\pi} \Im \int_{-\infty}^{E_F-V/2} G^r(E) dE
+   P_{eq} = -\frac{1}{\pi} \Im \int_{-\infty}^{E_F} G^r(E) dE
 
-   P_{neq} = -\frac{1}{2\pi} \int_{E_F-V/2}^{E_F+V/2} G^r(E)\Gamma(E)G^a(E) dE
+   P_{neq} = -\frac{1}{2\pi} \int_{E_F}^{E_F+V/2} G^r(E)\Gamma(E)G^a(E) dE
+           + -\frac{1}{2\pi} \int_{E_F}^{E_F-V/2} G^r(E)\Gamma(E)G^a(E) dE
 
 For the energy-independent case (NEGF), Γ(E) is constant. For the energy-dependent case (NEGFE), both G(E) and Γ(E) vary with energy.
 
@@ -187,14 +188,15 @@ Quick test with energy-independent self-energies:
 
 .. code-block:: python
 
-    from gauNEGF.scf import NEGF
+    from gauNEGF.scfE import NEGFE
     
     # Initialize system
-    negf = NEGF('molecule', basis='lanl2dz')
-    negf.setContactBethe([1,2,3], [4,5,6])
+    negf = NEGF('molContact', basis='lanl2dz')
+    negf.setContacts([1], [2], sig=-0.05j)
+    negf.setVoltage(0.0)
     
     # Run SCF
-    negf.SCF(conv=1e-4, damping=0.05)
+    negf.SCF(conv=1e-4, damping=0.02)
 
 Production NEGFE Calculation
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -206,11 +208,11 @@ Accurate calculation with temperature effects:
     
     # Initialize system
     negf = NEGFE('molecule', basis='lanl2dz')
-    negf.setContactBethe([1,2,3], [4,5,6], latFile='Au', T=300)
+    negf.setContactBethe([1,2,3], [4,5,6], latFile='Au2', T=300)
     
     # Set voltage and run SCF
-    negf.setVoltage(0.1, fermiMethod='secant')
-    negf.SCF(conv=1e-6, damping=0.02)
+    negf.setVoltage(0.0, fermiMethod='predict')
+    negf.SCF(conv=1e-4, damping=0.02)
 
 Next Steps
 ---------

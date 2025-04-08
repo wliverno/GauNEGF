@@ -29,7 +29,8 @@ Basic transmission calculation:
     E = np.linspace(-5, 5, 1000)
     
     # Calculate transmission
-    T = cohTrans(E, negf.F, negf.S, sig1, sig2)
+    F_eV = negf.F*27.211386 #Convert from hartrees to eV
+    T = cohTrans(E, F_eV, negf.S, sig1, sig2)
 
 Current Calculations
 -----------------
@@ -53,8 +54,9 @@ Current calculation at finite bias:
     from gauNEGF.transport import quickCurrent
     
     # Calculate current
+    F_eV = negf.F*27.211386 #Convert from hartrees to eV
     I = quickCurrent(
-        negf.F, negf.S,
+        F_eV, negf.S,
         sig1, sig2,
         fermi=negf.fermi,
         qV=0.1
@@ -74,8 +76,9 @@ Generate current-voltage curves:
     for v in V:
         negf.setVoltage(v)
         negf.SCF()
+        F_eV = negf.F*27.211386 #Convert from hartrees to eV
         I.append(quickCurrent(
-            negf.F, negf.S,
+            F_eV, negf.S,
             sig1, sig2,
             fermi=negf.fermi,
             qV=v
@@ -170,7 +173,8 @@ Example of a comprehensive transport analysis:
 
     # Initialize system
     negf = NEGF('molecule', basis='lanl2dz')
-    negf.setContactBethe([1,2,3], [6,7,8], 'Au')
+    negf.setContactBethe([1,2,3], [6,7,8], 'Au2')
+    har_to_eV = 27.211386
 
     # Run NEGF-DFT to get quilibrium density
     negf.setVoltage(0.0)
@@ -178,10 +182,10 @@ Example of a comprehensive transport analysis:
     
     # Calculate transmission
     E = np.linspace(-5, 5, 1000)
-    T = cohTransE(E+negf.fermi, negf.F, negf.S, negf.g)
+    T = cohTransE(E+negf.fermi, negf.F*har_to_eV, negf.S, negf.g)
     
     # Calculate DOS
-    dos, _ = DOSE(E+negf.fermi, negf.F, negf.S, negf.g)
+    dos, _ = DOSE(E+negf.fermi, negf.F*har_to_eV, negf.S, negf.g)
     
     # Generate IV curve
     V = np.linspace(0, 2, 21)
@@ -190,7 +194,7 @@ Example of a comprehensive transport analysis:
         negf.setVoltage(v)
         negf.SCF()
         I.append(quickCurrent(
-            negf.F, negf.S,
+            negf.F*har_to_eV, negf.S,
             sig1, sig2,
             fermi=negf.fermi,
             qV=v

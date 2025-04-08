@@ -11,11 +11,11 @@ Getting Started
 
 To get started with gauNEGF:
 
-1. Install the package using the install script, which uses pip:
+1. Install the package using pip:
 
    .. code-block:: bash
 
-      ./install.sh
+      pip install -e .
 
 2. Check out the :doc:`examples/index` for practical tutorials
 3. Read the :doc:`theory/index` for theoretical background
