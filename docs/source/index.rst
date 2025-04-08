@@ -58,7 +58,7 @@ Documentation Contents
 Contributing
 ===========
 
-We welcome contributions! Please see our GitHub repository for guidelines.
+We welcome contributions! Please see our `Github Repository <https://github.com/wliverno/GauNEGF>`_ for guidelines.
 
 Indices and Tables
 ================

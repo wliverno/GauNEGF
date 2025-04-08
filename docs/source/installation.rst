@@ -5,7 +5,8 @@ This guide covers installation of gauNEGF and its dependencies.
 
 Prerequisites
 -----------
-
+* **Gaussian Development Version**
+* **gauopen v2 Python Interface**
 * Python 3.7 or higher
 * Gaussian 16 or newer
 * NumPy and SciPy
