@@ -40,7 +40,7 @@ Contact Models
 1. **Energy-Independent**
 
    .. code-block:: python
-   
+       negf = scf.NEGF('mol')
        # Start with simple diagonal self-energies
        negf.setSigma([1], [2], -0.05j)
 
@@ -48,17 +48,19 @@ Contact Models
 
    .. code-block:: python
    
-       # Use realistic metallic contacts
-       g = surfGB(F, S, contacts=[1,2])
-       negf.setSigma([1], [2], g)
+       # Use realistic metallic contacts with extended system
+       negf = scfE.NEGFE('molContacts')
+       # Assuming triangular contacts on 1,2,3,4 and 5,6,7,8
+       inds = setContactBethe([[1,2,3],[6,7,8]], latFile='Au2', eta=1e-5, T=300)
 
 3. **1D Chain**
 
    .. code-block:: python
    
        # For molecular wire systems
-       g = surfG(F, S, taus, staus)
-       negf.setSigma([1], [2], g)
+       negf = scfE.NEGFE('molContacts')
+       # Assuming repeating infinite chain extending atoms [1,2] and [3,4]
+       inds = setContact1D([[2],[3]], [[1],[4]], eta=1e-5, T=300)
 
 Convergence Strategies
 -------------------
@@ -71,10 +73,10 @@ SCF Convergence
    .. code-block:: python
    
        # Start with conservative mixing
-       negf.runSCF(mix=0.005)
+       negf.SCF(damping=0.005, maxcycles=200)
        
        # Increase if convergence is slow
-       negf.runSCF(mix=0.02)
+       negf.runSCF(mix=0.02, maxcycles=100)
        
        # Values over 0.05 will be unstable!
 
@@ -85,16 +87,21 @@ SCF Convergence
        # Pulay mixing as implemented works well
        # Increase nPulay if you have cyclical convergence values
        negf = NEGF(fn='system', nPulay=9)
+       # Note: increasing nPulay will have a similar effect as
+       # lowering mixing in the SCF cycle
 
-3. **Convergence Criteria**
+3. **Change Initial Wavefunction Guess**
 
    .. code-block:: python
-   
-       # Tight convergence for production
-       negf.runSCF(conv=1e-4, damping=0.02, maxcycles=100)
+        
+       negf.setDen(density_guess)
+       # Typical values for convergence, don't read checkpoint
+       negf.SCF(conv=1e-4, damping=0.02, maxcycles=300, checkpoint=False)
 
 Integration Parameters
 ~~~~~~~~~~~~~~~~~~
+
+Note that integration is only used by the NEGFE() class:
 
 1. **Automatic Integration Limits***
 
@@ -120,8 +127,9 @@ Integration Parameters
 
    .. code-block:: python
    
-       # Include finite temperature (300 Kelvin)
-       negf.setSigma([1], [2], T=300)
+       # Include finite temperature (300 Kelvin) 
+       # even for energy-independent contacts
+       negf.setSigma([1], [2], sig=-0.05j, T=300)
 
 Troubleshooting Guide
 ------------------

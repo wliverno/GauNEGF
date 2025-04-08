@@ -3,7 +3,11 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+***Note: This package is currently in testing and uses the Gaussian Development Version and Gaussian Python Interface, both of which are not publicly available. Please check the [Gaussian website](https://gaussian.com/news/) for updates on the forthcoming releases.***
+
 A Python package for performing Non-Equilibrium Green's Function (NEGF) calculations integrated with Gaussian quantum chemistry software.
+
+Documentation: [https://wliverno.github.io/GauNEGF/](https://wliverno.github.io/GauNEGF/)
 
 This package builds upon the foundation laid by the open-source ANT.Gaussian package. The Bethe lattice implementation and numerical quadrature methods are adapted from ANT.Gaussian's Fortran implementation (Palacios et al., 2002; Jacob & Palacios, 2011).
 
@@ -26,8 +30,6 @@ Note: This package requires a licensed copy of Gaussian quantum chemistry softwa
 ## Requirements
 
 ### Required Software
-- Python 3.7 or higher
-- Gaussian quantum chemistry package (licensed copy required)
 - gauopen 3.0.0 Python interface for Gaussian
 
 ### Python Dependencies
@@ -70,7 +72,7 @@ I = transport.quickCurrent(negf.F, negf.S, negf.sig1, negf.sig2, negf.fermi, neg
 
 ## Documentation
 
-See the `DOCUMENTATION.md` file for detailed usage instructions and API documentation.
+Full API documentation with examples has been compiled and deployed with Github Pages: [https://wliverno.github.io/GauNEGF/](https://wliverno.github.io/GauNEGF/)
 
 For usage examples, see the files in the `examples/` directory.
 

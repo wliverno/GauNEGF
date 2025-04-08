@@ -1,25 +1,22 @@
+
+
 <!DOCTYPE html>
-<html class="writer-html5" lang="en">
+<html class="writer-html5" lang="en" data-content_root="../">
 <head>
-  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Advanced Examples &mdash; gauNEGF  documentation</title>
-      <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
-      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css" />
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
 
   
-  <!--[if lt IE 9]>
-    <script src="../_static/js/html5shiv.min.js"></script>
-  <![endif]-->
-  
-        <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
-        <script src="../_static/jquery.js"></script>
-        <script src="../_static/underscore.js"></script>
-        <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
-        <script src="../_static/doctools.js"></script>
-        <script src="../_static/sphinx_highlight.js"></script>
-        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9a2dae69"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+      <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
     <script src="../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" /> 
@@ -90,13 +87,13 @@
            <div itemprop="articleBody">
              
   <section id="advanced-examples">
-<h1>Advanced Examples<a class="headerlink" href="#advanced-examples" title="Permalink to this heading"></a></h1>
+<h1>Advanced Examples<a class="headerlink" href="#advanced-examples" title="Link to this heading"></a></h1>
 <p>This section provides advanced examples demonstrating specialized features of gauNEGF.</p>
 <section id="spin-transport">
-<h2>Spin Transport<a class="headerlink" href="#spin-transport" title="Permalink to this heading"></a></h2>
+<h2>Spin Transport<a class="headerlink" href="#spin-transport" title="Link to this heading"></a></h2>
 <p>Example of spin-dependent transport:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">gauNEGF.scf</span> <span class="kn">import</span> <span class="n">NEGF</span>
-<span class="kn">from</span> <span class="nn">gauNEGF.transport</span> <span class="kn">import</span> <span class="n">cohTransSpin</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.scf</span><span class="w"> </span><span class="kn">import</span> <span class="n">NEGF</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">cohTransSpin</span>
 
 <span class="c1"># Initialize with unrestricted calculation</span>
 <span class="n">negf</span> <span class="o">=</span> <span class="n">NEGF</span><span class="p">(</span>
@@ -127,7 +124,7 @@
 </div>
 </section>
 <section id="temperature-effects">
-<h2>Temperature Effects<a class="headerlink" href="#temperature-effects" title="Permalink to this heading"></a></h2>
+<h2>Temperature Effects<a class="headerlink" href="#temperature-effects" title="Link to this heading"></a></h2>
 <p>Including finite temperature:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Set basic temperature-dependent contact</span>
 <span class="n">negf</span><span class="o">.</span><span class="n">setSigma</span><span class="p">(</span>
@@ -146,7 +143,7 @@
 </div>
 </section>
 <section id="energy-dependent-contacts">
-<h2>Energy-Dependent Contacts<a class="headerlink" href="#energy-dependent-contacts" title="Permalink to this heading"></a></h2>
+<h2>Energy-Dependent Contacts<a class="headerlink" href="#energy-dependent-contacts" title="Link to this heading"></a></h2>
 <p>Using realistic contact models:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Bethe lattice contacts at atoms {1,2,3} and {6,7,8}</span>
 <span class="n">negf</span><span class="o">.</span><span class="n">setContactBethe</span><span class="p">(</span>
@@ -166,9 +163,9 @@
 </div>
 </section>
 <section id="parallel-processing">
-<h2>Parallel Processing<a class="headerlink" href="#parallel-processing" title="Permalink to this heading"></a></h2>
+<h2>Parallel Processing<a class="headerlink" href="#parallel-processing" title="Link to this heading"></a></h2>
 <p>If you know what you are doing and want to parallelize <em>each</em> integration point then you can manually set this in the densityComplex function:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">gauNEGF.density</span> <span class="kn">import</span> <span class="n">densityComplex</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.density</span><span class="w"> </span><span class="kn">import</span> <span class="n">densityComplex</span>
 
 <span class="c1"># Parallel density calculation</span>
 <span class="n">P</span> <span class="o">=</span> <span class="n">densityComplex</span><span class="p">(</span>
@@ -184,11 +181,11 @@
 <p>Note this is usually slower than the default numpy parallelization. <em>Only proceed if you know what you are doing</em></p>
 </section>
 <section id="custom-analysis">
-<h2>Custom Analysis<a class="headerlink" href="#custom-analysis" title="Permalink to this heading"></a></h2>
+<h2>Custom Analysis<a class="headerlink" href="#custom-analysis" title="Link to this heading"></a></h2>
 <p>Advanced analysis tools:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
-<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
-<span class="kn">from</span> <span class="nn">gauNEGF.transport</span> <span class="kn">import</span> <span class="n">DOS</span><span class="p">,</span> <span class="n">cohTransE</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">DOS</span><span class="p">,</span> <span class="n">cohTransE</span>
 
 <span class="c1">#... run energy dependent NEGFE() calculation</span>
 
@@ -215,7 +212,7 @@
 </div>
 </section>
 <section id="next-steps">
-<h2>Next Steps<a class="headerlink" href="#next-steps" title="Permalink to this heading"></a></h2>
+<h2>Next Steps<a class="headerlink" href="#next-steps" title="Link to this heading"></a></h2>
 <ol class="arabic simple">
 <li><p>Develop custom contact models</p></li>
 <li><p>Implement new analysis tools</p></li>

@@ -1,28 +1,25 @@
+
+
 <!DOCTYPE html>
-<html class="writer-html5" lang="en">
+<html class="writer-html5" lang="en" data-content_root="../">
 <head>
-  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Integration Demo &mdash; gauNEGF  documentation</title>
-      <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
-      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css" />
-      <link rel="stylesheet" type="text/css" href="../_static/nbsphinx-code-cells.css" />
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../_static/nbsphinx-code-cells.css?v=2aa19091" />
 
   
-  <!--[if lt IE 9]>
-    <script src="../_static/js/html5shiv.min.js"></script>
-  <![endif]-->
-  
-        <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
-        <script src="../_static/jquery.js"></script>
-        <script src="../_static/underscore.js"></script>
-        <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
-        <script src="../_static/doctools.js"></script>
-        <script src="../_static/sphinx_highlight.js"></script>
-        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
-        <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true, "displayMath": [["$$", "$$"], ["\\[", "\\]"]]}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
-        <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9a2dae69"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+      <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+      <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true, "displayMath": [["$$", "$$"], ["\\[", "\\]"]]}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+      <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <script src="../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" /> 
@@ -93,26 +90,26 @@
            <div itemprop="articleBody">
              
   <section id="Integration-Demo">
-<h1>Integration Demo<a class="headerlink" href="#Integration-Demo" title="Permalink to this heading"></a></h1>
+<h1>Integration Demo<a class="headerlink" href="#Integration-Demo" title="Link to this heading"></a></h1>
 <p>Following is a step-by-step guide comparing the two integration approaches use in the GaussianNEGF package. All steps have been tested on a 20 core system with each step running in seconds except for the final IV step, which can take minutes.</p>
 <section id="System-Setup">
-<h2>System Setup<a class="headerlink" href="#System-Setup" title="Permalink to this heading"></a></h2>
+<h2>System Setup<a class="headerlink" href="#System-Setup" title="Link to this heading"></a></h2>
 <p>We will be working with an ethane molecule: <img alt="drawing" class="no-scaled-link" src="../_images/ethane.png" style="width: 200px;" /></p>
 <p><strong>Basis set:</strong> 6-31g(d,p) - C atoms will have 15 basis functions and H will have 5</p>
 <p><strong>Functional:</strong> B3LYP Hydbrid functional</p>
 <p>For this system we will use a diagonal self energy matrix, with <span class="math notranslate nohighlight">\(\Gamma_i=0.1\)</span> (<span class="math notranslate nohighlight">\(\Sigma_i = -0.05j\)</span>). Because this is an energy independent self-energy, we can first test the system using the <code class="docutils literal notranslate"><span class="pre">NEGF()</span></code> type object from the <code class="docutils literal notranslate"><span class="pre">scf.py</span></code> file.</p>
 </section>
 <section id="Energy-Independent-Approach">
-<h2>Energy Independent Approach<a class="headerlink" href="#Energy-Independent-Approach" title="Permalink to this heading"></a></h2>
+<h2>Energy Independent Approach<a class="headerlink" href="#Energy-Independent-Approach" title="Link to this heading"></a></h2>
 <p>To set up the system lets first import the packages and initialize the ethane system:</p>
 <div class="nbinput docutils container">
 <div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[1]:
 </pre></div>
 </div>
-<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">gauNEGF.scf</span> <span class="kn">import</span> <span class="n">NEGF</span>
-<span class="kn">from</span> <span class="nn">gauNEGF.density</span> <span class="kn">import</span> <span class="o">*</span>
-<span class="kn">from</span> <span class="nn">gauNEGF.surfGBethe</span> <span class="kn">import</span> <span class="o">*</span>
-<span class="kn">from</span> <span class="nn">matplotlib</span> <span class="kn">import</span> <span class="n">pyplot</span> <span class="k">as</span> <span class="n">plt</span>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.scf</span><span class="w"> </span><span class="kn">import</span> <span class="n">NEGF</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.density</span><span class="w"> </span><span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.surfGBethe</span><span class="w"> </span><span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">matplotlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">pyplot</span> <span class="k">as</span> <span class="n">plt</span>
 
 <span class="n">negf</span> <span class="o">=</span> <span class="n">NEGF</span><span class="p">(</span><span class="n">fn</span><span class="o">=</span><span class="s1">&#39;ethane&#39;</span><span class="p">,</span> <span class="n">func</span><span class="o">=</span><span class="s1">&#39;b3lyp&#39;</span><span class="p">,</span> <span class="n">basis</span><span class="o">=</span><span class="s1">&#39;6-31g(d,p)&#39;</span><span class="p">,</span> <span class="n">spin</span><span class="o">=</span><span class="s1">&#39;r&#39;</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="n">negf</span><span class="o">.</span><span class="n">bar</span><span class="o">.</span><span class="n">ian</span><span class="p">)</span>
@@ -396,13 +393,13 @@ Text(0.5, 1.0, &#39;$\\mathbb{Im}\\left[\\rho_{ii}\\right]$&#39;)
 numerical integration methods that allow for an energy dependent <span class="math notranslate nohighlight">\(\hat{\Gamma}_j\)</span>.</p>
 </section>
 <section id="ENERGY-DEPENDENT-APPROACH">
-<h2>ENERGY DEPENDENT APPROACH<a class="headerlink" href="#ENERGY-DEPENDENT-APPROACH" title="Permalink to this heading"></a></h2>
+<h2>ENERGY DEPENDENT APPROACH<a class="headerlink" href="#ENERGY-DEPENDENT-APPROACH" title="Link to this heading"></a></h2>
 <p>First, let us import the energy dependent packages and set up the same system:</p>
 <div class="nbinput docutils container">
 <div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[6]:
 </pre></div>
 </div>
-<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">gauNEGF.scfE</span> <span class="kn">import</span> <span class="n">NEGFE</span>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.scfE</span><span class="w"> </span><span class="kn">import</span> <span class="n">NEGFE</span>
 
 <span class="n">negf2</span> <span class="o">=</span> <span class="n">NEGFE</span><span class="p">(</span><span class="n">fn</span><span class="o">=</span><span class="s1">&#39;ethane&#39;</span><span class="p">,</span> <span class="n">func</span><span class="o">=</span><span class="s1">&#39;b3lyp&#39;</span><span class="p">,</span> <span class="n">basis</span><span class="o">=</span><span class="s1">&#39;6-31g(d,p)&#39;</span><span class="p">,</span> <span class="n">spin</span><span class="o">=</span><span class="s1">&#39;r&#39;</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="n">negf2</span><span class="o">.</span><span class="n">bar</span><span class="o">.</span><span class="n">ian</span><span class="p">)</span>
@@ -1790,7 +1787,7 @@ INTEGRATION LIMITS SET!
 <p>Note that this assumes that temperature is zero, as used in the energy-independent case.</p>
 </section>
 <section id="Comparison-of-Approaches">
-<h2>Comparison of Approaches<a class="headerlink" href="#Comparison-of-Approaches" title="Permalink to this heading"></a></h2>
+<h2>Comparison of Approaches<a class="headerlink" href="#Comparison-of-Approaches" title="Link to this heading"></a></h2>
 <p>We can now compare the generated density matrices side by side:</p>
 <div class="nbinput docutils container">
 <div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[11]:
@@ -1828,7 +1825,7 @@ INTEGRATION LIMITS SET!
 <div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[12]:
 </pre></div>
 </div>
-<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">gauNEGF.transport</span> <span class="kn">import</span> <span class="o">*</span>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.transport</span><span class="w"> </span><span class="kn">import</span> <span class="o">*</span>
 
 <span class="n">Elist</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="mi">20</span><span class="p">,</span> <span class="mi">20</span><span class="p">,</span> <span class="mi">1000</span><span class="p">)</span>
 <span class="n">DOS1</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">DOS</span><span class="p">(</span><span class="n">Elist</span><span class="o">+</span><span class="n">negf</span><span class="o">.</span><span class="n">fermi</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">sigma1</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">sigma2</span><span class="p">)</span>
@@ -2872,7 +2869,7 @@ Text(0, 0.5, &#39;Density of States&#39;)
 </div>
 </section>
 <section id="IV-Characteristic-Comparison">
-<h2>IV Characteristic Comparison<a class="headerlink" href="#IV-Characteristic-Comparison" title="Permalink to this heading"></a></h2>
+<h2>IV Characteristic Comparison<a class="headerlink" href="#IV-Characteristic-Comparison" title="Link to this heading"></a></h2>
 <p>We can now use NEGF to sweep the voltage and calculate current across the molecule. This requires using the NEGF-DFT solver at each voltage point to calculate the transmission and then integrating to get the current. For <span class="math notranslate nohighlight">\(T=0 K\)</span> the fermi function becomes a step function and the Landauer formula simplifies to:</p>
 <div class="math notranslate nohighlight">
 \[I(V)= \frac{q^2}{h}\int_{\mu - \frac{qV}{2}}^{\mu + \frac{qV}{2}} T(E, V) dE\]</div>

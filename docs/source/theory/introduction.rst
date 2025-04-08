@@ -98,15 +98,6 @@ The package includes several contact models:
    * Adding Temperature dependence
    * Future development: Energy-dependent decoherence
 
-Utility Functions (`matTools.py`)
---------------
-
-Helper functions for common tasks:
-
-* Matrix operations and transformations
-* Integration routines
-* Density and transmission calculations
-* File I/O and checkpointing
 
 Next Steps
 --------

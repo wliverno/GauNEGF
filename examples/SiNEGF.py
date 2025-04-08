@@ -15,7 +15,7 @@ from gauNEGF.surfG1D import surfG
 from gauNEGF.density import *
 from gauNEGF.transport import *
 
-hartree_to_eV = 27.211386
+har_to_eV = 27.211386
 
 # PART 1 - TRANSPORT WITHOUT SCF
 # Use a long chain (12 Si atoms) to approximate an infinite chain
@@ -26,7 +26,7 @@ bar.update(model='b3lyp', basis='lanl2dz', toutput='out.log',dofock="scf")
 # Collect matrices from Gaussian, generate orthogonal H matrix
 S = np.array(bar.matlist['OVERLAP'].expand())
 P = np.array(bar.matlist['ALPHA SCF DENSITY MATRIX'].expand())
-F = np.array(bar.matlist['ALPHA FOCK MATRIX'].expand())*hartree_to_eV
+F = np.array(bar.matlist['ALPHA FOCK MATRIX'].expand())*har_to_eV
 X = np.array(fractional_matrix_power(S, -0.5))
 H = np.real(X@F@X)
 
@@ -66,7 +66,7 @@ negf.setIntegralLimits(512, 128, Emin=-24)
 negf.SCF(1e-2, 0.005, 200)
 negf.saveMAT('SiNanowire_ESCF.mat')
 
-Torth = cohTransE(Elist+negf.fermi, negf.F, negf.S, negf.g)
+Torth = cohTransE(Elist+negf.fermi, negf.F*har_to_eV, negf.S, negf.g)
 io.savemat('SiNanowire_TESCF.mat', {'Elist':Elist, 'fermi':negf.fermi, 'T':T})
 
 
@@ -74,6 +74,6 @@ inds = negf.setContact1D([[1],[2]], T=300, eta=1e-4)
 negf.SCF(1e-3, 0.002, 200)
 negf.saveMAT('SiNanowire_ESCF_300K.mat')
 
-Torth = cohTransE(Elist+negf.fermi, negf.F, negf.S, negf.g)
+Torth = cohTransE(Elist+negf.fermi, negf.F*har_to_eV, negf.S, negf.g)
 io.savemat('SiNanowire_TESCF_300K.mat', {'Elist':Elist, 'fermi':negf.fermi, 'T':T})
 

@@ -37,6 +37,8 @@ Create a Python script ``ethane.py``:
     import matplotlib.pyplot as plt
     from gauNEGF.transport import cohTrans, quickCurrent
     
+    har_to_eV = 27.211386 # conversion from hartrees to eV
+
     # Initialize calculator
     negf = NEGF(
         fn='ethane',          # Input file name
@@ -55,7 +57,7 @@ Create a Python script ``ethane.py``:
     # Calculate transmission
     E = np.linspace(-5, 5, 1000)
     sig1, sig2 = negf.getSigma()
-    T = cohTrans(E, negf.F, negf.S, sig1, sig2)
+    T = cohTrans(E, negf.F*har_to_eV, negf.S, sig1, sig2)
     
     # Plot transmission
     plt.figure()
@@ -81,7 +83,7 @@ Add voltage calculations to your script:
         negf.setVoltage(v)
         negf.SCF()
         I.append(quickCurrent(
-            negf.F, negf.S,
+            negf.F*har_to_eV, negf.S,
             sig1, sig2
             fermi=negf.fermi,
             qV=v

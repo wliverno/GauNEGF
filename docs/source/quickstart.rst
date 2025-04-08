@@ -64,7 +64,8 @@ Calculate and plot transmission:
     
     # Calculate transmission
     sig1, sig2 = negf.getSigma()
-    T = cohTrans(Elist, negf.F, negf.S, sig1, sig2)
+    F_eV = negf.F*27.211386
+    T = cohTrans(Elist, F_eV, negf.S, sig1, sig2)
     
     # Plot
     plt.figure()
@@ -87,10 +88,11 @@ Calculate current at different voltages:
     
     # Calculate current
     I = []
+    F_eV = negf.F*27.211386 #negf.F is in hartree units!
     for v in V:
         negf.setVoltage(v)
         negf.SCF(1e-3, 0.02, 100)
-        I.append(quickCurrent(negf.F, negf.S, sig1, sig2, 
+        I.append(quickCurrent(F_eV, negf.S, sig1, sig2, 
                               qV=v, fermi=negf.fermi))
     
     # Plot IV curve

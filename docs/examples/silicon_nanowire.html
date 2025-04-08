@@ -1,25 +1,22 @@
+
+
 <!DOCTYPE html>
-<html class="writer-html5" lang="en">
+<html class="writer-html5" lang="en" data-content_root="../">
 <head>
-  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Silicon Nanowire Tutorial &mdash; gauNEGF  documentation</title>
-      <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
-      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css" />
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
 
   
-  <!--[if lt IE 9]>
-    <script src="../_static/js/html5shiv.min.js"></script>
-  <![endif]-->
-  
-        <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
-        <script src="../_static/jquery.js"></script>
-        <script src="../_static/underscore.js"></script>
-        <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
-        <script src="../_static/doctools.js"></script>
-        <script src="../_static/sphinx_highlight.js"></script>
-        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9a2dae69"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+      <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
     <script src="../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" /> 
@@ -90,27 +87,27 @@
            <div itemprop="articleBody">
              
   <section id="silicon-nanowire-tutorial">
-<h1>Silicon Nanowire Tutorial<a class="headerlink" href="#silicon-nanowire-tutorial" title="Permalink to this heading"></a></h1>
+<h1>Silicon Nanowire Tutorial<a class="headerlink" href="#silicon-nanowire-tutorial" title="Link to this heading"></a></h1>
 <p>This tutorial demonstrates transport calculations through a silicon nanowire using two different approaches: with and without self-consistent field calculations.</p>
 <section id="part-1-transport-without-scf">
-<h2>Part 1: Transport Without SCF<a class="headerlink" href="#part-1-transport-without-scf" title="Permalink to this heading"></a></h2>
+<h2>Part 1: Transport Without SCF<a class="headerlink" href="#part-1-transport-without-scf" title="Link to this heading"></a></h2>
 <p>This approach uses a long chain (12 Si atoms) to approximate an infinite chain:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
-<span class="kn">import</span> <span class="nn">numpy.linalg</span> <span class="k">as</span> <span class="nn">LA</span>
-<span class="kn">from</span> <span class="nn">gauNEGF.matTools</span> <span class="kn">import</span> <span class="o">*</span>
-<span class="kn">from</span> <span class="nn">gauNEGF.scf</span> <span class="kn">import</span> <span class="n">NEGF</span>
-<span class="kn">from</span> <span class="nn">gauNEGF.scfE</span> <span class="kn">import</span> <span class="n">NEGFE</span>
-<span class="kn">from</span> <span class="nn">scipy</span> <span class="kn">import</span> <span class="n">io</span>
-<span class="kn">from</span> <span class="nn">scipy.linalg</span> <span class="kn">import</span> <span class="n">fractional_matrix_power</span>
-<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
-<span class="kn">from</span> <span class="nn">gauopen</span> <span class="kn">import</span> <span class="n">QCOpMat</span> <span class="k">as</span> <span class="n">qco</span>
-<span class="kn">from</span> <span class="nn">gauopen</span> <span class="kn">import</span> <span class="n">QCBinAr</span> <span class="k">as</span> <span class="n">qcb</span>
-<span class="kn">from</span> <span class="nn">gauopen</span> <span class="kn">import</span> <span class="n">QCUtil</span> <span class="k">as</span> <span class="n">qcu</span>
-<span class="kn">from</span> <span class="nn">gauNEGF.surfG1D</span> <span class="kn">import</span> <span class="n">surfG</span>
-<span class="kn">from</span> <span class="nn">gauNEGF.density</span> <span class="kn">import</span> <span class="o">*</span>
-<span class="kn">from</span> <span class="nn">gauNEGF.transport</span> <span class="kn">import</span> <span class="o">*</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy.linalg</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">LA</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.matTools</span><span class="w"> </span><span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.scf</span><span class="w"> </span><span class="kn">import</span> <span class="n">NEGF</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.scfE</span><span class="w"> </span><span class="kn">import</span> <span class="n">NEGFE</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy</span><span class="w"> </span><span class="kn">import</span> <span class="n">io</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.linalg</span><span class="w"> </span><span class="kn">import</span> <span class="n">fractional_matrix_power</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gauopen</span><span class="w"> </span><span class="kn">import</span> <span class="n">QCOpMat</span> <span class="k">as</span> <span class="n">qco</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gauopen</span><span class="w"> </span><span class="kn">import</span> <span class="n">QCBinAr</span> <span class="k">as</span> <span class="n">qcb</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gauopen</span><span class="w"> </span><span class="kn">import</span> <span class="n">QCUtil</span> <span class="k">as</span> <span class="n">qcu</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.surfG1D</span><span class="w"> </span><span class="kn">import</span> <span class="n">surfG</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.density</span><span class="w"> </span><span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gauNEGF.transport</span><span class="w"> </span><span class="kn">import</span> <span class="o">*</span>
 
-<span class="n">hartree_to_eV</span> <span class="o">=</span> <span class="mf">27.211386</span>
+<span class="n">har_to_eV</span> <span class="o">=</span> <span class="mf">27.211386</span>
 
 <span class="c1"># Run DFT calculation using SiNanowire12.gjf input file</span>
 <span class="n">bar</span> <span class="o">=</span> <span class="n">qcb</span><span class="o">.</span><span class="n">BinAr</span><span class="p">(</span><span class="n">debug</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">lenint</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">inputfile</span><span class="o">=</span><span class="s2">&quot;SiNanowire12.gjf&quot;</span><span class="p">)</span>
@@ -119,7 +116,7 @@
 <span class="c1"># Collect matrices from Gaussian, generate orthogonal H matrix</span>
 <span class="n">S</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">bar</span><span class="o">.</span><span class="n">matlist</span><span class="p">[</span><span class="s1">&#39;OVERLAP&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">expand</span><span class="p">())</span>
 <span class="n">P</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">bar</span><span class="o">.</span><span class="n">matlist</span><span class="p">[</span><span class="s1">&#39;ALPHA SCF DENSITY MATRIX&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">expand</span><span class="p">())</span>
-<span class="n">F</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">bar</span><span class="o">.</span><span class="n">matlist</span><span class="p">[</span><span class="s1">&#39;ALPHA FOCK MATRIX&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">expand</span><span class="p">())</span><span class="o">*</span><span class="n">hartree_to_eV</span>
+<span class="n">F</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">bar</span><span class="o">.</span><span class="n">matlist</span><span class="p">[</span><span class="s1">&#39;ALPHA FOCK MATRIX&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">expand</span><span class="p">())</span><span class="o">*</span><span class="n">har_to_eV</span>
 <span class="n">X</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">fractional_matrix_power</span><span class="p">(</span><span class="n">S</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.5</span><span class="p">))</span>
 <span class="n">H</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">real</span><span class="p">(</span><span class="n">X</span><span class="nd">@F@X</span><span class="p">)</span>
 
@@ -151,7 +148,7 @@
 </div>
 </section>
 <section id="part-2-transport-with-scf">
-<h2>Part 2: Transport With SCF<a class="headerlink" href="#part-2-transport-with-scf" title="Permalink to this heading"></a></h2>
+<h2>Part 2: Transport With SCF<a class="headerlink" href="#part-2-transport-with-scf" title="Link to this heading"></a></h2>
 <p>This approach uses self-consistent field calculations with different temperature settings:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">negf</span> <span class="o">=</span> <span class="n">NEGFE</span><span class="p">(</span><span class="n">fn</span><span class="o">=</span><span class="s1">&#39;Si2&#39;</span><span class="p">,</span> <span class="n">func</span><span class="o">=</span><span class="s1">&#39;b3lyp&#39;</span><span class="p">,</span> <span class="n">basis</span><span class="o">=</span><span class="s1">&#39;lanl2dz&#39;</span><span class="p">)</span>
 <span class="n">inds</span> <span class="o">=</span> <span class="n">negf</span><span class="o">.</span><span class="n">setContact1D</span><span class="p">([[</span><span class="mi">1</span><span class="p">],[</span><span class="mi">2</span><span class="p">]],</span> <span class="n">eta</span><span class="o">=</span><span class="mf">1e4</span><span class="p">)</span>  <span class="c1"># Added broadening to speed up convergence</span>
@@ -161,7 +158,7 @@
 <span class="n">negf</span><span class="o">.</span><span class="n">SCF</span><span class="p">(</span><span class="mf">1e-3</span><span class="p">,</span> <span class="mf">0.005</span><span class="p">,</span> <span class="mi">200</span><span class="p">)</span>
 <span class="n">negf</span><span class="o">.</span><span class="n">saveMAT</span><span class="p">(</span><span class="s1">&#39;SiNanowire_ESCF.mat&#39;</span><span class="p">)</span>
 
-<span class="n">Torth</span> <span class="o">=</span> <span class="n">cohTransE</span><span class="p">(</span><span class="n">Elist</span><span class="o">+</span><span class="n">negf</span><span class="o">.</span><span class="n">fermi</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">g</span><span class="p">)</span>
+<span class="n">Torth</span> <span class="o">=</span> <span class="n">cohTransE</span><span class="p">(</span><span class="n">Elist</span><span class="o">+</span><span class="n">negf</span><span class="o">.</span><span class="n">fermi</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="o">*</span><span class="n">har_to_eV</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">g</span><span class="p">)</span>
 <span class="n">io</span><span class="o">.</span><span class="n">savemat</span><span class="p">(</span><span class="s1">&#39;SiNanowire_TESCF.mat&#39;</span><span class="p">,</span> <span class="p">{</span><span class="s1">&#39;Elist&#39;</span><span class="p">:</span><span class="n">Elist</span><span class="p">,</span> <span class="s1">&#39;fermi&#39;</span><span class="p">:</span><span class="n">negf</span><span class="o">.</span><span class="n">fermi</span><span class="p">,</span> <span class="s1">&#39;T&#39;</span><span class="p">:</span><span class="n">T</span><span class="p">})</span>
 
 <span class="c1"># Finite temperature calculation</span>
@@ -170,13 +167,13 @@
 <span class="n">negf</span><span class="o">.</span><span class="n">SCF</span><span class="p">(</span><span class="mf">1e-3</span><span class="p">,</span> <span class="mf">0.001</span><span class="p">,</span> <span class="mi">200</span><span class="p">)</span>
 <span class="n">negf</span><span class="o">.</span><span class="n">saveMAT</span><span class="p">(</span><span class="s1">&#39;SiNanowire_ESCF_300K.mat&#39;</span><span class="p">)</span>
 
-<span class="n">Torth</span> <span class="o">=</span> <span class="n">cohTransE</span><span class="p">(</span><span class="n">Elist</span><span class="o">+</span><span class="n">negf</span><span class="o">.</span><span class="n">fermi</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">g</span><span class="p">)</span>
+<span class="n">Torth</span> <span class="o">=</span> <span class="n">cohTransE</span><span class="p">(</span><span class="n">Elist</span><span class="o">+</span><span class="n">negf</span><span class="o">.</span><span class="n">fermi</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="o">*</span><span class="n">har_to_eV</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">g</span><span class="p">)</span>
 <span class="n">io</span><span class="o">.</span><span class="n">savemat</span><span class="p">(</span><span class="s1">&#39;SiNanowire_TESCF_300K.mat&#39;</span><span class="p">,</span> <span class="p">{</span><span class="s1">&#39;Elist&#39;</span><span class="p">:</span><span class="n">Elist</span><span class="p">,</span> <span class="s1">&#39;fermi&#39;</span><span class="p">:</span><span class="n">negf</span><span class="o">.</span><span class="n">fermi</span><span class="p">,</span> <span class="s1">&#39;T&#39;</span><span class="p">:</span><span class="n">T</span><span class="p">})</span>
 </pre></div>
 </div>
 </section>
 <section id="key-points">
-<h2>Key Points<a class="headerlink" href="#key-points" title="Permalink to this heading"></a></h2>
+<h2>Key Points<a class="headerlink" href="#key-points" title="Link to this heading"></a></h2>
 <ol class="arabic simple">
 <li><p><strong>Part 1: No SCF</strong>
 - Uses 12 Si atoms to approximate infinite chain

@@ -25,7 +25,7 @@ This approach uses a long chain (12 Si atoms) to approximate an infinite chain:
     from gauNEGF.density import *
     from gauNEGF.transport import *
 
-    hartree_to_eV = 27.211386
+    har_to_eV = 27.211386
 
     # Run DFT calculation using SiNanowire12.gjf input file
     bar = qcb.BinAr(debug=False, lenint=8, inputfile="SiNanowire12.gjf")
@@ -34,7 +34,7 @@ This approach uses a long chain (12 Si atoms) to approximate an infinite chain:
     # Collect matrices from Gaussian, generate orthogonal H matrix
     S = np.array(bar.matlist['OVERLAP'].expand())
     P = np.array(bar.matlist['ALPHA SCF DENSITY MATRIX'].expand())
-    F = np.array(bar.matlist['ALPHA FOCK MATRIX'].expand())*hartree_to_eV
+    F = np.array(bar.matlist['ALPHA FOCK MATRIX'].expand())*har_to_eV
     X = np.array(fractional_matrix_power(S, -0.5))
     H = np.real(X@F@X)
 
@@ -78,7 +78,7 @@ This approach uses self-consistent field calculations with different temperature
     negf.SCF(1e-3, 0.005, 200)
     negf.saveMAT('SiNanowire_ESCF.mat')
 
-    Torth = cohTransE(Elist+negf.fermi, negf.F, negf.S, negf.g)
+    Torth = cohTransE(Elist+negf.fermi, negf.F*har_to_eV, negf.S, negf.g)
     io.savemat('SiNanowire_TESCF.mat', {'Elist':Elist, 'fermi':negf.fermi, 'T':T})
 
     # Finite temperature calculation
@@ -87,7 +87,7 @@ This approach uses self-consistent field calculations with different temperature
     negf.SCF(1e-3, 0.001, 200)
     negf.saveMAT('SiNanowire_ESCF_300K.mat')
 
-    Torth = cohTransE(Elist+negf.fermi, negf.F, negf.S, negf.g)
+    Torth = cohTransE(Elist+negf.fermi, negf.F*har_to_eV, negf.S, negf.g)
     io.savemat('SiNanowire_TESCF_300K.mat', {'Elist':Elist, 'fermi':negf.fermi, 'T':T})
 
 Key Points
