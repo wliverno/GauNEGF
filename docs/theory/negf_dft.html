@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Self-Consistent NEGF-DFT &mdash; gauNEGF  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
+        <script src="../_static/jquery.js"></script>
+        <script src="../_static/underscore.js"></script>
+        <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
+        <script src="../_static/doctools.js"></script>
+        <script src="../_static/sphinx_highlight.js"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+        <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true, "displayMath": [["$$", "$$"], ["\\[", "\\]"]]}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+        <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Transport Calculations" href="transport.html" />
+    <link rel="prev" title="Introduction to NEGF-DFT" href="introduction.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            gauNEGF
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../quickstart.html">Quickstart Guide</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Theory Guide</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Theory Guide</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="introduction.html">Introduction to NEGF-DFT</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Self-Consistent NEGF-DFT</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#theory-overview">Theory Overview</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#basic-procedure">Basic Procedure</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#implementation-classes">Implementation Classes</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#mathematical-details">Mathematical Details</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#density-matrix">Density Matrix</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#implementation">Implementation</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#integration-methods">Integration Methods</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#convergence-acceleration">Convergence Acceleration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#fermi-energy-search">Fermi Energy Search</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#practical-considerations">Practical Considerations</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#choosing-between-negf-and-negfe">Choosing Between NEGF and NEGFE</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#convergence-issues">Convergence Issues</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#example-workflows">Example Workflows</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#basic-negf-calculation">Basic NEGF Calculation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#production-negfe-calculation">Production NEGFE Calculation</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="transport.html">Transport Calculations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="best_practices.html">Best Practices for Production Calculations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#getting-started">Getting Started</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Examples</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../examples/index.html">Examples and Tutorials</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../api/index.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/index.html#core-modules">Core Modules</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/index.html#contact-models">Contact Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/index.html#utilities">Utilities</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">gauNEGF</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">Theory Guide</a></li>
+      <li class="breadcrumb-item active">Self-Consistent NEGF-DFT</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/theory/negf_dft.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="self-consistent-negf-dft">
+<h1>Self-Consistent NEGF-DFT<a class="headerlink" href="#self-consistent-negf-dft" title="Permalink to this heading"></a></h1>
+<p>This section details the self-consistent procedure combining NEGF and DFT calculations, including density matrix construction, convergence strategies, and practical considerations.</p>
+<section id="theory-overview">
+<h2>Theory Overview<a class="headerlink" href="#theory-overview" title="Permalink to this heading"></a></h2>
+<section id="basic-procedure">
+<h3>Basic Procedure<a class="headerlink" href="#basic-procedure" title="Permalink to this heading"></a></h3>
+<p>The self-consistent NEGF-DFT cycle:</p>
+<ol class="arabic simple">
+<li><p><strong>Initial Guess</strong></p>
+<ul class="simple">
+<li><p>Start with DFT density</p></li>
+<li><p>Set up contact parameters</p></li>
+<li><p>Define integration grid</p></li>
+</ul>
+</li>
+<li><p><strong>NEGF Step</strong></p>
+<ul class="simple">
+<li><p>Calculate Green’s functions</p></li>
+<li><p>Construct density matrix</p></li>
+<li><p>Update chemical potentials</p></li>
+</ul>
+</li>
+<li><p><strong>DFT Step</strong></p>
+<ul class="simple">
+<li><p>Generate Fock matrix</p></li>
+<li><p>Update electronic structure</p></li>
+<li><p>Check convergence</p></li>
+</ul>
+</li>
+<li><p><strong>Iterate</strong> until convergence</p></li>
+</ol>
+</section>
+</section>
+<section id="implementation-classes">
+<h2>Implementation Classes<a class="headerlink" href="#implementation-classes" title="Permalink to this heading"></a></h2>
+<p>The gauNEGF package provides two main classes for NEGF-DFT calculations:</p>
+<ol class="arabic simple">
+<li><p><strong>NEGF Class</strong> (<code class="docutils literal notranslate"><span class="pre">scf.py</span></code>)</p>
+<ul class="simple">
+<li><p>Energy-independent self-energies <a class="reference internal" href="#damle2002" id="id1"><span>[Damle2002]</span></a></p></li>
+<li><p>Constant broadening</p></li>
+<li><p>Simple contact models</p></li>
+<li><p>Faster calculations</p></li>
+<li><p>Suitable for quick tests and initial setup</p></li>
+</ul>
+</li>
+<li><p><strong>NEGFE Class</strong> (<code class="docutils literal notranslate"><span class="pre">scfE.py</span></code>)</p>
+<ul class="simple">
+<li><p>Energy-dependent self-energies</p></li>
+<li><p>Temperature effects</p></li>
+<li><p>Advanced contact models (Bethe lattice <a class="reference internal" href="#jacob2011" id="id2"><span>[Jacob2011]</span></a>, 1D chain)</p></li>
+<li><p>More accurate results</p></li>
+<li><p>Required for realistic transport calculations</p></li>
+</ul>
+</li>
+</ol>
+</section>
+<section id="mathematical-details">
+<h2>Mathematical Details<a class="headerlink" href="#mathematical-details" title="Permalink to this heading"></a></h2>
+<section id="density-matrix">
+<h3>Density Matrix<a class="headerlink" href="#density-matrix" title="Permalink to this heading"></a></h3>
+<p>The non-equilibrium density matrix has two components:</p>
+<div class="math notranslate nohighlight">
+\[P = P_{eq} + P_{neq}\]</div>
+<p>where:</p>
+<div class="math notranslate nohighlight">
+\[ \begin{align}\begin{aligned}P_{eq} = -\frac{1}{\pi} \Im \int_{-\infty}^{E_F-V/2} G^r(E) dE\\P_{neq} = -\frac{1}{2\pi} \int_{E_F-V/2}^{E_F+V/2} G^r(E)\Gamma(E)G^a(E) dE\end{aligned}\end{align} \]</div>
+<p>For the energy-independent case (NEGF), Γ(E) is constant. For the energy-dependent case (NEGFE), both G(E) and Γ(E) vary with energy.</p>
+</section>
+</section>
+<section id="implementation">
+<h2>Implementation<a class="headerlink" href="#implementation" title="Permalink to this heading"></a></h2>
+<section id="integration-methods">
+<h3>Integration Methods<a class="headerlink" href="#integration-methods" title="Permalink to this heading"></a></h3>
+<p>Energy-Independent Case (NEGF):</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">gauNEGF.scf</span> <span class="kn">import</span> <span class="n">NEGF</span>
+
+<span class="c1"># Initialize with constant self-energies</span>
+<span class="n">negf</span> <span class="o">=</span> <span class="n">NEGF</span><span class="p">(</span><span class="s1">&#39;molecule&#39;</span><span class="p">,</span> <span class="n">basis</span><span class="o">=</span><span class="s1">&#39;lanl2dz&#39;</span><span class="p">)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setSigma</span><span class="p">([</span><span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">6</span><span class="p">])</span>  <span class="c1"># Simple constant self-energy</span>
+</pre></div>
+</div>
+<p>Energy-Dependent Case (NEGFE):</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">gauNEGF.scfE</span> <span class="kn">import</span> <span class="n">NEGFE</span>
+
+<span class="c1"># Initialize with energy-dependent self-energies</span>
+<span class="n">negf</span> <span class="o">=</span> <span class="n">NEGFE</span><span class="p">(</span><span class="s1">&#39;molecule&#39;</span><span class="p">,</span> <span class="n">basis</span><span class="o">=</span><span class="s1">&#39;lanl2dz&#39;</span><span class="p">)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setContactBethe</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span><span class="mi">2</span><span class="p">,</span><span class="mi">3</span><span class="p">],</span> <span class="p">[</span><span class="mi">4</span><span class="p">,</span><span class="mi">5</span><span class="p">,</span><span class="mi">6</span><span class="p">],</span> <span class="n">latFile</span><span class="o">=</span><span class="s1">&#39;Au&#39;</span><span class="p">,</span> <span class="n">T</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>  <span class="c1"># Bethe lattice with temperature</span>
+
+<span class="c1"># Set integration parameters</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setIntegralLimits</span><span class="p">(</span>
+    <span class="n">N1</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span>     <span class="c1"># Complex contour points</span>
+    <span class="n">N2</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span>      <span class="c1"># Real axis points</span>
+    <span class="n">Emin</span><span class="o">=-</span><span class="mi">50</span><span class="p">,</span>   <span class="c1"># Lower bound</span>
+    <span class="n">T</span><span class="o">=</span><span class="mi">300</span>       <span class="c1"># Temperature in K</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="convergence-acceleration">
+<h3>Convergence Acceleration<a class="headerlink" href="#convergence-acceleration" title="Permalink to this heading"></a></h3>
+<p>Density mixing strategies (applicable to both NEGF and NEGFE):</p>
+<p>The Pulay mixing method <a class="reference internal" href="#pulay1980" id="id3"><span>[Pulay1980]</span></a> is a powerful convergence acceleration technique that uses information from previous iterations to predict the optimal density matrix. This method is particularly effective for systems with challenging convergence behavior.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Simple mixing</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">SCF</span><span class="p">(</span><span class="n">damping</span><span class="o">=</span><span class="mf">0.02</span><span class="p">,</span> <span class="n">pulay</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+<span class="c1"># Pulay mixing (DIIS)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">SCF</span><span class="p">(</span><span class="n">damping</span><span class="o">=</span><span class="mf">0.02</span><span class="p">,</span> <span class="n">pulay</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">nPulay</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>  <span class="c1"># Use 4 previous iterations</span>
+</pre></div>
+</div>
+</section>
+<section id="fermi-energy-search">
+<h3>Fermi Energy Search<a class="headerlink" href="#fermi-energy-search" title="Permalink to this heading"></a></h3>
+<p>Methods for finding the Fermi energy (NEGFE only):</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Constant self-energy approximation</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setVoltage</span><span class="p">(</span><span class="n">qV</span><span class="p">,</span> <span class="n">fermiMethod</span><span class="o">=</span><span class="s1">&#39;predict&#39;</span><span class="p">)</span>
+
+<span class="c1"># Secant method (recommended for NEGFE)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setVoltage</span><span class="p">(</span><span class="n">qV</span><span class="p">,</span> <span class="n">fermiMethod</span><span class="o">=</span><span class="s1">&#39;secant&#39;</span><span class="p">)</span>
+
+<span class="c1"># Muller method (alternative for NEGFE)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setVoltage</span><span class="p">(</span><span class="n">qV</span><span class="p">,</span> <span class="n">fermiMethod</span><span class="o">=</span><span class="s1">&#39;muller&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="practical-considerations">
+<h2>Practical Considerations<a class="headerlink" href="#practical-considerations" title="Permalink to this heading"></a></h2>
+<section id="choosing-between-negf-and-negfe">
+<h3>Choosing Between NEGF and NEGFE<a class="headerlink" href="#choosing-between-negf-and-negfe" title="Permalink to this heading"></a></h3>
+<p>Guidelines for selecting the appropriate class:</p>
+<ol class="arabic simple">
+<li><p><strong>Use NEGF when:</strong></p>
+<ul class="simple">
+<li><p>Quick initial tests are needed</p></li>
+<li><p>System is well-described by constant self-energies</p></li>
+<li><p>Temperature effects are negligible</p></li>
+<li><p>Performance is critical</p></li>
+</ul>
+</li>
+<li><p><strong>Use NEGFE when:</strong></p>
+<ul class="simple">
+<li><p>Accurate transport properties are needed</p></li>
+<li><p>Temperature effects are important</p></li>
+<li><p>Realistic contact models are required</p></li>
+<li><p>Energy-dependent effects are significant</p></li>
+</ul>
+</li>
+</ol>
+</section>
+<section id="convergence-issues">
+<h3>Convergence Issues<a class="headerlink" href="#convergence-issues" title="Permalink to this heading"></a></h3>
+<p>Common problems and solutions:</p>
+<ol class="arabic simple">
+<li><p><strong>Charge Oscillations</strong></p>
+<ul class="simple">
+<li><p>Reduce mixing parameter</p></li>
+<li><p>Increase Pulay vectors</p></li>
+<li><p>Check contact parameters</p></li>
+</ul>
+</li>
+<li><p><strong>Orbital Occupation Inaccurate</strong></p>
+<ul class="simple">
+<li><p>Verify integration limits</p></li>
+<li><p>Increase integration Grid</p></li>
+</ul>
+</li>
+<li><p><strong>Slow convergence</strong></p>
+<ul class="simple">
+<li><p>Add broadening (eta) to surfG</p></li>
+<li><p>Change fermi solver</p></li>
+<li><p>Reduce system/basis size</p></li>
+</ul>
+</li>
+</ol>
+</section>
+</section>
+<section id="example-workflows">
+<h2>Example Workflows<a class="headerlink" href="#example-workflows" title="Permalink to this heading"></a></h2>
+<section id="basic-negf-calculation">
+<h3>Basic NEGF Calculation<a class="headerlink" href="#basic-negf-calculation" title="Permalink to this heading"></a></h3>
+<p>Quick test with energy-independent self-energies:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">gauNEGF.scf</span> <span class="kn">import</span> <span class="n">NEGF</span>
+
+<span class="c1"># Initialize system</span>
+<span class="n">negf</span> <span class="o">=</span> <span class="n">NEGF</span><span class="p">(</span><span class="s1">&#39;molecule&#39;</span><span class="p">,</span> <span class="n">basis</span><span class="o">=</span><span class="s1">&#39;lanl2dz&#39;</span><span class="p">)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setContactBethe</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span><span class="mi">2</span><span class="p">,</span><span class="mi">3</span><span class="p">],</span> <span class="p">[</span><span class="mi">4</span><span class="p">,</span><span class="mi">5</span><span class="p">,</span><span class="mi">6</span><span class="p">])</span>
+
+<span class="c1"># Run SCF</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">SCF</span><span class="p">(</span><span class="n">conv</span><span class="o">=</span><span class="mf">1e-4</span><span class="p">,</span> <span class="n">damping</span><span class="o">=</span><span class="mf">0.05</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="production-negfe-calculation">
+<h3>Production NEGFE Calculation<a class="headerlink" href="#production-negfe-calculation" title="Permalink to this heading"></a></h3>
+<p>Accurate calculation with temperature effects:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">gauNEGF.scfE</span> <span class="kn">import</span> <span class="n">NEGFE</span>
+
+<span class="c1"># Initialize system</span>
+<span class="n">negf</span> <span class="o">=</span> <span class="n">NEGFE</span><span class="p">(</span><span class="s1">&#39;molecule&#39;</span><span class="p">,</span> <span class="n">basis</span><span class="o">=</span><span class="s1">&#39;lanl2dz&#39;</span><span class="p">)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setContactBethe</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span><span class="mi">2</span><span class="p">,</span><span class="mi">3</span><span class="p">],</span> <span class="p">[</span><span class="mi">4</span><span class="p">,</span><span class="mi">5</span><span class="p">,</span><span class="mi">6</span><span class="p">],</span> <span class="n">latFile</span><span class="o">=</span><span class="s1">&#39;Au&#39;</span><span class="p">,</span> <span class="n">T</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>
+
+<span class="c1"># Set voltage and run SCF</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setVoltage</span><span class="p">(</span><span class="mf">0.1</span><span class="p">,</span> <span class="n">fermiMethod</span><span class="o">=</span><span class="s1">&#39;secant&#39;</span><span class="p">)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">SCF</span><span class="p">(</span><span class="n">conv</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">,</span> <span class="n">damping</span><span class="o">=</span><span class="mf">0.02</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="next-steps">
+<h2>Next Steps<a class="headerlink" href="#next-steps" title="Permalink to this heading"></a></h2>
+<p>Continue to <a class="reference internal" href="transport.html"><span class="doc">Transport Calculations</span></a> for details on calculating transport properties.</p>
+<div role="list" class="citation-list">
+<div class="citation" id="damle2002" role="doc-biblioentry">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id1">Damle2002</a><span class="fn-bracket">]</span></span>
+<p>Damle, P., Ghosh, A. W., &amp; Datta, S. (2002). First-principles analysis of molecular conduction using quantum chemistry software. Chemical Physics, 281(2-3), 171-187. DOI: 10.1016/S0301-0104(02)00496-2</p>
+</div>
+<div class="citation" id="pulay1980" role="doc-biblioentry">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id3">Pulay1980</a><span class="fn-bracket">]</span></span>
+<p>Pulay, P. (1980). Convergence acceleration of iterative sequences. The case of SCF iteration. Chemical Physics Letters, 73(2), 393-398. DOI: 10.1016/0009-2614(80)80396-4</p>
+</div>
+<div class="citation" id="jacob2011" role="doc-biblioentry">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id2">Jacob2011</a><span class="fn-bracket">]</span></span>
+<p>Jacob, D., &amp; Palacios, J. J. (2011). Critical comparison of electrode models in density functional theory based quantum transport calculations. The Journal of Chemical Physics, 134(4), 044118. DOI: 10.1063/1.3526044</p>
+</div>
+</div>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="introduction.html" class="btn btn-neutral float-left" title="Introduction to NEGF-DFT" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="transport.html" class="btn btn-neutral float-right" title="Transport Calculations" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
