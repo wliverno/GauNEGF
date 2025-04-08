@@ -1,13 +1,16 @@
-cff-version: 1.1.0
+cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 authors:
-  - family-names: Liverno
+  - family-names: Livernois
     given-names: William
     orcid: https://orcid.org/0000-0001-8637-1213
 title: "GauNEGF"
 version: v0.1.0-alpha
 date-released: 2025-04-08
 url: "https://github.com/wliverno/GauNEGF"
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.15178667 
 repository-code: "https://github.com/wliverno/GauNEGF"
 license: MIT
 abstract: >

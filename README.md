@@ -1,6 +1,7 @@
 # GauNEGF
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX)
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15178667.svg)](https://doi.org/10.5281/zenodo.15178667)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ***Note: This package is currently in testing and uses the Gaussian Development Version and Gaussian Python Interface, both of which are not publicly available. Please check the [Gaussian website](https://gaussian.com/news/) for updates on the forthcoming releases.***
@@ -81,15 +82,16 @@ For usage examples, see the files in the `examples/` directory.
 If you use GaussianNEGF in your research, please cite:
 
 ```bibtex
-@software{gaussianNEGF2025,
-  author       = {William Livernois}
-  title        = {GaussianNEGF: A Python package for Non-Equilibrium Green's Function calculations},
+@software{gauNEGF2025
+  author       = {Livernois, William},
+  license      = {MIT},
   month        = April,
-  year         = 2025,
-  publisher    = {Zenodo},
-  version      = {v1.0.0},
-  doi          = {10.5281/zenodo.XXXXXXX},
-  url          = {https://doi.org/10.5281/zenodo.XXXXXXX}
+  year         = {2025},
+  title        = {{GauNEGF}},
+  url          = {https://github.com/wliverno/GauNEGF},
+  version      = {v0.1.0-alpha},
+  doi          = {10.5281/zenodo.15178667},
+  url          = {https://doi.org/10.5281/zenodo.15178667}
 }
 ```
 
