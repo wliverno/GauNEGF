@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Advanced Examples &mdash; gauNEGF  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
+        <script src="../_static/jquery.js"></script>
+        <script src="../_static/underscore.js"></script>
+        <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
+        <script src="../_static/doctools.js"></script>
+        <script src="../_static/sphinx_highlight.js"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            gauNEGF
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../quickstart.html">Quickstart Guide</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Theory Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../theory/index.html">Theory Guide</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Examples</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="index.html">Examples and Tutorials</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../api/index.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/index.html#core-modules">Core Modules</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/index.html#contact-models">Contact Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/index.html#utilities">Utilities</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">gauNEGF</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Advanced Examples</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/examples/advanced_examples.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="advanced-examples">
+<h1>Advanced Examples<a class="headerlink" href="#advanced-examples" title="Permalink to this heading"></a></h1>
+<p>This section provides advanced examples demonstrating specialized features of gauNEGF.</p>
+<section id="spin-transport">
+<h2>Spin Transport<a class="headerlink" href="#spin-transport" title="Permalink to this heading"></a></h2>
+<p>Example of spin-dependent transport:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">gauNEGF.scf</span> <span class="kn">import</span> <span class="n">NEGF</span>
+<span class="kn">from</span> <span class="nn">gauNEGF.transport</span> <span class="kn">import</span> <span class="n">cohTransSpin</span>
+
+<span class="c1"># Initialize with unrestricted calculation</span>
+<span class="n">negf</span> <span class="o">=</span> <span class="n">NEGF</span><span class="p">(</span>
+    <span class="n">fn</span><span class="o">=</span><span class="s1">&#39;molecule&#39;</span><span class="p">,</span>
+    <span class="n">spin</span><span class="o">=</span><span class="s1">&#39;u&#39;</span>  <span class="c1"># Unrestricted calculation</span>
+<span class="p">)</span>
+
+<span class="c1"># Set up spin-dependent contacts</span>
+<span class="n">sig_up</span> <span class="o">=</span> <span class="p">[</span><span class="o">-</span><span class="mf">0.1</span><span class="n">j</span><span class="p">]</span>
+<span class="n">sig_down</span> <span class="o">=</span> <span class="p">[</span><span class="o">-</span><span class="mf">0.05</span><span class="n">j</span><span class="p">]</span>
+<span class="n">inds</span> <span class="o">=</span> <span class="n">negf</span><span class="o">.</span><span class="n">setSigma</span><span class="p">([</span><span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">2</span><span class="p">])</span>
+<span class="n">sig1</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">diag</span><span class="p">(</span><span class="n">sig_up</span><span class="o">*</span><span class="nb">len</span><span class="p">(</span><span class="n">inds</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="o">+</span> <span class="n">sig_down</span><span class="o">*</span><span class="nb">len</span><span class="p">(</span><span class="n">inds</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+<span class="n">sig2</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">diag</span><span class="p">(</span><span class="n">sig_down</span><span class="o">*</span><span class="nb">len</span><span class="p">(</span><span class="n">inds</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span> <span class="o">+</span> <span class="n">sig_up</span><span class="o">*</span><span class="nb">len</span><span class="p">(</span><span class="n">inds</span><span class="p">[</span><span class="mi">1</span><span class="p">]))</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setSigma</span><span class="p">([</span><span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">sig1</span><span class="p">,</span> <span class="n">sig2</span><span class="p">)</span>
+
+<span class="c1"># Run at equilibrium</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setVoltage</span><span class="p">(</span><span class="mf">0.0</span><span class="p">)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">SCF</span><span class="p">(</span><span class="mf">1e-3</span><span class="p">,</span> <span class="mf">0.01</span><span class="p">)</span>
+
+<span class="c1"># Calculate spin-resolved transmission</span>
+<span class="n">sigma1</span><span class="p">,</span> <span class="n">sigma1</span> <span class="o">=</span> <span class="n">negf</span><span class="o">.</span><span class="n">getSigma</span><span class="p">()</span>
+<span class="n">T</span><span class="p">,</span> <span class="n">Tspin</span> <span class="o">=</span> <span class="n">cohTransSpin</span><span class="p">(</span>
+    <span class="n">E</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span>
+    <span class="n">sigma1</span><span class="p">,</span> <span class="n">sigma2</span><span class="p">,</span>
+    <span class="n">spin</span><span class="o">=</span><span class="s1">&#39;u&#39;</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="temperature-effects">
+<h2>Temperature Effects<a class="headerlink" href="#temperature-effects" title="Permalink to this heading"></a></h2>
+<p>Including finite temperature:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Set basic temperature-dependent contact</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setSigma</span><span class="p">(</span>
+    <span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">2</span><span class="p">],</span>
+    <span class="o">-</span><span class="mf">0.05</span><span class="n">j</span><span class="p">,</span>
+    <span class="n">T</span><span class="o">=</span><span class="mi">300</span>     <span class="c1"># Temperature in Kelvin</span>
+<span class="p">)</span>
+
+<span class="c1"># Set up temperature-dependent Bethe Lattice contacts</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setContactBethe</span><span class="p">(</span>
+    <span class="n">contactList</span><span class="o">=</span><span class="p">[[</span><span class="mi">1</span><span class="p">,</span><span class="mi">2</span><span class="p">,</span><span class="mi">3</span><span class="p">],</span> <span class="p">[</span><span class="mi">4</span><span class="p">,</span><span class="mi">5</span><span class="p">,</span><span class="mi">6</span><span class="p">]],</span>
+    <span class="n">latFile</span><span class="o">=</span><span class="s1">&#39;Au&#39;</span><span class="p">,</span>
+    <span class="n">T</span><span class="o">=</span><span class="mi">300</span>  <span class="c1"># Temperature in Kelvin</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="energy-dependent-contacts">
+<h2>Energy-Dependent Contacts<a class="headerlink" href="#energy-dependent-contacts" title="Permalink to this heading"></a></h2>
+<p>Using realistic contact models:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Bethe lattice contacts at atoms {1,2,3} and {6,7,8}</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setContactBethe</span><span class="p">(</span>
+    <span class="n">contactList</span><span class="o">=</span><span class="p">[[</span><span class="mi">1</span><span class="p">,</span><span class="mi">2</span><span class="p">,</span><span class="mi">3</span><span class="p">],</span> <span class="p">[</span><span class="mi">6</span><span class="p">,</span><span class="mi">7</span><span class="p">,</span><span class="mi">8</span><span class="p">]],</span>
+    <span class="n">latFile</span><span class="o">=</span><span class="s1">&#39;Au&#39;</span><span class="p">,</span> <span class="c1"># Slater coster parameters define in Au.bethe</span>
+    <span class="n">eta</span><span class="o">=</span><span class="mf">1e-6</span>      <span class="c1"># Broadening term (eV)</span>
+<span class="p">)</span>
+
+<span class="c1"># 1D chain contacts attached to atoms 1 and 6</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setContact1D</span><span class="p">(</span>
+    <span class="n">contactList</span><span class="o">=</span> <span class="p">[[</span><span class="mi">1</span><span class="p">],[</span><span class="mi">6</span><span class="p">]],</span>
+    <span class="n">tauList</span> <span class="o">=</span> <span class="p">[[</span><span class="mi">2</span><span class="p">],</span> <span class="p">[</span><span class="mi">5</span><span class="p">]],</span>   <span class="c1"># hopping calculated from 1 to 2 and 6 to 5</span>
+    <span class="n">neList</span> <span class="o">=</span> <span class="p">[</span><span class="mi">4</span><span class="p">,</span>  <span class="mi">4</span><span class="p">],</span>       <span class="c1"># 4 electrons per cell</span>
+    <span class="n">eta</span> <span class="o">=</span> <span class="mf">1e-6</span>              <span class="c1"># Broadening term (eV)</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="parallel-processing">
+<h2>Parallel Processing<a class="headerlink" href="#parallel-processing" title="Permalink to this heading"></a></h2>
+<p>If you know what you are doing and want to parallelize <em>each</em> integration point then you can manually set this in the densityComplex function:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">gauNEGF.density</span> <span class="kn">import</span> <span class="n">densityComplex</span>
+
+<span class="c1"># Parallel density calculation</span>
+<span class="n">P</span> <span class="o">=</span> <span class="n">densityComplex</span><span class="p">(</span>
+    <span class="n">F</span><span class="p">,</span> <span class="n">S</span><span class="p">,</span> <span class="n">g</span><span class="p">,</span>
+    <span class="n">Emin</span><span class="o">=-</span><span class="mi">50</span><span class="p">,</span>
+    <span class="n">mu</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+    <span class="n">N</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span>
+    <span class="n">parallel</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">numWorkers</span><span class="o">=</span><span class="mi">4</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p>Note this is usually slower than the default numpy parallelization. <em>Only proceed if you know what you are doing</em></p>
+</section>
+<section id="custom-analysis">
+<h2>Custom Analysis<a class="headerlink" href="#custom-analysis" title="Permalink to this heading"></a></h2>
+<p>Advanced analysis tools:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
+<span class="kn">from</span> <span class="nn">gauNEGF.transport</span> <span class="kn">import</span> <span class="n">DOS</span><span class="p">,</span> <span class="n">cohTransE</span>
+
+<span class="c1">#... run energy dependent NEGFE() calculation</span>
+
+<span class="c1"># Calculate DOS and transmission</span>
+<span class="n">E</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">1000</span><span class="p">)</span>
+<span class="n">dos</span><span class="p">,</span> <span class="n">dos_list</span> <span class="o">=</span> <span class="n">DOSE</span><span class="p">(</span><span class="n">E</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span> <span class="n">g</span><span class="p">)</span>
+<span class="n">T</span> <span class="o">=</span> <span class="n">cohTransE</span><span class="p">(</span><span class="n">E</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">F</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">S</span><span class="p">,</span> <span class="n">negf</span><span class="o">.</span><span class="n">g</span><span class="p">)</span>
+
+<span class="c1"># Plot correlation</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">figure</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">5</span><span class="p">))</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">subplot</span><span class="p">(</span><span class="mi">121</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">E</span><span class="p">,</span> <span class="n">dos</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;Energy (eV)&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s1">&#39;DOS&#39;</span><span class="p">)</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">subplot</span><span class="p">(</span><span class="mi">122</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">semilogy</span><span class="p">(</span><span class="n">E</span><span class="p">,</span> <span class="n">T</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;Energy (eV)&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s1">&#39;Transmission&#39;</span><span class="p">)</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+<section id="next-steps">
+<h2>Next Steps<a class="headerlink" href="#next-steps" title="Permalink to this heading"></a></h2>
+<ol class="arabic simple">
+<li><p>Develop custom contact models</p></li>
+<li><p>Implement new analysis tools</p></li>
+<li><p>Optimize performance</p></li>
+<li><p>Add error handling</p></li>
+</ol>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

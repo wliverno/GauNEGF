@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Best Practices for Production Calculations &mdash; gauNEGF  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
+        <script src="../_static/jquery.js"></script>
+        <script src="../_static/underscore.js"></script>
+        <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
+        <script src="../_static/doctools.js"></script>
+        <script src="../_static/sphinx_highlight.js"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Examples and Tutorials" href="../examples/index.html" />
+    <link rel="prev" title="Transport Calculations" href="transport.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            gauNEGF
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../quickstart.html">Quickstart Guide</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Theory Guide</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Theory Guide</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="introduction.html">Introduction to NEGF-DFT</a></li>
+<li class="toctree-l2"><a class="reference internal" href="negf_dft.html">Self-Consistent NEGF-DFT</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transport.html">Transport Calculations</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Best Practices for Production Calculations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#system-preparation">System Preparation</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#geometry-optimization">Geometry Optimization</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#dft-setup">DFT Setup</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#functional-selection">Functional Selection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#contact-models">Contact Models</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#convergence-strategies">Convergence Strategies</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#scf-convergence">SCF Convergence</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#integration-parameters">Integration Parameters</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#troubleshooting-guide">Troubleshooting Guide</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#common-issues">Common Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#validation-checks">Validation Checks</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#getting-started">Getting Started</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Examples</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../examples/index.html">Examples and Tutorials</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../api/index.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/index.html#core-modules">Core Modules</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/index.html#contact-models">Contact Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/index.html#utilities">Utilities</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">gauNEGF</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">Theory Guide</a></li>
+      <li class="breadcrumb-item active">Best Practices for Production Calculations</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/theory/best_practices.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="best-practices-for-production-calculations">
+<h1>Best Practices for Production Calculations<a class="headerlink" href="#best-practices-for-production-calculations" title="Permalink to this heading"></a></h1>
+<p>This section provides guidelines for setting up and running production-quality NEGF-DFT calculations, focusing on accuracy, efficiency, and troubleshooting.</p>
+<section id="system-preparation">
+<h2>System Preparation<a class="headerlink" href="#system-preparation" title="Permalink to this heading"></a></h2>
+<section id="geometry-optimization">
+<h3>Geometry Optimization<a class="headerlink" href="#geometry-optimization" title="Permalink to this heading"></a></h3>
+<ol class="arabic simple">
+<li><p><strong>Initial Structure</strong></p>
+<ul class="simple">
+<li><p>Use standard bond lengths and angles</p></li>
+<li><p>Consider symmetry for efficient calculations</p></li>
+<li><p>Optimize geometry without contacts first</p></li>
+</ul>
+</li>
+<li><p><strong>Contact Placement</strong></p>
+<ul class="simple">
+<li><p>Choose chemically reasonable contact sites</p></li>
+<li><p>Maintain consistent contact-molecule distances</p></li>
+<li><p>Consider multiple contact configurations</p></li>
+</ul>
+</li>
+<li><p><strong>Basis Set Selection</strong></p>
+<ul class="simple">
+<li><p>Start with a compact basis like LANL2DZ for testing</p></li>
+<li><p>Use larger basis sets for production</p></li>
+<li><p>Check basis set superposition error</p></li>
+</ul>
+</li>
+</ol>
+</section>
+</section>
+<section id="dft-setup">
+<h2>DFT Setup<a class="headerlink" href="#dft-setup" title="Permalink to this heading"></a></h2>
+<section id="functional-selection">
+<h3>Functional Selection<a class="headerlink" href="#functional-selection" title="Permalink to this heading"></a></h3>
+<p>Honestly, there are hundreds of DFT functionals out there. Find one that works for your system and doesn’t make the reviewers too mad. People seem to like pure functionals for metals and hybrid functionals for organics, if you want both you are SOL.</p>
+</section>
+<section id="contact-models">
+<h3>Contact Models<a class="headerlink" href="#contact-models" title="Permalink to this heading"></a></h3>
+<ol class="arabic">
+<li><p><strong>Energy-Independent</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Start with simple diagonal self-energies</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setSigma</span><span class="p">([</span><span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="o">-</span><span class="mf">0.05</span><span class="n">j</span><span class="p">)</span>
+</pre></div>
+</div>
+</li>
+<li><p><strong>Bethe Lattice</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Use realistic metallic contacts</span>
+<span class="n">g</span> <span class="o">=</span> <span class="n">surfGB</span><span class="p">(</span><span class="n">F</span><span class="p">,</span> <span class="n">S</span><span class="p">,</span> <span class="n">contacts</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span><span class="mi">2</span><span class="p">])</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setSigma</span><span class="p">([</span><span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">g</span><span class="p">)</span>
+</pre></div>
+</div>
+</li>
+<li><p><strong>1D Chain</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># For molecular wire systems</span>
+<span class="n">g</span> <span class="o">=</span> <span class="n">surfG</span><span class="p">(</span><span class="n">F</span><span class="p">,</span> <span class="n">S</span><span class="p">,</span> <span class="n">taus</span><span class="p">,</span> <span class="n">staus</span><span class="p">)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setSigma</span><span class="p">([</span><span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">g</span><span class="p">)</span>
+</pre></div>
+</div>
+</li>
+</ol>
+</section>
+</section>
+<section id="convergence-strategies">
+<h2>Convergence Strategies<a class="headerlink" href="#convergence-strategies" title="Permalink to this heading"></a></h2>
+<section id="scf-convergence">
+<h3>SCF Convergence<a class="headerlink" href="#scf-convergence" title="Permalink to this heading"></a></h3>
+<ol class="arabic">
+<li><p><strong>Mixing Parameters</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Start with conservative mixing</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">runSCF</span><span class="p">(</span><span class="n">mix</span><span class="o">=</span><span class="mf">0.005</span><span class="p">)</span>
+
+<span class="c1"># Increase if convergence is slow</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">runSCF</span><span class="p">(</span><span class="n">mix</span><span class="o">=</span><span class="mf">0.02</span><span class="p">)</span>
+
+<span class="c1"># Values over 0.05 will be unstable!</span>
+</pre></div>
+</div>
+</li>
+<li><p><strong>Pulay Mixing</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Pulay mixing as implemented works well</span>
+<span class="c1"># Increase nPulay if you have cyclical convergence values</span>
+<span class="n">negf</span> <span class="o">=</span> <span class="n">NEGF</span><span class="p">(</span><span class="n">fn</span><span class="o">=</span><span class="s1">&#39;system&#39;</span><span class="p">,</span> <span class="n">nPulay</span><span class="o">=</span><span class="mi">9</span><span class="p">)</span>
+</pre></div>
+</div>
+</li>
+<li><p><strong>Convergence Criteria</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Tight convergence for production</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">runSCF</span><span class="p">(</span><span class="n">conv</span><span class="o">=</span><span class="mf">1e-4</span><span class="p">,</span> <span class="n">damping</span><span class="o">=</span><span class="mf">0.02</span><span class="p">,</span> <span class="n">maxcycles</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
+</pre></div>
+</div>
+</li>
+</ol>
+</section>
+<section id="integration-parameters">
+<h3>Integration Parameters<a class="headerlink" href="#integration-parameters" title="Permalink to this heading"></a></h3>
+<ol class="arabic">
+<li><p><strong>Automatic Integration Limits*</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># tol = DOS cutoff value for Emin and</span>
+<span class="c1"># limit to MaxDP for density generation</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">integralCheck</span><span class="p">(</span><span class="n">tol</span><span class="o">=</span><span class="mf">1e-4</span><span class="p">)</span>
+</pre></div>
+</div>
+</li>
+<li><p><strong>Manually Set Integration Limits*</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Set grid size and Emin</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setIntegrationLimits</span><span class="p">(</span>
+     <span class="n">N1</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span> <span class="c1">#Integration from Emin to mu</span>
+     <span class="n">N2</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> <span class="c1">#Integration from Eminf to Emin</span>
+     <span class="n">Emin</span><span class="o">=-</span><span class="mi">500</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</li>
+<li><p><strong>Add Temperature</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Include finite temperature (300 Kelvin)</span>
+<span class="n">negf</span><span class="o">.</span><span class="n">setSigma</span><span class="p">([</span><span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">T</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>
+</pre></div>
+</div>
+</li>
+</ol>
+</section>
+</section>
+<section id="troubleshooting-guide">
+<h2>Troubleshooting Guide<a class="headerlink" href="#troubleshooting-guide" title="Permalink to this heading"></a></h2>
+<section id="common-issues">
+<h3>Common Issues<a class="headerlink" href="#common-issues" title="Permalink to this heading"></a></h3>
+<ol class="arabic simple">
+<li><p><strong>SCF Convergence</strong></p>
+<ul class="simple">
+<li><p>Decrease mixing parameter</p></li>
+<li><p>Check Fermi level shifts over SCF cycles</p></li>
+<li><p>Check for unreasonable geometries</p></li>
+</ul>
+</li>
+<li><p><strong>Transport Results</strong></p>
+<ul class="simple">
+<li><p>Verify energy range applied</p></li>
+<li><p>Start with simple energy independent contact</p></li>
+<li><p>Compare with similar systems</p></li>
+</ul>
+</li>
+</ol>
+</section>
+<section id="validation-checks">
+<h3>Validation Checks<a class="headerlink" href="#validation-checks" title="Permalink to this heading"></a></h3>
+<ol class="arabic simple">
+<li><p><strong>Zero Bias</strong></p>
+<ul class="simple">
+<li><p>Compare with literature conductance values</p></li>
+<li><p>Check Transmission profile between HOMO-LUMO gap</p></li>
+<li><p>Verify DOS features (molecular orbitals vs contact effects)</p></li>
+</ul>
+</li>
+<li><p><strong>Finite Bias</strong></p>
+<ul class="simple">
+<li><p>Check current symmetry with positive and negative bias</p></li>
+<li><p>Check current hysteresis with increasing convergence</p></li>
+<li><p>Monitor charge conservation</p></li>
+</ul>
+</li>
+<li><p><strong>Spin Systems</strong></p>
+<ul class="simple">
+<li><p>Check charge and multiplicity</p></li>
+<li><p>Check spin contamination</p></li>
+<li><p>For non-collinear cases check system spin direction</p></li>
+</ul>
+</li>
+</ol>
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="transport.html" class="btn btn-neutral float-left" title="Transport Calculations" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="../examples/index.html" class="btn btn-neutral float-right" title="Examples and Tutorials" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

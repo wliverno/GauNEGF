@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Introduction to NEGF-DFT &mdash; gauNEGF  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
+        <script src="../_static/jquery.js"></script>
+        <script src="../_static/underscore.js"></script>
+        <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
+        <script src="../_static/doctools.js"></script>
+        <script src="../_static/sphinx_highlight.js"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+        <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true, "displayMath": [["$$", "$$"], ["\\[", "\\]"]]}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+        <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Self-Consistent NEGF-DFT" href="negf_dft.html" />
+    <link rel="prev" title="Theory Guide" href="index.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            gauNEGF
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../quickstart.html">Quickstart Guide</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Theory Guide</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Theory Guide</a><ul class="current">
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Introduction to NEGF-DFT</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#historical-context">Historical Context</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#core-functionality">Core Functionality</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#mathematical-framework">Mathematical Framework</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#key-equations">Key Equations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#contact-models-and-testing">Contact Models and Testing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#utility-functions-mattools-py">Utility Functions (<cite>matTools.py</cite>)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#next-steps">Next Steps</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#references">References</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="negf_dft.html">Self-Consistent NEGF-DFT</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transport.html">Transport Calculations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="best_practices.html">Best Practices for Production Calculations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#getting-started">Getting Started</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Examples</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../examples/index.html">Examples and Tutorials</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../api/index.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/index.html#core-modules">Core Modules</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/index.html#contact-models">Contact Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/index.html#utilities">Utilities</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">gauNEGF</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">Theory Guide</a></li>
+      <li class="breadcrumb-item active">Introduction to NEGF-DFT</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/theory/introduction.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="introduction-to-negf-dft">
+<h1>Introduction to NEGF-DFT<a class="headerlink" href="#introduction-to-negf-dft" title="Permalink to this heading"></a></h1>
+<p>This section provides an overview of the Non-Equilibrium Green’s Function (NEGF) method combined with Density Functional Theory (DFT) for quantum transport calculations.</p>
+<section id="historical-context">
+<h2>Historical Context<a class="headerlink" href="#historical-context" title="Permalink to this heading"></a></h2>
+<p>The gauNEGF package builds upon the foundational work of ANT.Gaussian <a class="reference internal" href="#palacios2002" id="id1"><span>[Palacios2002]</span></a>, which pioneered the implementation of NEGF-DFT calculations using Gaussian basis sets. This approach has proven particularly effective for molecular electronics and nanoscale transport calculations.</p>
+</section>
+<section id="core-functionality">
+<h2>Core Functionality<a class="headerlink" href="#core-functionality" title="Permalink to this heading"></a></h2>
+<p>The gauNEGF package provides:</p>
+<ul class="simple">
+<li><p>Energy-independent and energy-dependent NEGF calculations <a class="reference internal" href="negf_dft.html#damle2002" id="id2"><span>[Damle2002]</span></a></p></li>
+<li><p>Multiple contact models (Bethe lattice <a class="reference internal" href="negf_dft.html#jacob2011" id="id3"><span>[Jacob2011]</span></a>, 1D chain)</p></li>
+<li><p>Transmission and current calculations</p></li>
+<li><p>Spin-dependent transport <a class="reference internal" href="#zollner2020" id="id4"><span>[Zollner2020]</span></a></p></li>
+<li><p>Temperature and voltage effects</p></li>
+</ul>
+</section>
+<section id="mathematical-framework">
+<h2>Mathematical Framework<a class="headerlink" href="#mathematical-framework" title="Permalink to this heading"></a></h2>
+</section>
+<section id="key-equations">
+<h2>Key Equations<a class="headerlink" href="#key-equations" title="Permalink to this heading"></a></h2>
+<p>The central quantities in NEGF-DFT are:</p>
+<ol class="arabic">
+<li><p><strong>Green’s Functions</strong></p>
+<div class="math notranslate nohighlight" id="equation-eq-retarded-gf">
+<span class="eqno">(1)<a class="headerlink" href="#equation-eq-retarded-gf" title="Permalink to this equation"></a></span>\[G^r(E) = [(E+i\eta)S - F - \Sigma(E)]^{-1}\]</div>
+<p>where:</p>
+<ul class="simple">
+<li><p><span class="math notranslate nohighlight">\(G^r(E)\)</span> is the retarded Green’s function</p></li>
+<li><p><span class="math notranslate nohighlight">\(E\)</span> is the energy</p></li>
+<li><p><span class="math notranslate nohighlight">\(\eta\)</span> is a small broadening parameter</p></li>
+<li><p><span class="math notranslate nohighlight">\(S\)</span> is the overlap matrix</p></li>
+<li><p><span class="math notranslate nohighlight">\(F\)</span> is the Fock matrix</p></li>
+<li><p><span class="math notranslate nohighlight">\(\Sigma(E)\)</span> is the self-energy</p></li>
+</ul>
+<p>The lesser Green’s function is given by:</p>
+<div class="math notranslate nohighlight" id="equation-eq-lesser-gf">
+<span class="eqno">(2)<a class="headerlink" href="#equation-eq-lesser-gf" title="Permalink to this equation"></a></span>\[G^\lt(E) = G^r(E) [\Gamma_L f(E-\mu_L) + \Gamma_R f(E-\mu_R)] G^{r\dagger}(E)\]</div>
+<p>where:</p>
+<ul class="simple">
+<li><p><span class="math notranslate nohighlight">\(G^\lt(E)\)</span> is the lesser Green’s function</p></li>
+<li><p><span class="math notranslate nohighlight">\(\Gamma_{L,R}\)</span> are the broadening matrices for left and right contacts</p></li>
+<li><p><span class="math notranslate nohighlight">\(f(E)\)</span> is the Fermi-Dirac distribution</p></li>
+<li><p><span class="math notranslate nohighlight">\(\mu_{L,R}\)</span> are the chemical potentials of the contacts</p></li>
+</ul>
+</li>
+<li><p><strong>Self-Energies</strong></p>
+<div class="math notranslate nohighlight">
+\[\Sigma(E) = \sum_i \tau_i g_{s,i}(E) \tau_i^\dagger\]</div>
+<p>where:</p>
+<ul class="simple">
+<li><p><span class="math notranslate nohighlight">\(\tau_i\)</span> is the coupling matrix to contact i</p></li>
+<li><p><span class="math notranslate nohighlight">\(g_{s,i}(E)\)</span> is the surface Green’s function of contact i</p></li>
+<li><p>The sum runs over all contacts</p></li>
+</ul>
+</li>
+<li><p><strong>Density Matrix</strong></p>
+<div class="math notranslate nohighlight">
+\[\rho = -\frac{1}{2\pi} \int_{-\infty}^{\infty} G^\lt(E) dE\]</div>
+<p>This gives the electron density used in the self-consistent cycle.</p>
+</li>
+</ol>
+</section>
+<section id="contact-models-and-testing">
+<h2>Contact Models and Testing<a class="headerlink" href="#contact-models-and-testing" title="Permalink to this heading"></a></h2>
+<p>The package includes several contact models:</p>
+<ol class="arabic simple">
+<li><p><strong>Bethe Lattice</strong> (<cite>surfGBethe.py</cite>)</p>
+<ul class="simple">
+<li><p>Ideal for metallic contacts</p></li>
+<li><p>Energy-dependent self-energy</p></li>
+<li><p>Realistic density of states</p></li>
+</ul>
+</li>
+<li><p><strong>1D Chain</strong> (<cite>surfG1D.py</cite>)</p>
+<ul class="simple">
+<li><p>Perfect for molecular wires</p></li>
+<li><p>Periodic boundary conditions</p></li>
+<li><p>Band structure effects</p></li>
+</ul>
+</li>
+<li><p><strong>Constant Self-Energy</strong> (<cite>surfGTester.py</cite>)</p>
+<ul class="simple">
+<li><p>Performance benchmarking</p></li>
+<li><p>Adding Temperature dependence</p></li>
+<li><p>Future development: Energy-dependent decoherence</p></li>
+</ul>
+</li>
+</ol>
+</section>
+<section id="utility-functions-mattools-py">
+<h2>Utility Functions (<cite>matTools.py</cite>)<a class="headerlink" href="#utility-functions-mattools-py" title="Permalink to this heading"></a></h2>
+<p>Helper functions for common tasks:</p>
+<ul class="simple">
+<li><p>Matrix operations and transformations</p></li>
+<li><p>Integration routines</p></li>
+<li><p>Density and transmission calculations</p></li>
+<li><p>File I/O and checkpointing</p></li>
+</ul>
+</section>
+<section id="next-steps">
+<h2>Next Steps<a class="headerlink" href="#next-steps" title="Permalink to this heading"></a></h2>
+<p>Continue to <a class="reference internal" href="negf_dft.html"><span class="doc">Self-Consistent NEGF-DFT</span></a> for details on the self-consistent procedure.</p>
+</section>
+<section id="references">
+<h2>References<a class="headerlink" href="#references" title="Permalink to this heading"></a></h2>
+<div role="list" class="citation-list">
+<div class="citation" id="palacios2002" role="doc-biblioentry">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id1">Palacios2002</a><span class="fn-bracket">]</span></span>
+<p>Palacios, J. J., Pérez-Jiménez, A. J., Louis, E., SanFabián, E., &amp; Vergés, J. A. (2002). First-principles approach to electrical transport in atomic-scale nanostructures. <em>Physical Review B</em>, 66(3), 035322. <a class="reference external" href="https://doi.org/10.1103/PhysRevB.66.035322">https://doi.org/10.1103/PhysRevB.66.035322</a></p>
+</div>
+<div class="citation" id="damle2002" role="doc-biblioentry">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id2">Damle2002</a><span class="fn-bracket">]</span></span>
+<p>Damle, P., Ghosh, A. W., &amp; Datta, S. (2002). First-principles analysis of molecular conduction using quantum chemistry software. <em>Chemical Physics</em>, 281(2-3), 171-187. <a class="reference external" href="https://doi.org/10.1016/S0301-0104(02)00496-2">https://doi.org/10.1016/S0301-0104(02)00496-2</a></p>
+</div>
+<div class="citation" id="jacob2011" role="doc-biblioentry">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id3">Jacob2011</a><span class="fn-bracket">]</span></span>
+<p>Jacob, D., &amp; Palacios, J. J. (2011). Critical comparison of electrode models in density functional theory based quantum transport calculations. <em>The Journal of Chemical Physics</em>, 134(4), 044118. <a class="reference external" href="https://doi.org/10.1063/1.3526044">https://doi.org/10.1063/1.3526044</a></p>
+</div>
+<div class="citation" id="zollner2020" role="doc-biblioentry">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id4">Zollner2020</a><span class="fn-bracket">]</span></span>
+<p>Zöllner, M. S., Varela, S., Medina, E., Mujica, V., &amp; Herrmann, C. (2020). Insight into the Origin of Chiral-Induced Spin Selectivity from a Symmetry Analysis of Electronic Transmission. <em>Journal of Chemical Theory and Computation</em>, 16(5), 2914-2929. <a class="reference external" href="https://doi.org/10.1021/acs.jctc.9b01078">https://doi.org/10.1021/acs.jctc.9b01078</a></p>
+</div>
+</div>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="index.html" class="btn btn-neutral float-left" title="Theory Guide" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="negf_dft.html" class="btn btn-neutral float-right" title="Self-Consistent NEGF-DFT" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
