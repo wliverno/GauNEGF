@@ -9,7 +9,7 @@ Core Modules
 NEGF Base Class
 --------------
 
-.. automodule:: scf
+.. automodule:: gauNEGF.scf
    :members:
    :undoc-members:
    :show-inheritance:
@@ -17,7 +17,7 @@ NEGF Base Class
 Energy-Dependent NEGF
 -------------------
 
-.. automodule:: scfE
+.. automodule:: gauNEGF.scfE
    :members:
    :undoc-members:
    :show-inheritance:
@@ -25,7 +25,7 @@ Energy-Dependent NEGF
 Density Module
 ------------
 
-.. automodule:: density
+.. automodule:: gauNEGF.density
    :members:
    :undoc-members:
    :show-inheritance:
@@ -33,7 +33,7 @@ Density Module
 Transport Module
 --------------
 
-.. automodule:: transport
+.. automodule:: gauNEGF.transport
    :members:
    :undoc-members:
    :show-inheritance:
@@ -44,7 +44,7 @@ Contact Models
 Bethe Lattice
 ------------
 
-.. automodule:: surfGBethe
+.. automodule:: gauNEGF.surfGBethe
    :members:
    :undoc-members:
    :show-inheritance:
@@ -52,7 +52,7 @@ Bethe Lattice
 1D Chain
 -------
 
-.. automodule:: surfG1D
+.. automodule:: gauNEGF.surfG1D
    :members:
    :undoc-members:
    :show-inheritance:
@@ -60,7 +60,7 @@ Bethe Lattice
 Constant Self Energy
 -------------------
 
-.. automodule:: surfGTester
+.. automodule:: gauNEGF.surfGTester
    :members:
    :undoc-members:
    :show-inheritance:
@@ -71,7 +71,7 @@ Utilities
 Matrix Tools
 -----------
 
-.. automodule:: matTools
+.. automodule:: gauNEGF.matTools
    :members:
    :undoc-members:
    :show-inheritance: 
