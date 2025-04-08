@@ -1,0 +1,20 @@
+cff-version: 1.1.0
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: Liverno
+    given-names: William
+    orcid: https://orcid.org/0000-0001-8637-1213
+title: "GauNEGF"
+version: v0.1.0-alpha
+date-released: 2025-04-08
+url: "https://github.com/wliverno/GauNEGF"
+repository-code: "https://github.com/wliverno/GauNEGF"
+license: MIT
+abstract: >
+  Using Non-Equilibrium Green's Functions to model quantum transport in molecules
+  using the Gaussian software package and interface
+keywords:
+  - quantum-transport
+  - negf
+  - gaussian
+  - molecular-electronics
