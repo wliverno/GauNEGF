@@ -233,6 +233,116 @@ def integratePoints(computePointFunc, numPoints, parallel=False, numWorkers=None
             # Fallback to sequential processing if parallel fails
             return sum(process_chunk(chunk) for chunk in chunks)
 
+def integratePointsAdaptiveSubset(computePoint, w, tol=1e-3):
+    """
+    Adaptive integration over a dyadically nested quadrature grid.
+
+    Assumes precomputed weights ``w`` of length ``M = 2^n + 1``.
+    Starts with indices ``[0, mid, M-1]`` and, at each refinement, inserts the
+    midpoint between every adjacent pair of currently selected indices. At each
+    step, rescales the partial sum by the ratio of total weight to subset weight
+    and checks convergence using the maximum absolute entrywise difference
+    between successive estimates.
+
+    Parameters
+    ----------
+    computePoint : callable
+        Function taking an integer index ``i`` and returning the weighted
+        contribution at that index. Any quadrature weight ``w[i]`` and
+        Jacobian/contour factor should already be applied inside
+        ``computePoint(i)``.
+    w : array_like
+        Quadrature weights. Used to compute subset weight sums and global
+        rescaling.
+    tol : float, optional
+        Convergence threshold applied to ``max(abs(P_new - P_old))`` (default 1e-3).
+
+    Returns
+    -------
+    ndarray
+        The final integrated estimate after convergence or after using all points.
+
+    Notes
+    -----
+    - No parallelization is used.
+    - Requires ``len(w) = 2^n + 1`` so that midpoint refinement is
+      perfectly nested.
+    """
+
+    # Validate and normalize inputs
+    w_arr = np.asarray(w)
+    M = int(w_arr.shape[0])
+    if M == 0:
+        raise ValueError("w must be non-empty")
+    # Enforce M = 2^n + 1
+    m1 = M - 1
+    if not (m1 > 0 and (m1 & (m1 - 1)) == 0):
+        raise AssertionError("len(w) must equal 2^n + 1 for some n >= 1")
+
+    total_weight = float(np.sum(w_arr))
+    if total_weight == 0.0:
+        # Degenerate case: weights sum to zero; just sum all contributions
+        cumulative = None
+        for i in range(M):
+            contrib = computePoint(i)
+            if cumulative is None:
+                cumulative = np.zeros_like(contrib)
+            cumulative += contrib
+        return cumulative
+
+    # Initialize with first, mid, last
+    indices = [0, (M - 1) // 2, M - 1]
+    indices = sorted(set(indices))
+
+    cumulative_sum = None
+    subset_weight_sum = 0.0
+
+    for j in indices:
+        contrib = computePoint(j)
+        if cumulative_sum is None:
+            cumulative_sum = np.zeros_like(contrib)
+        cumulative_sum += contrib
+        subset_weight_sum += float(w_arr[j])
+
+    # First estimate
+    scale = total_weight / subset_weight_sum if subset_weight_sum != 0.0 else 0.0
+    P_prev = scale * cumulative_sum
+    last_err = None
+
+    # Refinement loop: insert midpoints between adjacent indices
+    while len(indices) < M:
+        new_indices = []
+        for a, b in zip(indices[:-1], indices[1:]):
+            m = (a + b) // 2
+            if m != a and m != b:
+                new_indices.append(m)
+
+        if not new_indices:
+            # Should not happen if M = 2^n + 1
+            if last_err is None:
+                print("Warning: final error is unknown (no refinement performed)")
+            else:
+                print(f"Warning: final error is {last_err:.3e}")
+            return P_prev
+
+        # Accumulate new contributions
+        for j in new_indices:
+            contrib = computePoint(j)
+            cumulative_sum += contrib
+            subset_weight_sum += float(w_arr[j])
+
+        # Merge and sort indices
+        indices = sorted(set(indices).union(new_indices))
+
+        # New estimate and convergence check
+        scale = total_weight / subset_weight_sum if subset_weight_sum != 0.0 else 0.0
+        P_new = scale * cumulative_sum
+        err = np.max(np.abs(P_new - P_prev))
+        last_err = err
+        if err <= tol:
+            return P_new
+        P_prev = P_new
+
 ## ENERGY INDEPENDENT DENSITY FUNCTIONS
 def density(V, Vc, D, Gam, Emin, mu):
     """
@@ -500,7 +610,7 @@ def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=300):
     return den/(2*np.pi)
 
 def densityComplex(F, S, g, Emin, mu, N=100, T=300, parallel=False, numWorkers=None, 
-                         showText=True, method='ant'):
+                         showText=True, method='ant', use_adaptive=False, adaptive_tol=1e-3):
     """
     Calculate equilibrium density matrix using complex contour integration.
 
@@ -532,6 +642,11 @@ def densityComplex(F, S, g, Emin, mu, N=100, T=300, parallel=False, numWorkers=N
         Whether to print progress messages (default: True)
     method : {'ant', 'legendre', 'chebyshev'}, optional
         Integration method to use (default: 'ant')
+    use_adaptive : bool, optional
+        If True, use dyadic adaptive integration on the contour integral. Requires
+        len(w) = 2^n + 1. Defaults to False.
+    adaptive_tol : float, optional
+        Convergence tolerance for adaptive integration (default: 1e-3)
 
     Returns
     -------
@@ -571,7 +686,18 @@ def densityComplex(F, S, g, Emin, mu, N=100, T=300, parallel=False, numWorkers=N
     
     if showText:
         print(f'Complex Integration over {N} points...')
-    lineInt=integratePoints(computePoint, int(N), parallel, numWorkers)
+
+    # Route to adaptive integrator if requested and valid (len(w) = 2^n + 1)
+    def _is_dyadic_plus_one(m: int) -> bool:
+        t = m - 1
+        return t > 0 and (t & (t - 1)) == 0
+
+    if use_adaptive and _is_dyadic_plus_one(len(w)):
+        lineInt = integratePointsAdaptiveSubset(computePoint, w, tol=adaptive_tol)
+    else:
+        if use_adaptive and showText and not _is_dyadic_plus_one(len(w)):
+            print('Adaptive disabled: len(w) must equal 2^n + 1')
+        lineInt = integratePoints(computePoint, int(N), parallel, numWorkers)
     
     #Add integration points for Fermi Broadening
     if T>0:
