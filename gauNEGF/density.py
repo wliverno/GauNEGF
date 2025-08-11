@@ -139,7 +139,12 @@ def getANTPoints(N):
     # Generate weights similarly to ANT
     w = xs**4 * 16.0/(3*(N))
     w = np.concatenate((w, w))
-    
+
+    if N%2==1:
+        w=w[:-1]
+        x=x[:-1]
+    x = x[np.argsort(x)]
+    w = w[np.argsort(x)]
     return x, w
 
 def integratePoints(computePointFunc, numPoints, parallel=False, numWorkers=None, 
@@ -610,7 +615,7 @@ def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=300):
     return den/(2*np.pi)
 
 def densityComplex(F, S, g, Emin, mu, N=100, T=300, parallel=False, numWorkers=None, 
-                         showText=True, method='ant', use_adaptive=False, adaptive_tol=1e-3):
+                         showText=True, method='ant', use_adaptive=True, adaptive_tol=1e-3):
     """
     Calculate equilibrium density matrix using complex contour integration.
 
