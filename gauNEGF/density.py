@@ -115,7 +115,7 @@ def getANTPoints(N):
 
     Follows the IntCompPlane subroutine in device.F90 from ANT.Gaussian package.
     Uses a modified Gauss-Chebyshev quadrature scheme optimized for transport
-    calculations.
+    calculations. _Note: Always generates an even number of points._
 
     Parameters
     ----------
@@ -140,11 +140,6 @@ def getANTPoints(N):
     w = xs**4 * 16.0/(3*(N))
     w = np.concatenate((w, w))
 
-    if N%2==1:
-        w=w[:-1]
-        x=x[:-1]
-    x = x[np.argsort(x)]
-    w = w[np.argsort(x)]
     return x, w
 
 def integratePoints(computePointFunc, numPoints, parallel=False, numWorkers=None, 
