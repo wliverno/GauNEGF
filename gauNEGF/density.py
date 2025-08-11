@@ -322,14 +322,6 @@ def integratePointsAdaptiveSubset(computePoint, w, tol=1e-3):
             if m != a and m != b:
                 new_indices.append(m)
 
-        if not new_indices:
-            # Should not happen if M = 2^n + 1
-            if last_err is None:
-                print("Warning: final error is unknown (no refinement performed)")
-            else:
-                print(f"Warning: final error is {last_err:.3e}")
-            return P_prev
-
         # Accumulate new contributions
         for j in new_indices:
             contrib = computePoint(j)
@@ -348,6 +340,13 @@ def integratePointsAdaptiveSubset(computePoint, w, tol=1e-3):
             print(f'Adaptive integration used {len(indices)} points.')
             return P_new
         P_prev = P_new
+    
+    # Reached full grid without satisfying tolerance; return last estimate
+    if last_err is not None:
+        print(f'Adaptive integration reached full grid ({len(indices)} points). Final error {last_err:.3e}')
+    else:
+        print(f'Adaptive integration reached full grid ({len(indices)} points).')
+    return P_prev
 
 ## ENERGY INDEPENDENT DENSITY FUNCTIONS
 def density(V, Vc, D, Gam, Emin, mu):
@@ -846,7 +845,7 @@ def integralFit(F, S, g, mu, Eminf=-1e6, tol=1e-5, T=0, maxN=1000):
         print(f'Warning: Nreal still not within tolerance (final value = {dP})')
     print(f'Final Nreal: {Nreal}') 
 
-    return Emin, Ncomplex, Nreal
+    return Emin, Ncomplex+1, Nreal
 
 def integralFitNEGF(F, S, g, fermi, qV, Eminf=-1e6, tol=1e-5, T=0, maxGrid=1000):
     """
