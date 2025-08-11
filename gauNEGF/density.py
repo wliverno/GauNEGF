@@ -233,115 +233,69 @@ def integratePoints(computePointFunc, numPoints, parallel=False, numWorkers=None
             # Fallback to sequential processing if parallel fails
             return sum(process_chunk(chunk) for chunk in chunks)
 
-def integratePointsAdaptiveSubset(computePoint, w, tol=1e-3):
+def integratePointsAdaptiveANT(computePoint, tol=1e-3, maxN=1458, debug=False):
     """
-    Adaptive integration over a dyadically nested quadrature grid.
-
-    Assumes precomputed weights ``w`` of length ``M = 2^n + 1``.
-    Starts with indices ``[0, mid, M-1]`` and, at each refinement, inserts the
-    midpoint between every adjacent pair of currently selected indices. At each
-    step, rescales the partial sum by the ratio of total weight to subset weight
-    and checks convergence using the maximum absolute entrywise difference
-    between successive estimates.
+    Adaptive integration using ANT-modified Gauss-Chebyshev quadrature (IntCompPlane subroutine from ANT.Gaussian package)
 
     Parameters
     ----------
     computePoint : callable
-        Function taking an integer index ``i`` and returning the weighted
-        contribution at that index. Any quadrature weight ``w[i]`` and
-        Jacobian/contour factor should already be applied inside
-        ``computePoint(i)``.
-    w : array_like
-        Quadrature weights. Used to compute subset weight sums and global
-        rescaling.
+        Function that computes a single integration point. Should take a weight and point and return a matrix/array.
     tol : float, optional
-        Convergence threshold applied to ``max(abs(P_new - P_old))`` (default 1e-3).
+        Tolerance for the adaptive integration.
+    maxN : int, optional
+        Maximum number of points to integrate.
+    debug : bool, optional
+        Whether to print debug information.
 
     Returns
     -------
     ndarray
-        The final integrated estimate after convergence or after using all points.
-
-    Notes
-    -----
-    - No parallelization is used.
-    - Requires ``len(w) = 2^n + 1`` so that midpoint refinement is
-      perfectly nested.
+        Integral of the function.
     """
+    prev_x = None
+    prev_sumW = None
+    P = None
+    N = 2
+    maxDP = 1e10
+    while N<maxN:
+        x, w = getANTPoints(N)
 
-    # Validate and normalize inputs
-    w_arr = np.asarray(w)
-    M = int(w_arr.shape[0])
-    if M == 0:
-        raise ValueError("w must be non-empty")
-    # Enforce M = 2^n + 1
-    m1 = M - 1
-    if not (m1 > 0 and (m1 & (m1 - 1)) == 0):
-        raise AssertionError("len(w) must equal 2^n + 1 for some n >= 1")
+        if prev_x is None:
+            # first level: no reuse
+            P = computePoint(x[0], w[0]) + computePoint(x[1], w[1])
+        else:
+            # mark old nodes robustly by value
+            old_mask = np.isin(np.round(x, 14), np.round(prev_x, 14))
+            # sanity: all previous nodes should be found
+            assert int(old_mask.sum()) == prev_x.size, "Old nodes mismatch"
 
-    total_weight = float(np.sum(w_arr))
-    if total_weight == 0.0:
-        # Degenerate case: weights sum to zero; just sum all contributions
-        cumulative = None
-        for i in range(M):
-            contrib = computePoint(i)
-            if cumulative is None:
-                cumulative = np.zeros_like(contrib)
-            cumulative += contrib
-        return cumulative
+            # exact transfer factor (should be ~1/3)
+            ratio = float(np.sum(w[old_mask]) / prev_sumW)
+            if debug:
+                P_debug = np.zeros_like(P)
+                for i in range(N):
+                    P_debug += computePoint(x[i], w[i])
+                maxDP_debug = np.max(np.abs(P_debug-P))
+                print(f"N={N}, nested-weight ratio ~ {ratio:.3f}, maxDP={maxDP:.3e}")
+                print(f"Direct Calculation: N={N}, maxDP={maxDP_debug:.3e}")
 
-    # Initialize with first, mid, last
-    indices = [0, (M - 1) // 2, M - 1]
-    indices = sorted(set(indices))
+            # scale previous integral + add only new-node contributions
+            new_mask = ~old_mask
+            new_P = P*ratio
+            for xi, wi in zip(x[new_mask], w[new_mask]):
+                new_P += computePoint(xi, wi)
+            maxDP = np.max(np.abs(new_P-P))
+            if maxDP<tol:
+                print(f'Adaptive integration converged to {maxDP:.3e} in {N} points.')
+                return new_P
 
-    cumulative_sum = None
-    subset_weight_sum = 0.0
-
-    for j in indices:
-        contrib = computePoint(j)
-        if cumulative_sum is None:
-            cumulative_sum = np.zeros_like(contrib)
-        cumulative_sum += contrib
-        subset_weight_sum += float(w_arr[j])
-
-    # First estimate
-    scale = total_weight / subset_weight_sum if subset_weight_sum != 0.0 else 0.0
-    P_prev = scale * cumulative_sum
-    last_err = None
-
-    # Refinement loop: insert midpoints between adjacent indices
-    while len(indices) < M:
-        new_indices = []
-        for a, b in zip(indices[:-1], indices[1:]):
-            m = (a + b) // 2
-            if m != a and m != b:
-                new_indices.append(m)
-
-        # Accumulate new contributions
-        for j in new_indices:
-            contrib = computePoint(j)
-            cumulative_sum += contrib
-            subset_weight_sum += float(w_arr[j])
-
-        # Merge and sort indices
-        indices = sorted(set(indices).union(new_indices))
-
-        # New estimate and convergence check
-        scale = total_weight / subset_weight_sum if subset_weight_sum != 0.0 else 0.0
-        P_new = scale * cumulative_sum
-        err = np.max(np.abs(P_new - P_prev))
-        last_err = err
-        if err <= tol:
-            print(f'Adaptive integration used {len(indices)} points.')
-            return P_new
-        P_prev = P_new
-    
-    # Reached full grid without satisfying tolerance; return last estimate
-    if last_err is not None:
-        print(f'Adaptive integration reached full grid ({len(indices)} points). Final error {last_err:.3e}')
-    else:
-        print(f'Adaptive integration reached full grid ({len(indices)} points).')
-    return P_prev
+        # update state for next level
+        prev_x = x
+        prev_sumW = float(np.sum(w))
+        N *= 3
+    print(f'Adaptive integration reached full grid ({N} points), final error {maxDP:.3e}')
+    return new_P
 
 ## ENERGY INDEPENDENT DENSITY FUNCTIONS
 def density(V, Vc, D, Gam, Emin, mu):
@@ -683,20 +637,21 @@ def densityComplex(F, S, g, Emin, mu, N=100, T=300, parallel=False, numWorkers=N
         z = center + r*np.exp(1j*theta)
         dz = 1j * r * np.exp(1j*theta)
         return (np.pi/2)*w[i]*Gr(F, S, g, z)*fermi(z, mu, T)*dz
+
+    # For ANT adaptive integration, compute from point-weight pairs
+    def computePoint_weighted(xi, wi):
+        theta = np.pi/2 * (xi + 1)
+        z = center + r*np.exp(1j*theta)
+        dz = 1j * r * np.exp(1j*theta)
+        return (np.pi/2)*wi*Gr(F, S, g, z)*fermi(z, mu, T)*dz
     
     if showText:
         print(f'Complex Integration over {N} points...')
 
-    # Route to adaptive integrator if requested and valid (len(w) = 2^n + 1)
-    def _is_dyadic_plus_one(m: int) -> bool:
-        t = m - 1
-        return t > 0 and (t & (t - 1)) == 0
-
-    if use_adaptive and _is_dyadic_plus_one(len(w)):
-        lineInt = integratePointsAdaptiveSubset(computePoint, w, tol=adaptive_tol)
+    # Route to ANT adaptive integrator when requested
+    if method == 'ant' and use_adaptive:
+        lineInt = integratePointsAdaptiveANT(computePoint_weighted, tol=adaptive_tol, maxN=N, debug=True)
     else:
-        if use_adaptive and showText and not _is_dyadic_plus_one(len(w)):
-            print('Adaptive disabled: len(w) must equal 2^n + 1')
         lineInt = integratePoints(computePoint, int(N), parallel, numWorkers)
     
     #Add integration points for Fermi Broadening
@@ -706,7 +661,7 @@ def densityComplex(F, S, g, Emin, mu, N=100, T=300, parallel=False, numWorkers=N
         x_fermi,w_fermi = roots_legendre(N//8)
         def computePointBroadening(i):
             E = broadening * (x_fermi[i]) + mu
-            return broadening*w[i]*Gr(F, S, g, E)*fermi(E, mu, T)
+            return broadening*w_fermi[i]*Gr(F, S, g, E)*fermi(E, mu, T)
     
         lineInt += integratePoints(computePointBroadening, int(N//8), parallel, numWorkers)
 
@@ -840,7 +795,7 @@ def integralFit(F, S, g, mu, Eminf=-1e6, tol=1e-5, T=0, maxN=1000):
         print(f'Warning: Nreal still not within tolerance (final value = {dP})')
     print(f'Final Nreal: {Nreal}') 
 
-    return Emin, Ncomplex+1, Nreal
+    return Emin, Ncomplex, Nreal
 
 def integralFitNEGF(F, S, g, fermi, qV, Eminf=-1e6, tol=1e-5, T=0, maxGrid=1000):
     """
