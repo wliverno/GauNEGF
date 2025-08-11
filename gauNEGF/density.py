@@ -127,17 +127,20 @@ def getANTPoints(N):
     tuple
         (points, weights) - Arrays of integration points and weights
     """
-    k = np.arange(1,N+1,2)
+    n = (N+1)//2
+    k = np.arange(1,n+1)
     theta = k*np.pi/(2*N)
     xs = np.sin(theta)
     xcc = np.cos(theta)
 
     # Transform points using ANT-like formula
-    x = 1.0 + 0.21220659078919378103 * xs * xcc * (3 + 2*xs*xs) - k/(N)
+    x = 1.0 + 0.21220659078919378103 * xs * xcc * (3 + 2*xs*xs) - k/(n)
     x = np.concatenate((x,-1*x))
+    if N%2==1:
+        x = x[:-1]
     
     # Generate weights similarly to ANT
-    w = xs**4 * 16.0/(3*(N))
+    w = xs**4 * 16.0/(3*(n))
     w = np.concatenate((w, w))
 
     if N%2==1:
@@ -345,6 +348,7 @@ def integratePointsAdaptiveSubset(computePoint, w, tol=1e-3):
         err = np.max(np.abs(P_new - P_prev))
         last_err = err
         if err <= tol:
+            print(f'Adaptive integration used {len(indices)} points.')
             return P_new
         P_prev = P_new
 
