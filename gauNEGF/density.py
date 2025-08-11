@@ -127,20 +127,17 @@ def getANTPoints(N):
     tuple
         (points, weights) - Arrays of integration points and weights
     """
-    n = (N+1)//2
-    k = np.arange(1,n+1)
+    k = np.arange(1,N+1,2)
     theta = k*np.pi/(2*N)
     xs = np.sin(theta)
     xcc = np.cos(theta)
 
     # Transform points using ANT-like formula
-    x = 1.0 + 0.21220659078919378103 * xs * xcc * (3 + 2*xs*xs) - k/(n)
+    x = 1.0 + 0.21220659078919378103 * xs * xcc * (3 + 2*xs*xs) - k/(N)
     x = np.concatenate((x,-1*x))
-    if N%2==1:
-        x = x[:-1]
     
     # Generate weights similarly to ANT
-    w = xs**4 * 16.0/(3*(n))
+    w = xs**4 * 16.0/(3*(N))
     w = np.concatenate((w, w))
 
     if N%2==1:
