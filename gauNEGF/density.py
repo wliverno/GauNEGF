@@ -272,13 +272,6 @@ def integratePointsAdaptiveANT(computePoint, tol=1e-3, maxN=1458, debug=False):
 
             # exact transfer factor (should be ~1/3)
             ratio = float(np.sum(w[old_mask]) / prev_sumW)
-            if debug:
-                P_debug = np.zeros_like(P)
-                for i in range(N):
-                    P_debug += computePoint(x[i], w[i])
-                maxDP_debug = np.max(np.abs(P_debug-P))
-                print(f"N={N}, nested-weight ratio ~ {ratio:.3f}, maxDP={maxDP:.3e}")
-                print(f"Direct Calculation: N={N}, maxDP={maxDP_debug:.3e}")
 
             # scale previous integral + add only new-node contributions
             new_mask = ~old_mask
@@ -286,6 +279,15 @@ def integratePointsAdaptiveANT(computePoint, tol=1e-3, maxN=1458, debug=False):
             for xi, wi in zip(x[new_mask], w[new_mask]):
                 new_P += computePoint(xi, wi)
             maxDP = np.max(np.abs(new_P-P))
+            if debug:
+                P_debug = np.zeros_like(P)
+                for i in range(N):
+                    P_debug += computePoint(x[i], w[i])
+                maxDP_debug = np.max(np.abs(P_debug-P))
+                maxDiff = np.max(np.abs(P_debug-new_P))
+                print(f"N={N}, nested-weight ratio ~ {ratio:.3f}, maxDP={maxDP:.3e}")
+                print(f"Direct Calculation: N={N}, maxDP={maxDP_debug:.3e}, maxDiff={maxDiff:.3e}")
+            P = new_P.copy()
             if maxDP<tol:
                 print(f'Adaptive integration converged to {maxDP:.3e} in {N} points.')
                 return new_P
@@ -645,13 +647,13 @@ def densityComplex(F, S, g, Emin, mu, N=100, T=300, parallel=False, numWorkers=N
         dz = 1j * r * np.exp(1j*theta)
         return (np.pi/2)*wi*Gr(F, S, g, z)*fermi(z, mu, T)*dz
     
-    if showText:
-        print(f'Complex Integration over {N} points...')
 
     # Route to ANT adaptive integrator when requested
     if method == 'ant' and use_adaptive:
-        lineInt = integratePointsAdaptiveANT(computePoint_weighted, tol=adaptive_tol, maxN=N, debug=True)
+        lineInt = integratePointsAdaptiveANT(computePoint_weighted, tol=adaptive_tol)
     else:
+        if showText:
+            print(f'Complex Integration over {N} points...')
         lineInt = integratePoints(computePoint, int(N), parallel, numWorkers)
     
     #Add integration points for Fermi Broadening
