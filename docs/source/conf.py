@@ -1,13 +1,37 @@
 import os
 import sys
 
+# Ensure both docs dir and repo root are importable
 sys.path.insert(0, os.path.abspath('..'))
+sys.path.insert(0, os.path.abspath('../..'))
 
-# Mock imports for autodoc
+# Provide a resilient stub for 'gauopen' when unavailable (e.g., CI/docs builds)
+try:
+    import gauopen  # type: ignore
+except Exception:  # pragma: no cover - only for docs build environments
+    import types
+
+    gauopen = types.ModuleType('gauopen')
+
+    class _Placeholder:  # minimal stand-in to satisfy attribute access
+        def __getattr__(self, _name):
+            return self
+
+        def __call__(self, *args, **kwargs):
+            return self
+
+    # Expose expected attributes used by the codebase
+    gauopen.QCOpMat = _Placeholder()
+    gauopen.QCBinAr = _Placeholder()
+    gauopen.QCUtil = _Placeholder()
+
+    sys.modules['gauopen'] = gauopen
+
+# Mock imports for autodoc (belt-and-suspenders with the stub above)
 autodoc_mock_imports = ['gauopen']
 
 project = 'gauNEGF'
-copyright = '2024'
+copyright = '2025'
 author = 'William Livernois'
 
 extensions = [
