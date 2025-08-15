@@ -201,7 +201,7 @@ def integratePoints(computePointFunc, numPoints, parallel=False, numWorkers=None
         if debug:
             print('Using numpy built-in parallelization for matrix operations')
         result = np.zeros_like(computePointFunc(0))
-        for i in range(numPoints):
+        for i in range(int(numPoints)):
             result += computePointFunc(i)
         return result
     
@@ -412,7 +412,7 @@ def bisectFermi(V, Vc, D, Gam, Nexp, conv=1e-3, Eminf=-1e6):
 def densityRealN(F, S, g, Emin, mu, N=100, T=300, parallel=False,
                 numWorkers=None, showText=True):
     """
-    Calculate equilibrium density matrix using real-axis integration.
+    Calculate equilibrium density matrix using real-axis integration on a specified grid.
 
     Performs numerical integration along the real energy axis using Gauss-Legendre
     quadrature. Suitable for equilibrium calculations with energy-dependent
@@ -469,11 +469,9 @@ def densityRealN(F, S, g, Emin, mu, N=100, T=300, parallel=False,
 
 def densityReal(F, S, g, Emin, mu, tol=1e-3, T=0, maxN=1000, debug=False):
     """
-    Calculate equilibrium density matrix using real-axis integration.
+    Calculate equilibrium density matrix using adaptive real-axis integration.
 
-    Performs numerical integration along the real energy axis using Gauss-Legendre
-    quadrature. Suitable for equilibrium calculations with energy-dependent
-    self-energies.
+    Wrapper for densityRealN() using the tol and maxN specification to determine grid size
 
     Parameters
     ----------
@@ -501,44 +499,22 @@ def densityReal(F, S, g, Emin, mu, tol=1e-3, T=0, maxN=1000, debug=False):
     ndarray
         Density matrix
     """
-    kT = kB*T
-    Emax = mu + 5*kT
-    mid = (Emax-Emin)/2
-    defInt = np.array(np.zeros(np.shape(F)), dtype=complex)
-    
-    def computePoint(xi, wi):
-        E = mid*(xi + 1) + Emin
-        return mid*wi*Gr(F, S, g, E)*fermi(E, mu, T)
-    
-    x = np.array([0.0])
-    w = np.array([1.0])
-    x_ = np.array([], dtype=float)
+    P = np.zeros_like(F)
+    N = 1
     maxDP = 1e9
-    while maxDP > tol and len(x_) < maxN:
-        P_old = defInt.copy()
-        defInt/= 2
-        for xi, wi in zip(x, w):
-            defInt += computePoint(xi, wi)
-        maxDP = np.max(np.abs(defInt - P_old))
-        if debug:
-            wdebug = np.ones(len(x_)) / max(1, len(x_))
-            defInt_debug = np.zeros_like(defInt)
-            for xi, wi in zip(x_, wdebug):
-                defInt_debug += computePoint(xi, wi)
-            maxDP_debug = np.max(np.abs(defInt - defInt_debug))
-            P_diff = np.max(np.abs(defInt - defInt_debug))
-            print(f"Debug: N={len(x_)}, maxDP_debug={maxDP_debug:.2E}, P_diff={P_diff:.2E}")
-        if maxDP < tol:
-            print(f'Real integration converged to {maxDP:.2E} in {len(x_)} points.')
-            return (-1+0j)*np.imag(defInt)/(np.pi)
-        # Accumulate points used so far, then generate new midpoints between all boundaries
-        x_ = np.sort(np.concatenate((x_, x)))
-        edges = np.concatenate((np.array([-1.0]), x_, np.array([1.0])))
-        x = 0.5*(edges[:-1] + edges[1:])
-        w = np.ones(len(x)) / max(1, len(x))
-    
-    print(f'Real integration did not converge in {maxN} points (error: {maxDP:.2E}).')
-    return (-1+0j)*np.imag(defInt)/(np.pi)
+    while N<maxN:
+        P_ = P.copy()
+
+        P = densityRealN(F, S, g, Emin, mu, N, T, showText=False)
+        maxDP = np.max(np.abs(P - P_))
+        if maxDP< tol:
+            print(f'Adaptive integration converged to {maxDP:.3e} in {N} points.')
+            return P
+        N *= 2
+
+    print(f'Warning: adaptive integration not converged after {maxN} points: maxDP={maxDP:.2E}')
+    return P
+   
 
 def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=300, parallel=False,
                 numWorkers=None, showText=True):
@@ -643,7 +619,7 @@ def densityGrid(F, S, g, mu1, mu2, ind=None, tol=1e-3, T=300, debug=False):
     Calculate non-equilibrium density matrix using real-axis integration.
 
     Performs numerical integration for the non-equilibrium part of the density
-    matrix when a bias voltage is applied. Uses Gauss-Legendre quadrature.
+    matrix when a bias voltage is applied. Uses ANT modified Gauss-Chebyshev quadrature.
 
     Parameters
     ----------
@@ -894,7 +870,7 @@ def calcEmin(F, S, g, tol=1e-5, maxN=1000):
         counter += 1
     if counter == maxN:
         print(f'Warning: Emin still not within tolerance (final value = {dP}) after {maxN} energy samples')
-    print(f'Final Emin: {Emin} eV, DOS = {dP:.2E}')
+    print(f'Calculated Emin: {Emin} eV, DOS = {dP:.2E}')
     return Emin
 
 def integralFit(F, S, g, mu, Eminf=-1e6, tol=1e-5, T=0, maxN=1000):

@@ -201,7 +201,7 @@ class NEGFE(NEGF):
             Method for Fermi search: 'muller', 'secant', or 'predict' (default: 'muller')
         """
         super().setVoltage(qV, fermi, Emin, Eminf)
-        if self.mu1 != self.mu2:
+        if self.mu1 != self.mu2 and self.N1 is not None:
             self.Nnegf=50 # Default grid
         if self.updFermi:
             self.fermiMethod = fermiMethod
@@ -219,7 +219,7 @@ class NEGFE(NEGF):
         Emin : float or None, optional
             Minimum energy for integration (default: None)
         """
-        if self.Emin is None and tol is not None:
+        if Emin is None and tol is not None:
             self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, tol, 1000)
         else:
             self.Emin = Emin
@@ -307,8 +307,12 @@ class NEGFE(NEGF):
         tuple
             (energies, occupations) - Sorted eigenvalues and occupations
         """
-        print('Calculating lower density matrix:') 
-        P = densityReal(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
+        print('Calculating lower density matrix:')
+        if self.N2 is None:
+            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, self.tol, 1000)
+            P = densityReal(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
+        else:
+            P = densityRealN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
         nLower = np.trace(self.S@P).real 
 
         # Fermi Energy Update using local self-energy approximation
