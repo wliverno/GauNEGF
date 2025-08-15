@@ -663,7 +663,7 @@ class NEGF(object):
         """
         # Run Gaussian, update SCF Energy
         try:
-            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="DENSITY", miscroute=self.otherRoute)
+            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="DENSITY", miscroute=self.otherRoute, add_section=self.section)
         except Exception as e:
             print("WARNING: DFT METHOD HAD AN ERROR, CYCLE INVALID:")
             print(e)
