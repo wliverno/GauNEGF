@@ -446,8 +446,9 @@ def densityRealN(F, S, g, Emin, mu, N=100, T=300, parallel=False,
     ndarray
         Density matrix
     """
+    nKT= 10
     kT = kB*T
-    Emax = mu + 5*kT
+    Emax = mu + nKT*kT
     mid = (Emax-Emin)/2
     defInt = np.array(np.zeros(np.shape(F)), dtype=complex)
     x,w = roots_legendre(N)
@@ -554,12 +555,13 @@ def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=300, parallel=False,
     ndarray
         Non-equilibrium contribution to density matrix
     """
+    nKT= 10
     kT = kB*T
     muLo = min(mu1, mu2)
     muHi = max(mu1, mu2)
     dInt = np.sign(mu2 - mu1)
-    Emax = muHi + 5*kT
-    Emin = muLo - 5*kT
+    Emax = muHi + nKT*kT
+    Emin = muLo - nKT*kT
     mid = (Emax-Emin)/2
     den = np.array(np.zeros(np.shape(F)), dtype=complex)
     x,w = roots_legendre(N)
@@ -589,12 +591,13 @@ def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=300, parallel=False,
 
 # Get non-equilibrium density at a single contact (ind) using a real energy grid
 def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=300):
+    nKT= 10
     kT = kB*T
     muLo = min(mu1, mu2)
     muHi = max(mu1, mu2)
     dInt = np.sign(mu2 - mu1)
-    Emax = muHi + 5*kT
-    Emin = muLo - 5*kT
+    Emax = muHi + nKT*kT
+    Emin = muLo - nKT*kT
     Egrid = np.linspace(Emin, Emax, N)
     den = np.array(np.zeros(np.shape(F)), dtype=complex)
     print(f'Real integration over {N} points...')
@@ -651,12 +654,13 @@ def densityGrid(F, S, g, mu1, mu2, ind=None, tol=1e-3, T=300, debug=False):
     ndarray
         Non-equilibrium contribution to density matrix
     """
+    nKT= 10
     kT = kB*T
     muLo = min(mu1, mu2)
     muHi = max(mu1, mu2)
     dInt = np.sign(mu2 - mu1)
-    Emax = muHi + 5*kT
-    Emin = muLo - 5*kT
+    Emax = muHi + nKT*kT
+    Emin = muLo - nKT*kT
     mid = (Emax-Emin)/2
     den = np.array(np.zeros(np.shape(F)), dtype=complex)
     
@@ -726,7 +730,7 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=300, parallel=False,
     for transport calculations, matching the ANT.Gaussian implementation.
     """
     #Construct circular contour
-    nKT= 5
+    nKT= 10
     broadening = nKT*kB*T
     Emax = mu-broadening
     center = (Emin+Emax)/2
@@ -827,7 +831,7 @@ def densityComplex(F, S, g, Emin, mu, tol=1e-3, T=300, debug=False):
     for transport calculations, matching the ANT.Gaussian implementation.
     """
     #Construct circular contour
-    nKT= 5
+    nKT= 10
     broadening = nKT*kB*T
     Emax = mu-broadening
     center = (Emin+Emax)/2
@@ -840,7 +844,7 @@ def densityComplex(F, S, g, Emin, mu, tol=1e-3, T=300, debug=False):
         dz = 1j * r * np.exp(1j*theta)
         return (np.pi/2)*wi*Gr(F, S, g, z)*fermi(z, mu, T)*dz
     
-
+    print('Complex Contour Integration:')
     lineInt = integratePointsAdaptiveANT(computePoint, tol=tol, debug=debug)
     
     #Add integration points for Fermi Broadening
@@ -1004,7 +1008,7 @@ def integralFitNEGF(F, S, g, fermi, qV, Eminf=-1e6, tol=1e-5, T=0, maxGrid=1000)
     return N
 
 
-def getFermiContact(g, ne, tol=1e-4, Eminf=-1e6, maxcycles=1000, nOrbs=0):
+def getFermiContact(g, ne, tol=1e-4, Eminf=-1e6, maxcycles=1000, T=0, nOrbs=0):
     """
     Calculate Fermi energy for a contact.
 
@@ -1037,12 +1041,12 @@ def getFermiContact(g, ne, tol=1e-4, Eminf=-1e6, maxcycles=1000, nOrbs=0):
     orbs, _ = LA.eig(LA.inv(S)@F)
     orbs = np.sort(np.real(orbs))
     fermi = (orbs[int(ne)-1] + orbs[int(ne)])/2
-    Emin, N1, N2 = integralFit(F, S, g, fermi, Eminf, tol, T=0, maxN=maxcycles)
+    Emin, N1, N2 = integralFit(F, S, g, fermi, Eminf, tol, T, maxN=maxcycles)
     Emax = max(orbs)
     return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, 
-                        Eminf, tol, maxcycles, nOrbs)[0]
+                        Eminf, T, tol, maxcycles, nOrbs)[0]
 
-def getFermi1DContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
+def getFermi1DContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, T=0, maxcycles=1000):
     """
     Calculate Fermi energy for a 1D chain contact.
 
@@ -1084,12 +1088,12 @@ def getFermi1DContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, maxcycles=1000):
     orbs, _ = LA.eig(LA.inv(Sorbs)@Forbs)
     orbs = np.sort(np.real(orbs))
     fermi = (orbs[2*int(ne)-1] + orbs[2*int(ne)])/2
-    Emin, N1, N2 = integralFit(Forbs, Sorbs, gorbs, fermi, Eminf, tol, T=0, maxN=maxcycles)
+    Emin, N1, N2 = integralFit(Forbs, Sorbs, gorbs, fermi, Eminf, tol, T, maxN=maxcycles)
     Emax = max(orbs)
-    return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, Eminf, tol, maxcycles)
+    return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, Eminf, T, tol, maxcycles)
 
 # Calculate the fermi energy of the surface Green's Function object
-def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e-4, maxcycles=20, nOrbs=0):
+def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, T=0, tol=1e-4, maxcycles=20, nOrbs=0):
     """
     Calculate Fermi energy using bisection method.
 
@@ -1131,9 +1135,9 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e
     print(f'Eminf DOS = {DOSg(g.F,g.S,g,Eminf)}')
     fermi = fermiGuess
     if N2 is None:
-        pLow = densityReal(g.F, g.S, g, Eminf, Emin, tol, T=0, showText=False)
+        pLow = densityReal(g.F, g.S, g, Eminf, Emin, tol, T, showText=False)
     else:
-        pLow = densityRealN(g.F, g.S, g, Eminf, Emin, N2, T=0, showText=False)
+        pLow = densityRealN(g.F, g.S, g, Eminf, Emin, N2, T, showText=False)
     if nOrbs==0:
         nELow = np.trace(pLow@g.S)
     else:
@@ -1142,9 +1146,9 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, tol=1e
     if nELow >= ne:
         raise Exception('Calculated Fermi energy is below lowest orbital energy!')
     if N1 is None:
-        pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, tol, T=0, showText=False, method='legendre')
+        pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, tol, T, showText=False, method='legendre')
     else:
-        pMu = lambda E: densityComplexN(g.F, g.S, g, Emin, E, N1, T=0, showText=False, method='legendre')
+        pMu = lambda E: densityComplexN(g.F, g.S, g, Emin, E, N1, T, showText=False, method='legendre')
     
     # Fermi search using bisection method (F not changing, highly stable)
     Ncurr = -1
