@@ -25,7 +25,11 @@ from scipy.special import roots_legendre
 from scipy.special import roots_chebyu
 import matplotlib.pyplot as plt
 import warnings
-#import cupy as cp
+try:
+    import cupy as cp
+    isCuda = cp.cuda.is_available()
+except:
+    isCuda = False
 
 # Parallelization packages
 from multiprocessing import Pool
@@ -62,6 +66,53 @@ def Gr(F, S, g, E):
         Retarded Green's function G(E) = [ES - F - Σ(E)]^(-1)
     """
     return LA.inv(E*S - F - g.sigmaTot(E))
+
+def GrIntVectorized(F, S, g, Elist, weights):
+    """
+    Integrate retarded Green's function for a list of energies using vectorization.
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix (NxN)
+    S : ndarray
+        Overlap matrix (NxN)
+    g : surfG object
+        Surface Green's function calculator
+    Elist : ndarray
+        Array of energies in eV
+
+    Returns
+    -------
+    ndarray
+        Retarded Green's function G(E) for each energy in Elist (MxNxN)
+    """
+    assert Elist.size == weights.size, "Elist and weights must have the same length"
+    assert F.shape == S.shape, "F and S must have the same shape"
+    assert F.shape[0] == F.shape[1], "F and S must be square matrices"
+
+    M = Elist.size  # Number of points in the grid
+    N = F.shape[0]  # Assuming F is square (NxN)
+
+    # Use CuPy if cuda available, otherwise numpy
+    solver = cp if isCuda else np
+    Elist = solver.array(Elist)
+    weights = solver.array(weights)
+    S = solver.array(S)
+    F = solver.array(F)
+
+    #Generate vectorized matrices
+    S_repeated = solver.tile(S, (M, 1, 1))  # Shape (MxNxN)
+    F_repeated = solver.tile(F, (M, 1, 1))  # Shape (MxNxN)
+    I = solver.eye(N)  # Shape (NxN)
+    I_repeated = solver.tile(I, (M, 1, 1))  # Shape (MxNxN)
+    SigmaTot = solver.array([g.sigmaTot(E) for E in Elist])  # Shape (MxNxN)
+
+    #Solve for retarded Green's function - NOTE: This is the bottleneck for larger systems!
+    Gr_vec = solver.linalg.solve(Elist[:, None, None] * S_repeated - F_repeated - SigmaTot, I_repeated)
+
+    #Sum up using weights, convert back to numpy array
+    return np.array(solver.sum(Gr_vec*weights[:, None, None]))  
 
 def fermi(E, mu, T):
     """
@@ -232,7 +283,6 @@ def integratePoints(computePointFunc, numPoints, parallel=False, numWorkers=None
         except (AttributeError, TypeError):
             # Fallback to sequential processing if parallel fails
             return sum(process_chunk(chunk) for chunk in chunks)
-
 def integratePointsAdaptiveANT(computePoint, tol=1e-3, maxN=1458, debug=False):
     """
     Adaptive integration using ANT-modified Gauss-Chebyshev quadrature (IntCompPlane subroutine from ANT.Gaussian package)
@@ -409,8 +459,7 @@ def bisectFermi(V, Vc, D, Gam, Nexp, conv=1e-3, Eminf=-1e6):
     return fermi
 
 ## ENERGY DEPENDENT DENSITY FUNCTIONS
-def densityRealN(F, S, g, Emin, mu, N=100, T=300, parallel=False,
-                numWorkers=None, showText=True):
+def densityRealN(F, S, g, Emin, mu, N=100, T=300, showText=True):
     """
     Calculate equilibrium density matrix using real-axis integration on a specified grid.
 
@@ -434,10 +483,6 @@ def densityRealN(F, S, g, Emin, mu, N=100, T=300, parallel=False,
         Number of integration points (default: 100)
     T : float, optional
         Temperature in Kelvin (default: 300)
-    parallel : bool, optional
-        Whether to use parallel processing (default: False)
-    numWorkers : int, optional
-        Number of worker processes for parallel mode
     showText : bool, optional
         Whether to print progress messages (default: True)
 
@@ -454,14 +499,13 @@ def densityRealN(F, S, g, Emin, mu, N=100, T=300, parallel=False,
     x,w = roots_legendre(N)
     x = np.real(x)
     
-    def computePoint(i):
-        E = mid*(x[i] + 1) + Emin
-        return mid*w[i]*Gr(F, S, g, E)*fermi(E, mu, T)
+    Elist = mid*(x + 1) + Emin
+    weights = mid*w*fermi(Elist, mu, T)
     
     if showText:
-        print(f'Real integration over {N} points...')
+        print(f'Integrating {N} points along real axis...')
 
-    defInt = integratePoints(computePoint, int(N), parallel, numWorkers)
+    defInt = GrIntVectorized(F, S, g, Elist, weights)
 
     if showText:
         print('Integration done!')
@@ -517,13 +561,12 @@ def densityReal(F, S, g, Emin, mu, tol=1e-3, T=0, maxN=1000, debug=False):
     return P
    
 
-def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=300, parallel=False,
-                numWorkers=None, showText=True):
+def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=300, showText=True):
     """
     Calculate non-equilibrium density matrix using real-axis integration.
 
     Performs numerical integration for the non-equilibrium part of the density
-    matrix when a bias voltage is applied. Uses Gauss-Legendre quadrature.
+    matrix when a bias voltage is applied. Uses vectorized integration for efficiency.
 
     Parameters
     ----------
@@ -543,10 +586,6 @@ def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=300, parallel=False,
         Number of integration points (default: 100)
     T : float, optional
         Temperature in Kelvin (default: 300)
-    parallel : bool, optional
-        Whether to use parallel processing (default: False)
-    numWorkers : int, optional
-        Number of worker processes for parallel mode
     showText : bool, optional
         Whether to print progress messages (default: True)
 
@@ -567,22 +606,13 @@ def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=300, parallel=False,
     x,w = roots_legendre(N)
     x = np.real(x)
     
-    def computePoint(i):
-        E = mid*(x[i] + 1) + Emin
-        GrE = Gr(F, S, g, E)
-        GaE = GrE.conj().T
-        if ind == None:
-            sig = g.sigmaTot(E)
-        else:
-            sig = g.sigma(E, ind)
-        Gamma = 1j*(sig - sig.conj().T)
-        dFermi = fermi(E, muHi, T) - fermi(E, muLo, T)
-        return mid*w[i]*(GrE@Gamma@GaE)*dFermi*dInt
-     
+    energies = mid*(x + 1) + Emin
+    weights = mid*w*fermi(energies, muHi, T) - mid*w*fermi(energies, muLo, T)
+
     if showText:
         print(f'Real integration over {N} points...')
     
-    den = integratePoints(computePoint, int(N), parallel, numWorkers)
+    den = GrIntVectorized(F, S, g, energies, weights)
 
     if showText:
         print('Integration done!')
@@ -622,7 +652,11 @@ def densityGrid(F, S, g, mu1, mu2, ind=None, tol=1e-3, T=300, debug=False):
     Calculate non-equilibrium density matrix using real-axis integration.
 
     Performs numerical integration for the non-equilibrium part of the density
+<<<<<<< HEAD
     matrix when a bias voltage is applied. Uses ANT modified Gauss-Chebyshev quadrature.
+=======
+    matrix when a bias voltage is applied. Uses adaptive integration.
+>>>>>>> 6210a51 (Added vectorized solver with CuPy integration to density.py)
 
     Parameters
     ----------
@@ -638,16 +672,12 @@ def densityGrid(F, S, g, mu1, mu2, ind=None, tol=1e-3, T=300, debug=False):
         Right contact chemical potential in eV
     ind : int or None, optional
         Contact index (None for total) (default: None)
-    N : int, optional
-        Number of integration points (default: 100)
+    tol : float, optional
+        Convergence tolerance (default: 1e-3)
     T : float, optional
         Temperature in Kelvin (default: 300)
-    parallel : bool, optional
-        Whether to use parallel processing (default: False)
-    numWorkers : int, optional
-        Number of worker processes for parallel mode
-    showText : bool, optional
-        Whether to print progress messages (default: True)
+    debug : bool, optional
+        Whether to print debug information (default: False)
 
     Returns
     -------
@@ -680,14 +710,13 @@ def densityGrid(F, S, g, mu1, mu2, ind=None, tol=1e-3, T=300, debug=False):
 
     return den/(2*np.pi)
 
-def densityComplexN(F, S, g, Emin, mu, N=100, T=300, parallel=False, 
-                    numWorkers=None, showText=True, method='ant'):
+def densityComplexN(F, S, g, Emin, mu, N=100, T=300, showText=True, method='ant'):
     """
     Calculate equilibrium density matrix using complex contour integration.
 
     Performs numerical integration along a complex contour that encloses the
     poles of the Fermi function. More efficient than real-axis integration
-    for equilibrium calculations.
+    for equilibrium calculations. Uses vectorized integration for efficiency.
 
     Parameters
     ----------
@@ -705,19 +734,10 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=300, parallel=False,
         Number of integration points (default: 100)
     T : float, optional
         Temperature in Kelvin (default: 300)
-    parallel : bool, optional
-        Whether to use parallel processing (default: False)
-    numWorkers : int, optional
-        Number of worker processes for parallel mode
     showText : bool, optional
         Whether to print progress messages (default: True)
     method : {'ant', 'legendre', 'chebyshev'}, optional
         Integration method to use (default: 'ant')
-    use_adaptive : bool, optional
-        If True, use dyadic adaptive integration on the contour integral. Requires
-        len(w) = 2^n + 1. Defaults to False.
-    adaptive_tol : float, optional
-        Convergence tolerance for adaptive integration (default: 1e-3)
 
     Returns
     -------
@@ -749,15 +769,15 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=300, parallel=False,
         w = 2*np.ones(N)/N
     
     #Integrate along contour
-    def computePoint(i):
-        theta = np.pi/2 * (x[i] + 1)
-        z = center + r*np.exp(1j*theta)
-        dz = 1j * r * np.exp(1j*theta)
-        return (np.pi/2)*w[i]*Gr(F, S, g, z)*fermi(z, mu, T)*dz
+    theta = np.pi/2 * (x + 1)
+    Elist = center + r*np.exp(1j*theta)
+    dz = 1j * r * np.exp(1j*theta)
+    weights = (np.pi/2)*w*fermi(Elist, mu, T)*dz
 
     if showText:
         print(f'Complex Integration over {N} points...')
-    lineInt = integratePoints(computePoint, N, parallel, numWorkers)
+
+    lineInt = GrIntVectorized(F, S, g, Elist, weights)
     
     #Add integration points for Fermi Broadening
     if T>0:
@@ -770,11 +790,9 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=300, parallel=False,
         else: # Trapezoidal rule
             x_fermi = np.linspace(-1, 1, Nbroad)
             w_fermi = 2*np.ones(Nbroad)/Nbroad
-        def computePointBroadening(i):
-            E = broadening * (x_fermi[i]) + mu
-            return broadening*w_fermi[i]*Gr(F, S, g, E)*fermi(E, mu, T)
-    
-        lineInt += integratePoints(computePointBroadening, Nbroad, parallel, numWorkers)
+        Elist = broadening * (x_fermi) + mu
+        weights = broadening*w_fermi*fermi(Elist, mu, T)
+        lineInt += GrIntVectorized(F, S, g, Elist, weights)
 
     if showText:
         print('Integration done!')
@@ -788,7 +806,7 @@ def densityComplex(F, S, g, Emin, mu, tol=1e-3, T=300, debug=False):
 
     Performs numerical integration along a complex contour that encloses the
     poles of the Fermi function. More efficient than real-axis integration
-    for equilibrium calculations.
+    for equilibrium calculations. Uses adaptive integration.
 
     Parameters
     ----------
@@ -802,23 +820,12 @@ def densityComplex(F, S, g, Emin, mu, tol=1e-3, T=300, debug=False):
         Lower bound for integration in eV
     mu : float
         Chemical potential in eV
-    N : int, optional
-        Number of integration points (default: 100)
+    tol : float, optional
+        Convergence tolerance (default: 1e-3)
     T : float, optional
         Temperature in Kelvin (default: 300)
-    parallel : bool, optional
-        Whether to use parallel processing (default: False)
-    numWorkers : int, optional
-        Number of worker processes for parallel mode
-    showText : bool, optional
-        Whether to print progress messages (default: True)
-    method : {'ant', 'legendre', 'chebyshev'}, optional
-        Integration method to use (default: 'ant')
-    use_adaptive : bool, optional
-        If True, use dyadic adaptive integration on the contour integral. Requires
-        len(w) = 2^n + 1. Defaults to False.
-    adaptive_tol : float, optional
-        Convergence tolerance for adaptive integration (default: 1e-3)
+    debug : bool, optional
+        Whether to print debug information (default: False)
 
     Returns
     -------
