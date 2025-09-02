@@ -30,11 +30,6 @@ import time
 import matplotlib.pyplot as plt
 from numpy import savetxt
 
-# Gaussian interface packages
-from gauopen import QCOpMat as qco
-from gauopen import QCBinAr as qcb
-from gauopen import QCUtil as qcu
-
 #Constants
 kB = 8.617e-5           # eV/Kelvin
 
