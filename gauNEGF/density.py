@@ -80,12 +80,14 @@ def GrIntVectorized(F, S, g, Elist, weights):
     g : surfG object
         Surface Green's function calculator
     Elist : ndarray
-        Array of energies in eV
+        Array of energies in eV (Mx1)
+    weights : ndarray
+        Array of weights for each energy (Mx1)
 
     Returns
     -------
     ndarray
-        Retarded Green's function G(E) for each energy in Elist (MxNxN)
+        Retarded Green's function G(E) integrated over the energy grid (NxN)
     """
     assert Elist.size == weights.size, "Elist and weights must have the same length"
     assert F.shape == S.shape, "F and S must have the same shape"
@@ -113,6 +115,65 @@ def GrIntVectorized(F, S, g, Elist, weights):
 
     #Sum up using weights, convert back to numpy array
     return np.array(solver.sum(Gr_vec*weights[:, None, None]))  
+
+def GrLessVectorized(F, S, g, Elist, weights, ind=None):
+    """
+    Integrate nonequilibrium Green's function for a list of energies using vectorization.
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix (NxN)
+    S : ndarray
+        Overlap matrix (NxN)
+    g : surfG object
+        Surface Green's function calculator
+    Elist : ndarray
+        Array of energies in eV (Mx1)
+    weights : ndarray
+        Array of weights for each energy (Mx1)
+    ind : int, optional
+        Contact index for partial density calculation (default: None)
+
+    Returns
+    -------
+    ndarray
+        Nonequilibrium Green's function G<(E) integrated over the energy grid (NxN)
+    """
+    assert Elist.size == weights.size, "Elist and weights must have the same length"
+    assert F.shape == S.shape, "F and S must have the same shape"
+    assert F.shape[0] == F.shape[1], "F and S must be square matrices"
+
+    M = Elist.size  # Number of points in the grid
+    N = F.shape[0]  # Assuming F is square (NxN)
+
+    # Use CuPy if cuda available, otherwise numpy
+    solver = cp if isCuda else np
+    Elist = solver.array(Elist)
+    weights = solver.array(weights)
+    S = solver.array(S)
+    F = solver.array(F)
+
+    #Generate vectorized matrices
+    S_repeated = solver.tile(S, (M, 1, 1))  # Shape (MxNxN)
+    F_repeated = solver.tile(F, (M, 1, 1))  # Shape (MxNxN)
+    I = solver.eye(N)  # Shape (NxN)
+    I_repeated = solver.tile(I, (M, 1, 1))  # Shape (MxNxN)
+    SigmaTot = solver.array([g.sigmaTot(E) for E in Elist])  # Shape (MxNxN)
+
+    #Solve for retarded Green's function - NOTE: This is the bottleneck for larger systems!
+    Gr_vec = solver.linalg.solve(Elist[:, None, None] * S_repeated - F_repeated - SigmaTot, I_repeated)
+    Ga_vec = solver.conj(Gr_vec).transpose(0, 2, 1) # Shape (MxNxN)
+    if ind is not None:
+        SigList = SigmaTot
+    else:
+        SigList = [g.sigma(E, i) for i in range(N)]
+    GammaList = [1j*(sig - sig.conj().T) for sig in SigList]
+
+    Gless_vec = solver.matmul(solver.matmul(Gr_vec, GammaList), Ga_vec)
+
+    #Sum up using weights, convert back to numpy array
+    return np.array(solver.sum(Gless_vec*weights[:, None, None]))  
 
 def fermi(E, mu, T):
     """
@@ -290,7 +351,7 @@ def integratePointsAdaptiveANT(computePoint, tol=1e-3, maxN=1458, debug=False):
     Parameters
     ----------
     computePoint : callable
-        Function that computes a single integration point. Should take a weight and point and return a matrix/array.
+        Function that computes integral over a list of weights and points. Should return a matrix/array.
     tol : float, optional
         Tolerance for the adaptive integration.
     maxN : int, optional
@@ -308,12 +369,12 @@ def integratePointsAdaptiveANT(computePoint, tol=1e-3, maxN=1458, debug=False):
     P = None
     N = 2
     maxDP = 1e10
-    while N<maxN:
+    while N<=maxN:
         x, w = getANTPoints(N)
 
         if prev_x is None:
             # first level: no reuse
-            P = computePoint(x[0], w[0]) + computePoint(x[1], w[1])
+            P = computePoint(x[0:2], w[0:2])
         else:
             # mark old nodes robustly by value
             old_mask = np.isin(np.round(x, 14), np.round(prev_x, 14))
@@ -326,13 +387,10 @@ def integratePointsAdaptiveANT(computePoint, tol=1e-3, maxN=1458, debug=False):
             # scale previous integral + add only new-node contributions
             new_mask = ~old_mask
             new_P = P*ratio
-            for xi, wi in zip(x[new_mask], w[new_mask]):
-                new_P += computePoint(xi, wi)
+            new_P += computePoint(x[new_mask], w[new_mask])
             maxDP = np.max(np.abs(new_P-P))
             if debug:
-                P_debug = np.zeros_like(P)
-                for i in range(N):
-                    P_debug += computePoint(x[i], w[i])
+                P_debug = computePoint(x, w)
                 maxDP_debug = np.max(np.abs(P_debug-P))
                 maxDiff = np.max(np.abs(P_debug-new_P))
                 print(f"N={N}, nested-weight ratio ~ {ratio:.3f}, maxDP={maxDP:.3e}")
@@ -598,7 +656,7 @@ def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=300, showText=True):
     kT = kB*T
     muLo = min(mu1, mu2)
     muHi = max(mu1, mu2)
-    dInt = np.sign(mu2 - mu1)
+    dInt = np.sign(mu2 - mu1) # Sign of bias voltage
     Emax = muHi + nKT*kT
     Emin = muLo - nKT*kT
     mid = (Emax-Emin)/2
@@ -607,12 +665,13 @@ def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=300, showText=True):
     x = np.real(x)
     
     energies = mid*(x + 1) + Emin
-    weights = mid*w*fermi(energies, muHi, T) - mid*w*fermi(energies, muLo, T)
+    dfermi = fermi(energies, muHi, T) - fermi(energies, muLo, T)
+    weights = mid*w*dfermi*dInt
 
     if showText:
         print(f'Real integration over {N} points...')
     
-    den = GrIntVectorized(F, S, g, energies, weights)
+    den = GrLessVectorized(F, S, g, energies, weights, ind)
 
     if showText:
         print('Integration done!')
@@ -625,7 +684,7 @@ def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=300):
     kT = kB*T
     muLo = min(mu1, mu2)
     muHi = max(mu1, mu2)
-    dInt = np.sign(mu2 - mu1)
+    dInt = np.sign(mu2 - mu1) # Sign of bias voltage
     Emax = muHi + nKT*kT
     Emin = muLo - nKT*kT
     Egrid = np.linspace(Emin, Emax, N)
@@ -642,7 +701,7 @@ def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=300):
             sig = g.sigma(E, ind)
         Gamma = 1j*(sig - sig.conj().T)
         dFermi = fermi(E, muHi, T) - fermi(E, muLo, T)
-        den += (GrE@Gamma@GaE)*dFermi*dE
+        den += (GrE@Gamma@GaE)*dFermi*dE*dInt
     print('Integration done!')
     
     return den/(2*np.pi)
@@ -652,11 +711,7 @@ def densityGrid(F, S, g, mu1, mu2, ind=None, tol=1e-3, T=300, debug=False):
     Calculate non-equilibrium density matrix using real-axis integration.
 
     Performs numerical integration for the non-equilibrium part of the density
-<<<<<<< HEAD
-    matrix when a bias voltage is applied. Uses ANT modified Gauss-Chebyshev quadrature.
-=======
-    matrix when a bias voltage is applied. Uses adaptive integration.
->>>>>>> 6210a51 (Added vectorized solver with CuPy integration to density.py)
+    matrix when a bias voltage is applied. Uses ANT-modified Gauss-Chebyshev quadrature.
 
     Parameters
     ----------
@@ -688,25 +743,21 @@ def densityGrid(F, S, g, mu1, mu2, ind=None, tol=1e-3, T=300, debug=False):
     kT = kB*T
     muLo = min(mu1, mu2)
     muHi = max(mu1, mu2)
-    dInt = np.sign(mu2 - mu1)
+    dInt = np.sign(mu2 - mu1) # Sign of bias voltage
     Emax = muHi + nKT*kT
     Emin = muLo - nKT*kT
     mid = (Emax-Emin)/2
     den = np.array(np.zeros(np.shape(F)), dtype=complex)
     
-    def computePoint(xi, wi):
-        E = mid*(xi + 1) + Emin
-        GrE = Gr(F, S, g, E)
-        GaE = GrE.conj().T
-        if ind == None:
-            sig = g.sigmaTot(E)
-        else:
-            sig = g.sigma(E, ind)
-        Gamma = 1j*(sig - sig.conj().T)
+    def computePoint(x, w):
+        E = mid*(x + 1) + Emin
         dFermi = fermi(E, muHi, T) - fermi(E, muLo, T)
-        return mid*wi*(GrE@Gamma@GaE)*dFermi*dInt
+        weights = mid*w*dFermi*dInt
+        return GrLessVectorized(F, S, g, E, weights, ind)
      
     den = integratePointsAdaptiveANT(computePoint, tol=tol, debug=debug)
+    if debug:
+        print('Integration done!')
 
     return den/(2*np.pi)
 
@@ -845,11 +896,12 @@ def densityComplex(F, S, g, Emin, mu, tol=1e-3, T=300, debug=False):
     r = (Emax-Emin)/2
 
     # For ANT adaptive integration, compute from point-weight pairs
-    def computePoint(xi, wi):
-        theta = np.pi/2 * (xi + 1)
+    def computePoint(x, w):
+        theta = np.pi/2 * (x + 1)
         z = center + r*np.exp(1j*theta)
         dz = 1j * r * np.exp(1j*theta)
-        return (np.pi/2)*wi*Gr(F, S, g, z)*fermi(z, mu, T)*dz
+        weights = (np.pi/2)*w*dz*fermi(z, mu, T)
+        return GrIntVectorized(F, S, g, z, weights)
     
     print('Complex Contour Integration:')
     lineInt = integratePointsAdaptiveANT(computePoint, tol=tol, debug=debug)
@@ -857,9 +909,10 @@ def densityComplex(F, S, g, Emin, mu, tol=1e-3, T=300, debug=False):
     #Add integration points for Fermi Broadening
     if T>0:
         print('Integrating Fermi Broadening:')
-        def computePointBroadening(xi, wi):
-            E = broadening * (xi) + mu
-            return broadening*wi*Gr(F, S, g, E)*fermi(E, mu, T)
+        def computePointBroadening(x, w):
+            E = broadening * (x) + mu
+            weights = broadening*w*fermi(E, mu, T)
+            return GrIntVectorized(F, S, g, E, weights)
     
         lineInt += integratePointsAdaptiveANT(computePointBroadening, tol=tol, debug=debug)
 
