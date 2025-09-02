@@ -122,7 +122,7 @@ class NEGF(object):
 
     """
 
-    def __init__(self, fn, basis="chkbasis", func="b3pw91", spin="r", fullSCF=True, route="", nPulay=4):
+    def __init__(self, fn, basis="chkbasis", func="hf", spin="r", fullSCF=True, route=None, section=None, nPulay=4):
         """
         Initialize NEGF calculator and run initial DFT calculation.
 
@@ -140,6 +140,7 @@ class NEGF(object):
         self.basis = basis
         self.method= spin+func
         self.otherRoute = route     # Other commands that are needed in Gaussian
+        self.section = section
         self.spin = spin
         self.energyDep = False;
         self.Total_E_Old=9999.0;
@@ -220,18 +221,18 @@ class NEGF(object):
         if fullSCF:
             try:
                 print('Checking '+self.chkfile+' for saved data...');
-                self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock=True,chkname=self.chkfile, miscroute=self.otherRoute)
+                self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock=True,chkname=self.chkfile, miscroute=self.otherRoute, add_section=self.section)
             except:
                 print('Checkpoint not loaded, running full SCF...');
-                self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="scf",chkname=self.chkfile, miscroute=self.otherRoute)
+                self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="scf",chkname=self.chkfile, miscroute=self.otherRoute, add_section=self.section)
         
             print("Done!")
             self.F, self.locs = getFock(self.bar, self.spin)
             
         else:
             print('Using default Harris DFT guess to initialize...')
-            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="GUESS",chkname=self.chkfile, miscroute=self.otherRoute)
-            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock=True, miscroute=self.otherRoute)
+            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="GUESS",chkname=self.chkfile, miscroute=self.otherRoute, add_section=section)
+            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock=True, miscroute=self.otherRoute, add_section=section)
             print("Done!")
             self.F, self.locs = getFock(self.bar, self.spin)
     
@@ -662,7 +663,7 @@ class NEGF(object):
         """
         # Run Gaussian, update SCF Energy
         try:
-            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="DENSITY", miscroute=self.otherRoute)
+            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="DENSITY", miscroute=self.otherRoute, add_section=self.section)
         except Exception as e:
             print("WARNING: DFT METHOD HAD AN ERROR, CYCLE INVALID:")
             print(e)
