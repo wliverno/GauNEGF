@@ -98,7 +98,7 @@ def GrIntVectorized(F, S, g, Elist, weights):
 
     # Use CuPy if cuda available, otherwise numpy
     solver = cp if isCuda else np
-    Elist = solver.array(Elist)
+    Elist_ = solver.array(Elist)
     weights = solver.array(weights)
     S = solver.array(S)
     F = solver.array(F)
@@ -111,10 +111,11 @@ def GrIntVectorized(F, S, g, Elist, weights):
     SigmaTot = solver.array([g.sigmaTot(E) for E in Elist])  # Shape (MxNxN)
 
     #Solve for retarded Green's function - NOTE: This is the bottleneck for larger systems!
-    Gr_vec = solver.linalg.solve(Elist[:, None, None] * S_repeated - F_repeated - SigmaTot, I_repeated)
+    Gr_vec = solver.linalg.solve(Elist_[:, None, None] * S_repeated - F_repeated - SigmaTot, I_repeated)
 
     #Sum up using weights, convert back to numpy array
-    return np.array(solver.sum(Gr_vec*weights[:, None, None]))  
+    Gint = solver.sum(Gr_vec*weights[:, None, None], axis=0)
+    return Gint.get() if isCuda else Gint
 
 def GrLessVectorized(F, S, g, Elist, weights, ind=None):
     """
@@ -149,7 +150,7 @@ def GrLessVectorized(F, S, g, Elist, weights, ind=None):
 
     # Use CuPy if cuda available, otherwise numpy
     solver = cp if isCuda else np
-    Elist = solver.array(Elist)
+    Elist_ = solver.array(Elist)
     weights = solver.array(weights)
     S = solver.array(S)
     F = solver.array(F)
@@ -162,7 +163,7 @@ def GrLessVectorized(F, S, g, Elist, weights, ind=None):
     SigmaTot = solver.array([g.sigmaTot(E) for E in Elist])  # Shape (MxNxN)
 
     #Solve for retarded Green's function - NOTE: This is the bottleneck for larger systems!
-    Gr_vec = solver.linalg.solve(Elist[:, None, None] * S_repeated - F_repeated - SigmaTot, I_repeated)
+    Gr_vec = solver.linalg.solve(Elist_[:, None, None] * S_repeated - F_repeated - SigmaTot, I_repeated)
     Ga_vec = solver.conj(Gr_vec).transpose(0, 2, 1) # Shape (MxNxN)
     if ind is not None:
         SigList = SigmaTot
@@ -173,7 +174,8 @@ def GrLessVectorized(F, S, g, Elist, weights, ind=None):
     Gless_vec = solver.matmul(solver.matmul(Gr_vec, GammaList), Ga_vec)
 
     #Sum up using weights, convert back to numpy array
-    return np.array(solver.sum(Gless_vec*weights[:, None, None]))  
+    Gint = solver.sum(Gless_vec*weights[:, None, None], axis=0)
+    return Gint.get() if isCuda else Gint
 
 def fermi(E, mu, T):
     """
@@ -1274,7 +1276,7 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=1e-4, conv=1e-3, maxcycles=10, T=0):
         dE = max(2*abs(Ncurr-ne)/DOSg(g.F, g.S, g, E), dE)
         counter += 1
     counter = 0
-    while abs(ne - Ncurr) > conv and dE > conv and counter < maxcycles:
+    while abs(ne - Ncurr) > conv and counter < maxcycles:
         g.setF(g.F, Ef, Ef)
         P = pMu(Ef)
         Ncurr = np.trace(pMu(Ef)@g.S)
@@ -1305,7 +1307,7 @@ def calcFermiSecant(g, ne, Emin, Ef, N, tol=1e-4, conv=1e-3, maxcycles=10, T=0):
     nCurr = np.trace(P@g.S).real
     dE = conv
     counter = 0
-    while abs(nCurr-ne) > conv and abs(dE) > conv and counter < maxcycles:
+    while abs(nCurr-ne) > conv and counter < maxcycles:
         Ef += dE
         g.setF(g.F, Ef, Ef)
         P = pMu(Ef)
@@ -1389,8 +1391,8 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=1e-4, conv=1e-3, maxcycles=10, T=0):
         P = pMu(E2)
         n2 = np.trace(P@g.S).real - ne
 
-        # Check both relative error and absolute convergence
-        if abs(n2) < conv or abs(dE) < conv:
+        # Check convergence
+        if abs(n2) < conv:
             break
 
         #print("E0 - ", E0, n0, "E1 - ", E1, n1, "E2 - ", E2, n2, " dE ", dE)
