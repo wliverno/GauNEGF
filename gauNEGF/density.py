@@ -407,7 +407,7 @@ def densityRealN(F, S, g, Emin, mu, N=100, T=300, showText=True):
     if showText:
         print(f'Integrating {N} points along real axis...')
 
-    defInt = GrIntVectorized(F, S, g, Elist, weights)
+    defInt = GrInt(F, S, g, Elist, weights)
 
     if showText:
         print('Integration done!')
@@ -687,7 +687,7 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=300, showText=True, method='ant'
             w_fermi = 2*np.ones(Nbroad)/Nbroad
         Elist = broadening * (x_fermi) + mu
         weights = broadening*w_fermi*fermi(Elist, mu, T)
-        lineInt += GrIntVectorized(F, S, g, Elist, weights)
+        lineInt += GrInt(F, S, g, Elist, weights)
 
     if showText:
         print('Integration done!')
