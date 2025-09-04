@@ -25,11 +25,6 @@ from scipy.special import roots_legendre
 from scipy.special import roots_chebyu
 import matplotlib.pyplot as plt
 import warnings
-try:
-    import cupy as cp
-    isCuda = cp.cuda.is_available()
-except:
-    isCuda = False
 
 # Parallelization packages
 from multiprocessing import Pool
@@ -38,6 +33,7 @@ import os
 # Developed Packages:
 from gauNEGF.fermiSearch import DOSFermiSearch
 from gauNEGF.surfG1D import surfG
+from gauNEGF.integrate import *
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
@@ -45,138 +41,6 @@ kB = 8.617e-5           # eV/Kelvin
 
 
 ## HELPER FUNCTIONS
-def Gr(F, S, g, E):
-    """
-    Calculate retarded Green's function at given energy.
-
-    Parameters
-    ----------
-    F : ndarray
-        Fock matrix
-    S : ndarray
-        Overlap matrix
-    g : surfG object
-        Surface Green's function calculator
-    E : float
-        Energy in eV
-
-    Returns
-    -------
-    ndarrayh
-        Retarded Green's function G(E) = [ES - F - Σ(E)]^(-1)
-    """
-    return LA.inv(E*S - F - g.sigmaTot(E))
-
-def GrIntVectorized(F, S, g, Elist, weights):
-    """
-    Integrate retarded Green's function for a list of energies using vectorization.
-
-    Parameters
-    ----------
-    F : ndarray
-        Fock matrix (NxN)
-    S : ndarray
-        Overlap matrix (NxN)
-    g : surfG object
-        Surface Green's function calculator
-    Elist : ndarray
-        Array of energies in eV (Mx1)
-    weights : ndarray
-        Array of weights for each energy (Mx1)
-
-    Returns
-    -------
-    ndarray
-        Retarded Green's function G(E) integrated over the energy grid (NxN)
-    """
-    assert Elist.size == weights.size, "Elist and weights must have the same length"
-    assert F.shape == S.shape, "F and S must have the same shape"
-    assert F.shape[0] == F.shape[1], "F and S must be square matrices"
-
-    M = Elist.size  # Number of points in the grid
-    N = F.shape[0]  # Assuming F is square (NxN)
-
-    # Use CuPy if cuda available, otherwise numpy
-    solver = cp if isCuda else np
-    Elist_ = solver.array(Elist)
-    weights = solver.array(weights)
-    S = solver.array(S)
-    F = solver.array(F)
-
-    #Generate vectorized matrices
-    S_repeated = solver.tile(S, (M, 1, 1))  # Shape (MxNxN)
-    F_repeated = solver.tile(F, (M, 1, 1))  # Shape (MxNxN)
-    I = solver.eye(N)  # Shape (NxN)
-    I_repeated = solver.tile(I, (M, 1, 1))  # Shape (MxNxN)
-    SigmaTot = solver.array([g.sigmaTot(E) for E in Elist])  # Shape (MxNxN)
-
-    #Solve for retarded Green's function - NOTE: This is the bottleneck for larger systems!
-    Gr_vec = solver.linalg.solve(Elist_[:, None, None] * S_repeated - F_repeated - SigmaTot, I_repeated)
-
-    #Sum up using weights, convert back to numpy array
-    Gint = solver.sum(Gr_vec*weights[:, None, None], axis=0)
-    return Gint.get() if isCuda else Gint
-
-def GrLessVectorized(F, S, g, Elist, weights, ind=None):
-    """
-    Integrate nonequilibrium Green's function for a list of energies using vectorization.
-
-    Parameters
-    ----------
-    F : ndarray
-        Fock matrix (NxN)
-    S : ndarray
-        Overlap matrix (NxN)
-    g : surfG object
-        Surface Green's function calculator
-    Elist : ndarray
-        Array of energies in eV (Mx1)
-    weights : ndarray
-        Array of weights for each energy (Mx1)
-    ind : int, optional
-        Contact index for partial density calculation (default: None)
-
-    Returns
-    -------
-    ndarray
-        Nonequilibrium Green's function G<(E) integrated over the energy grid (NxN)
-    """
-    assert Elist.size == weights.size, "Elist and weights must have the same length"
-    assert F.shape == S.shape, "F and S must have the same shape"
-    assert F.shape[0] == F.shape[1], "F and S must be square matrices"
-
-    M = Elist.size  # Number of points in the grid
-    N = F.shape[0]  # Assuming F is square (NxN)
-
-    # Use CuPy if cuda available, otherwise numpy
-    solver = cp if isCuda else np
-    Elist_ = solver.array(Elist)
-    weights = solver.array(weights)
-    S = solver.array(S)
-    F = solver.array(F)
-
-    #Generate vectorized matrices
-    S_repeated = solver.tile(S, (M, 1, 1))  # Shape (MxNxN)
-    F_repeated = solver.tile(F, (M, 1, 1))  # Shape (MxNxN)
-    I = solver.eye(N)  # Shape (NxN)
-    I_repeated = solver.tile(I, (M, 1, 1))  # Shape (MxNxN)
-    SigmaTot = solver.array([g.sigmaTot(E) for E in Elist])  # Shape (MxNxN)
-
-    #Solve for retarded Green's function - NOTE: This is the bottleneck for larger systems!
-    Gr_vec = solver.linalg.solve(Elist_[:, None, None] * S_repeated - F_repeated - SigmaTot, I_repeated)
-    Ga_vec = solver.conj(Gr_vec).transpose(0, 2, 1) # Shape (MxNxN)
-    if ind is not None:
-        SigList = SigmaTot
-    else:
-        SigList = [g.sigma(E, i) for i in range(N)]
-    GammaList = [1j*(sig - sig.conj().T) for sig in SigList]
-
-    Gless_vec = solver.matmul(solver.matmul(Gr_vec, GammaList), Ga_vec)
-
-    #Sum up using weights, convert back to numpy array
-    Gint = solver.sum(Gless_vec*weights[:, None, None], axis=0)
-    return Gint.get() if isCuda else Gint
-
 def fermi(E, mu, T):
     """
     Calculate Fermi-Dirac distribution.
@@ -200,28 +64,6 @@ def fermi(E, mu, T):
         return (E<=mu)*1
     else:
         return 1/(np.exp((E - mu)/kT)+1)
-
-def DOSg(F, S, g, E):
-    """
-    Calculate density of states at given energy.
-
-    Parameters
-    ----------
-    F : ndarray
-        Fock matrix
-    S : ndarray
-        Overlap matrix
-    g : surfG object
-        Surface Green's function calculator
-    E : float
-        Energy in eV
-
-    Returns
-    -------
-    float
-        Density of states at energy E
-    """
-    return -np.trace(np.imag(Gr(F,S, g, E)))/np.pi
 
 def getANTPoints(N):
     """
@@ -673,7 +515,7 @@ def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=300, showText=True):
     if showText:
         print(f'Real integration over {N} points...')
     
-    den = GrLessVectorized(F, S, g, energies, weights, ind)
+    den = GrLessInt(F, S, g, energies, weights, ind)
 
     if showText:
         print('Integration done!')
@@ -755,7 +597,7 @@ def densityGrid(F, S, g, mu1, mu2, ind=None, tol=1e-3, T=300, debug=False):
         E = mid*(x + 1) + Emin
         dFermi = fermi(E, muHi, T) - fermi(E, muLo, T)
         weights = mid*w*dFermi*dInt
-        return GrLessVectorized(F, S, g, E, weights, ind)
+        return GrLessInt(F, S, g, E, weights, ind)
      
     den = integratePointsAdaptiveANT(computePoint, tol=tol, debug=debug)
     if debug:
@@ -830,7 +672,7 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=300, showText=True, method='ant'
     if showText:
         print(f'Complex Integration over {N} points...')
 
-    lineInt = GrIntVectorized(F, S, g, Elist, weights)
+    lineInt = GrInt(F, S, g, Elist, weights)
     
     #Add integration points for Fermi Broadening
     if T>0:
@@ -903,7 +745,7 @@ def densityComplex(F, S, g, Emin, mu, tol=1e-3, T=300, debug=False):
         z = center + r*np.exp(1j*theta)
         dz = 1j * r * np.exp(1j*theta)
         weights = (np.pi/2)*w*dz*fermi(z, mu, T)
-        return GrIntVectorized(F, S, g, z, weights)
+        return GrInt(F, S, g, z, weights)
     
     print('Complex Contour Integration:')
     lineInt = integratePointsAdaptiveANT(computePoint, tol=tol, debug=debug)
@@ -914,7 +756,7 @@ def densityComplex(F, S, g, Emin, mu, tol=1e-3, T=300, debug=False):
         def computePointBroadening(x, w):
             E = broadening * (x) + mu
             weights = broadening*w*fermi(E, mu, T)
-            return GrIntVectorized(F, S, g, E, weights)
+            return GrInt(F, S, g, E, weights)
     
         lineInt += integratePointsAdaptiveANT(computePointBroadening, tol=tol, debug=debug)
 
