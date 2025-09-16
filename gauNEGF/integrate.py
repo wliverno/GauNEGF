@@ -114,10 +114,10 @@ def GrIntVectorized(F, S, g, Elist, weights, solver):
     N = F.shape[0]
     
     # Convert array types to match solver:
-    Elist_ = solver.array(Elist)
+    Elist_ = solver.array(Elist, dtype=solver.complex128)
     weights = solver.array(weights)
-    S = solver.array(S)
-    F = solver.array(F)
+    S = solver.array(S, dtype=solver.complex128)
+    F = solver.array(F, dtype=solver.complex128)
     
     #Generate vectorized matrices conserving memory
     ES_minus_F_minus_Sig = Elist_[:, None, None] * solver.tile(solver.array(S), (M, 1, 1))
@@ -215,11 +215,10 @@ def GrLessVectorized(F, S, g, Elist, weights, solver, ind):
     N = F.shape[0]
     
     # Convert array types to match solver:
-    Elist_ = solver.array(Elist)
+    Elist_ = solver.array(Elist, dtype=solver.complex128)
     weights = solver.array(weights)
-    S = solver.array(S)
-    F = solver.array(F)
-    I = solver.eye(N)
+    S = solver.array(S, dtype=solver.complex128)
+    F = solver.array(F, dtype=solver.complex128)
     
     #Generate Gr and Ga vectorized matrices conserving memory
     ES_minus_F_minus_Sig = Elist_[:, None, None] * solver.tile(S, (M, 1, 1))
@@ -227,7 +226,7 @@ def GrLessVectorized(F, S, g, Elist, weights, solver, ind):
     SigmaTot = solver.array([g.sigmaTot(E) for E in Elist])
     ES_minus_F_minus_Sig -= SigmaTot
     
-    Gr_vec = solver.linalg.solve(ES_minus_F_minus_Sig, solver.tile(I, (M, 1, 1)))
+    Gr_vec = solver.linalg.solve(ES_minus_F_minus_Sig, solver.tile(solver.eye(N), (M, 1, 1)))
     del ES_minus_F_minus_Sig
     
     Ga_vec = solver.conj(Gr_vec).transpose(0, 2, 1)

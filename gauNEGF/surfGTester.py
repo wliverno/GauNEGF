@@ -18,8 +18,8 @@ class surfGTest:
             else:
                 self.sig[1] = formSigma(indsList[1], sig2, self.N, self.S)
         else:
-            self.sig[0][np.ix_(indsList[0], indsList[0])]= np.diag([-0.05j]*len(inds))
-            self.sig[1][np.ix_(indsList[1], indsList[1])]= np.diag([-0.05j]*len(inds))
+            self.sig[0][np.ix_(indsList[0], indsList[0])]= np.diag([-0.05j]*self.N)
+            self.sig[1][np.ix_(indsList[1], indsList[1])]= np.diag([-0.05j]*self.N)
     
     def sigma(self, E, i, conv=1e-3):
         return self.sig[i]
