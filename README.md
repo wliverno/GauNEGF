@@ -58,17 +58,18 @@ from gauNEGF import scf, transport
 negf = scf.NEGF("molecule", basis="lanl2dz", func="b3pw91")
 
 # Set contacts - left contact on atom 1, right contact on atom 2
+# Default contacts: energy independent, Gamma=0.2eV
 negf.setContacts([1], [2])
 
 # Set voltage bias
 negf.setVoltage(0.1)  # 0.1V bias
 
 # Run SCF calculation
-negf.SCF(1e-3, 0.02) # convergence @ 1e-3, damping=0.02
+negf.SCF(1e-3) # convergence @ 1e-3
 
 # Calculate current
-I = transport.quickCurrent(negf.F, negf.S, negf.sig1, negf.sig2, negf.fermi, negf.qV)
-
+harToEV = 27.211386 # Fock matrix uses Hartree units, all others use eV
+I = transport.current(negf.F*harToEV, negf.S, negf.sig1, negf.sig2, negf.fermi, negf.qV)
 ```
 
 ## Documentation
