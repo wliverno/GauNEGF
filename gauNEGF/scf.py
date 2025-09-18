@@ -231,8 +231,8 @@ class NEGF(object):
             
         else:
             print('Using default Harris DFT guess to initialize...')
-            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="GUESS",chkname=self.chkfile, miscroute=self.otherRoute, add_section=section)
-            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock=True, miscroute=self.otherRoute, add_section=section)
+            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="GUESS",chkname=self.chkfile, miscroute=self.otherRoute, add_section=self.section)
+            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock=True, miscroute=self.otherRoute, add_section=self.section)
             print("Done!")
             self.F, self.locs = getFock(self.bar, self.spin)
     

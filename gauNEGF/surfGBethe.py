@@ -36,6 +36,7 @@ kB = 8.617e-5           # eV/Kelvin
 dim = 9                 # size of single atom matrix: 1s + 3p + 5d
 har_to_eV = 27.211386   # eV/Hartree
 Eminf = -1e6            # Setting lower bound to -1e6 eV
+bohr_to_ang = 0.529177  # Bohr radius to Angstrom
 
 # Bethe lattice surface Green's function for a device with contacts
 class surfGB:
@@ -112,6 +113,7 @@ class surfGB:
         self.spin = spin
         orbMap = bar.ibfatm[bar.ibfatm>0] 
         orbTyp = bar.ibftyp[bar.ibfatm>0]
+        coords =np.array([bar.c[i*3:(i+1)*3] for i in range(len(bar.c)//3)])*bohr_to_ang
         self.N = len(orbMap)
 
         # Collect contact information
@@ -120,7 +122,7 @@ class surfGB:
             cList = []
             for atom in contact:
                 inds = np.where(np.isin(orbMap, atom))[0]
-                cList.append(np.array(bar.c[(atom-1)*3:atom*3]))
+                cList.append(coords[atom-1])
                 assert len(inds) == 9, f'Error: Atom {atom} has {len(inds)} basis functions, expecting 9'
                 inds = inds[np.argsort(abs(orbTyp[inds])//1000)]
                 indsList.append(inds)
@@ -128,29 +130,51 @@ class surfGB:
             # Calculate plane direction using SVD
             centeredCoords = cList-np.mean(cList, axis=0)
             _, _, Vt = LA.svd(centeredCoords)
-            self.cVecs.append(Vt[-1])
+            contDir = np.mean(cList, axis=0)-np.mean(coords, axis=0)
+            contVec = Vt[-1]
+            if np.dot(contDir, contVec)<0:
+                contVec *= -1 
+            self.cVecs.append(contVec)
             # Calculate one lattice direction for lining up atoms
             vInd = np.argmin([LA.norm(v - cList[0]) for v in cList[1:]])+1
             latVec = cList[vInd]-cList[0]
-            self.latVecs.append(latVec/LA.norm(latVec))
+            latDist = LA.norm(latVec)
+            self.latVecs.append(latVec/latDist)
             # Calculate rest of lattice directions
-            nVecs = self.genNeighbors(Vt[-1], latVec)
+            nVecs1 = self.genNeighbors(contVec, latVec)
+            # Calculate second direction (in case off by rotation)
+            nVecs2 = self.genNeighbors(contVec, -latVec)
             
             # Use lattice vectors to see what nearest neighbors
             nIndList = []
+            nVecs = nVecs1.copy()
             for c in cList:
                 nAtVecs = []
-                for c2 in cList:
+                for c2 in coords:
                     l = LA.norm(c2-c)
-                    # if within 1.5*nearest neighbor dist and not the same atom
-                    if l < 1.5 * LA.norm(latVec) and not np.allclose(c2, c):
+                    # if within 0.2*nearest neighbor dist and not the same atom
+                    if l > 0.8 * latDist and l < 1.2 * latDist and not np.allclose(c2, c):
                         nAtVecs.append((c2-c)/l) #Unit vector for that direction
+                
+                # Align out of plane vectors (two options)
+                nVecs = nVecs1.copy()
+                outOfPlane = [3,4,5,9,10,11]
+                for vec in nAtVecs:
+                    valList = [np.dot(vec, direction) for direction in nVecs2]
+                    dirInd = np.argmax(valList)
+                    if dirInd in outOfPlane and valList[dirInd]>0.9:
+                        nVecs = nVecs2.copy()
+                        break
+
+                # Now that orientation is fixed, track all neighbors
                 nInds = []
                 for vec in nAtVecs:
                     valList = [np.dot(vec, direction) for direction in nVecs]
-                    nInds.append(np.argmax(valList))
-                    assert valList[nInds[-1]] > 0.9 and nInds[-1] in [0,1,2,6,7,8], \
-                             'Error: Lattice mismatch in atoms!'
+                    dirInd = np.argmax(valList)
+                    if valList[dirInd]>0.9:
+                        nInds.append(dirInd)
+                    else:
+                        print(f'Warning: Lattice {ind} mismatch, neighbor not recorded')
                 # write neighbor indices for each atom
                 nIndList.append(nInds)
             # write direction vectors and neighbors for each contact
@@ -230,7 +254,7 @@ class surfGB:
         out_of_plane_angle = np.arccos(1/np.sqrt(3)) # ~54.74
         
         out_of_plane_vectors = []
-        # Add 30° = pi/6 rotation to base vector before going out of plane
+        # Add 30deg = pi/6 rotation to base vector before going out of plane
         rot_angle = np.pi/6
         K = np.array([[0, -plane_normal[2], plane_normal[1]],
                       [plane_normal[2], 0, -plane_normal[0]],
