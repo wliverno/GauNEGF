@@ -1168,7 +1168,7 @@ def calcFermiSecant(g, ne, Emin, Ef, N, tol=1e-4, conv=1e-3, maxcycles=10, T=0):
     Ef += dE  
     if counter == maxcycles:
         print(f'Warning: Max cycles reached, convergence = {abs(nCurr-ne):.2E}')
-    return Ef, dE, P
+    return Ef, dE, P, abs(nCurr-ne)
 
 def calcFermiMuller(g, ne, Emin, Ef, N, tol=1e-4, conv=1e-3, maxcycles=10, T=0):
     """
@@ -1243,5 +1243,5 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=1e-4, conv=1e-3, maxcycles=10, T=0):
     if counter == maxcycles:
         print(f'Warning: Max cycles reached, convergence = {abs(n2):.2E}')
 
-    return E2, dE, P
+    return E2, dE, P, abs(n2)
 
