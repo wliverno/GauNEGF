@@ -30,12 +30,14 @@ from scipy.linalg import fractional_matrix_power
 
 # Developed packages
 from gauNEGF.density import *
+from gauNEGF.config import (ETA, TEMPERATURE, SURFACE_GREEN_CONVERGENCE, 
+                            FERMI_CALCULATION_TOL, ENERGY_MIN)
 
 #Constants
 kB = 8.617e-5           # eV/Kelvin
 dim = 9                 # size of single atom matrix: 1s + 3p + 5d
 har_to_eV = 27.211386   # eV/Hartree
-Eminf = -1e6            # Setting lower bound to -1e6 eV
+Eminf = ENERGY_MIN      # Setting lower bound from config
 bohr_to_ang = 0.529177  # Bohr radius to Angstrom
 
 # Bethe lattice surface Green's function for a device with contacts
@@ -98,7 +100,7 @@ class surfGB:
         The Journal of Chemical Physics, 134(4), 044118.
         DOI: 10.1063/1.3526044
     """
-    def __init__(self, F, S, contacts, bar,  latFile='Au', spin='r', eta=1e-9, T=0):
+    def __init__(self, F, S, contacts, bar,  latFile='Au', spin='r', eta=ETA, T=TEMPERATURE):
         #Read contact/orbital information and store
         self.cVecs = []
         self.latVecs = []
@@ -174,7 +176,7 @@ class surfGB:
                     if valList[dirInd]>0.9:
                         nInds.append(dirInd)
                     else:
-                        print(f'Warning: Lattice {ind} mismatch, neighbor not recorded')
+                        print(f'Warning: Lattice Vec #{dirInd} mismatch, neighbor not recorded')
                 # write neighbor indices for each atom
                 nIndList.append(nInds)
             # write direction vectors and neighbors for each contact
@@ -456,7 +458,7 @@ class surfGB:
         # Apply transformation 
         return tr @ M @ tr.T
     
-    def sigma(self, E, i, conv=1e-5):
+    def sigma(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
         """
         Calculate self-energy matrix for a specific contact.
 
@@ -505,7 +507,7 @@ class surfGB:
             sig = np.kron(sig, np.eye(2))
         return sig
     
-    def sigmaTot(self, E, conv=1e-5):
+    def sigmaTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
         """
         Calculate total self-energy matrix for the extended system.
 
@@ -536,7 +538,7 @@ class surfGB:
         sigs = [self.sigma(E, i, conv) for i in range(len(self.indsLists))]
         return sum(sigs)
 
-    def getSigma(self, Elist=[None, None], conv=1e-5):
+    def getSigma(self, Elist=[None, None], conv=SURFACE_GREEN_CONVERGENCE):
         """
         Helper method for getting the left and right contact self-energies
  
@@ -830,7 +832,7 @@ class surfGBAt:
     S : ndarray
         Extended overlap matrix including neighbors
     """
-    def __init__(self, H, Slist, Vlist, eta, T=0):
+    def __init__(self, H, Slist, Vlist, eta, T=TEMPERATURE):
         """
         Initialize surfGBAt with Hamiltonian and neighbor matrices.
 
@@ -913,7 +915,7 @@ class surfGBAt:
         self.S = S0x
     
     # Calculate sigmaK for the bulk
-    def sigmaK(self, E, conv=1e-5, mix=0.5):
+    def sigmaK(self, E, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5):
         """
         Calculate bulk self-energies for all 12 lattice directions.
 
@@ -977,7 +979,7 @@ class surfGBAt:
 
         return sigmaK
 
-    def sigma(self, E, inds=None, conv=1e-5, mix=0.5): 
+    def sigma(self, E, inds=None, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5): 
         """
         Calculate surface self-energies for an FCC lattice.
 
@@ -1069,7 +1071,7 @@ class surfGBAt:
         pass # Bethe lattice bulk properties are intrinsic (dependent on TB parameters)
     
     # Wrapper function for compatibility with density.py methods
-    def sigmaTot(self, E, conv=1e-5):
+    def sigmaTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
         sig = np.zeros(((self.NN + 1)*dim, (self.NN+1)*dim), dtype=complex)
         sigK = self.sigmaK(E, conv)
         sigTot = np.sum(sigK, axis=0)
@@ -1098,7 +1100,7 @@ class surfGBAt:
 
     
     # Calculate fermi energy using bisection (to specified tolerance)
-    def calcFermi(self, ne, fGuess=5, tol=1e-5):
+    def calcFermi(self, ne, fGuess=5, tol=FERMI_CALCULATION_TOL):
         """
         Calculate Fermi energy using bisection method.
 
@@ -1124,6 +1126,6 @@ class surfGBAt:
         Previous implementation used ANT.Gaussian approach with complex contour
         integration. Current version uses simpler bisection method from density.py.
         """
-        self.fermi = getFermiContact(self, ne, tol, Eminf, 1000, T=self.T, nOrbs=dim)
+        self.fermi = getFermiContact(self, ne, tol, ENERGY_MIN, 1000, T=self.T, nOrbs=dim)
         return self.fermi
 

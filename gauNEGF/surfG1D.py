@@ -26,6 +26,10 @@ specification and automatic extraction from DFT calculations.
 import numpy as np
 from numpy import linalg as LA
 from scipy.linalg import fractional_matrix_power
+
+# Configuration
+from gauNEGF.config import (ETA, SURFACE_GREEN_CONVERGENCE, SURFACE_RELAXATION_FACTOR, 
+                            TEMPERATURE, ENERGY_STEP)
 import time
 import matplotlib.pyplot as plt
 from numpy import savetxt
@@ -103,7 +107,7 @@ class surfG:
     gPrev : list
         Previous surface Green's functions for convergence
     """
-    def __init__(self, Fock, Overlap, indsList, taus=None, staus=None, alphas=None, aOverlaps=None, betas=None, bOverlaps=None, eta=1e-9):
+    def __init__(self, Fock, Overlap, indsList, taus=None, staus=None, alphas=None, aOverlaps=None, betas=None, bOverlaps=None, eta=ETA):
         """
         Initialize the surface Green's function calculator.
 
@@ -229,7 +233,7 @@ class surfG:
             self.bList = betas
             self.bSList = bOverlaps
     
-    def g(self, E, i, conv=1e-5, relFactor=0.1):
+    def g(self, E, i, conv=SURFACE_GREEN_CONVERGENCE, relFactor=SURFACE_RELAXATION_FACTOR):
         """
         Calculate surface Green's function for a contact.
 
@@ -273,7 +277,7 @@ class surfG:
         while diff>conv and count<maxIter:
             g_ = g.copy()
             g = LA.inv(A - B@g@B.conj().T)
-            dg = abs(g - g_)/(abs(g).max())
+            dg = abs(g - g_)/np.maximum(abs(g), 1e-12)
             g = g*relFactor + g_*(1-relFactor)
             diff = dg.max()
             count = count+1
@@ -320,13 +324,13 @@ class surfG:
             else:
                 for i,mu in zip([0,-1], [mu1, mu2]):
                     fermi = self.fermiList[i]
-                    if fermi!= mu:
+                    if fermi is not None and mu is not None and fermi != mu:
                         dFermi = mu - fermi
                         self.aList[i] += dFermi*np.eye(len(self.aList[i]))
                         self.bList[i] += dFermi*self.bSList[i]
                         self.fermiList[i] = mu
     
-    def sigma(self, E, i, conv=1e-5):
+    def sigma(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
         """
         Calculate self-energy matrix for a contact.
 
@@ -357,7 +361,7 @@ class surfG:
         sigma[np.ix_(inds, inds)] += sig
         return sigma
     
-    def sigmaTot(self, E, conv=1e-5):
+    def sigmaTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
         """
         Calculate total self-energy matrix from all contacts.
 
@@ -387,7 +391,7 @@ class surfG:
         return sigma
     
 
-    def denFunc(self, E, ind=None, mu=None, T=300):
+    def denFunc(self, E, ind=None, mu=None, T=TEMPERATURE):
         """
         Calculate density matrix contribution at a single energy point.
 
@@ -431,9 +435,7 @@ class surfG:
         Ga = Gr.conj().T
         return (Gr@Gambar@Ga, D)
     
-    # Density matrix generation using direct integration across the (real) energy axis
-    # Not used, for testing purposes only
-    def densityGrid(self, Emin, Emax, ind=None, dE=0.001, mu=None, T=300):
+    def densityGrid(self, Emin, Emax, ind=None, dE=ENERGY_STEP, mu=None, T=TEMPERATURE):
         """
         Calculate density matrix contribution on a grid of energy points.
 
@@ -459,7 +461,13 @@ class surfG:
         Returns
         -------
         ndarray
-            Array of density matrix contributions at each energy point
+            Density matrix from real-axis integration
+
+        Notes
+        -----
+        This method is primarily for testing purposes and direct comparison
+        with other integration methods. For production calculations, use the
+        vectorized integration methods in the density module.
         """
         # Create Fermi function if mu given
         kT = kB*T

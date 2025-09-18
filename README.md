@@ -78,6 +78,42 @@ Full API documentation with examples has been compiled and deployed with Github 
 
 For usage examples, see the files in the `examples/` directory.
 
+## Configuration
+
+GauNEGF uses a centralized configuration system for default parameters. All default values can be customized globally by modifying the configuration:
+
+```python
+from gauNEGF import config
+
+# View current defaults
+print(f"Default temperature: {config.TEMPERATURE} K")
+print(f"Default SCF tolerance: {config.SCF_CONVERGENCE_TOL}")
+
+# Customize global defaults
+config.TEMPERATURE = 273.15  # Set to 0°C
+config.SCF_CONVERGENCE_TOL = 1e-6  # Higher precision
+config.SCF_DAMPING = 0.01  # More aggressive damping
+```
+
+### Available Configuration Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `TEMPERATURE` | 300.0 | Temperature in Kelvin for Fermi-Dirac statistics |
+| `ETA` | 1e-9 | Broadening parameter in eV |
+| `ENERGY_STEP` | 0.001 | Default energy step size in eV |
+| `ADAPTIVE_INTEGRATION_TOL` | 1e-4 | Tolerance for adaptive integration |
+| `FERMI_CALCULATION_TOL` | 1e-5 | Tolerance for Fermi energy calculations |
+| `SCF_CONVERGENCE_TOL` | 1e-5 | SCF convergence tolerance |
+| `SURFACE_GREEN_CONVERGENCE` | 1e-5 | Surface Green's function convergence |
+| `SCF_DAMPING` | 0.02 | SCF damping parameter |
+| `SCF_MAX_CYCLES` | 100 | Maximum SCF cycles |
+| `PULAY_MIXING_SIZE` | 4 | Number of iterations for Pulay mixing |
+| `MAX_CYCLES` | 1000 | Maximum iteration cycles for various algorithms |
+| `ENERGY_MIN` | -1e6 | Lower bound for energy integration in eV |
+
+These parameters affect all calculations unless explicitly overridden in function calls.
+
 ## Citation
 
 If you use GaussianNEGF in your research, please cite:

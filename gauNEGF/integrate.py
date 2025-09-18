@@ -109,6 +109,26 @@ def GrInt(F, S, g, Elist, weights):
 def GrIntVectorized(F, S, g, Elist, weights, solver):
     """
     Original vectorized implementation - preserved exactly.
+    
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix (NxN)
+    S : ndarray
+        Overlap matrix (NxN)
+    g : surfG object
+        Surface Green's function calculator
+    Elist : ndarray
+        Array of energies in eV (Mx1)
+    weights : ndarray
+        Array of weights for each energy (Mx1)
+    solver : module
+        Either numpy or cupy module for array operations
+        
+    Returns
+    -------
+    ndarray
+        Retarded Green's function integrated over the energy grid (NxN)
     """
     M = Elist.size
     N = F.shape[0]
@@ -135,6 +155,26 @@ def GrIntVectorized(F, S, g, Elist, weights, solver):
 def GrIntChunked(F, S, g, Elist, weights, solver):
     """
     Chunked version that preserves original mathematical operations.
+    
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix (NxN)
+    S : ndarray
+        Overlap matrix (NxN)
+    g : surfG object
+        Surface Green's function calculator
+    Elist : ndarray
+        Array of energies in eV (Mx1)
+    weights : ndarray
+        Array of weights for each energy (Mx1)
+    solver : module
+        Either numpy or cupy module for array operations
+        
+    Returns
+    -------
+    ndarray
+        Retarded Green's function integrated over the energy grid (NxN)
     """
     M = Elist.size
     N = F.shape[0]
@@ -210,6 +250,28 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
 def GrLessVectorized(F, S, g, Elist, weights, solver, ind):
     """
     Full Vectorized G< implementation.
+    
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix (NxN)
+    S : ndarray
+        Overlap matrix (NxN)
+    g : surfG object
+        Surface Green's function calculator
+    Elist : ndarray
+        Array of energies in eV (Mx1)
+    weights : ndarray
+        Array of weights for each energy (Mx1)
+    solver : module
+        Either numpy or cupy module for array operations
+    ind : int or None
+        Contact index for partial density calculation
+        
+    Returns
+    -------
+    ndarray
+        Nonequilibrium Green's function G<(E) integrated over the energy grid (NxN)
     """
     M = Elist.size
     N = F.shape[0]
@@ -236,7 +298,7 @@ def GrLessVectorized(F, S, g, Elist, weights, solver, ind):
         SigList = SigmaTot
     else:
         del SigmaTot
-        SigList = solver.array([g.sigma(E, ind) for E in Elist])  # Note: This line in original had issue - E not used
+        SigList = solver.array([g.sigma(E, ind) for E in Elist]) 
         
     GammaList = 1j * (SigList - solver.conj(SigList).transpose(0, 2, 1))
     del SigList
@@ -253,6 +315,28 @@ def GrLessVectorized(F, S, g, Elist, weights, solver, ind):
 def GrLessChunked(F, S, g, Elist, weights, solver, ind):
     """
     Chunked G< version preserving original operations.
+    
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix (NxN)
+    S : ndarray
+        Overlap matrix (NxN)
+    g : surfG object
+        Surface Green's function calculator
+    Elist : ndarray
+        Array of energies in eV (Mx1)
+    weights : ndarray
+        Array of weights for each energy (Mx1)
+    solver : module
+        Either numpy or cupy module for array operations
+    ind : int or None
+        Contact index for partial density calculation
+        
+    Returns
+    -------
+    ndarray
+        Nonequilibrium Green's function G<(E) integrated over the energy grid (NxN)
     """
     M = Elist.size
     N = F.shape[0]
