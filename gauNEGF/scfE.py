@@ -11,7 +11,6 @@ References
 """
 
 # Python Packages
-from tkinter import N
 import numpy as np
 from numpy import linalg as LA
 
@@ -23,6 +22,7 @@ from gauopen import QCUtil as qcu
 # Developed Packages 
 from gauNEGF.matTools import *
 from gauNEGF.density import *
+from gauNEGF.config import (ETA, TEMPERATURE)
 from gauNEGF.transport import DOS
 from gauNEGF.fermiSearch import DOSFermiSearch
 from gauNEGF.scf import NEGF
@@ -62,7 +62,7 @@ class NEGFE(NEGF):
     Inherits all attributes and methods from NEGF class.
     """
     # Set energy dependent Bethe lattice contact using surfGB() object
-    def setContactBethe(self, contactList, latFile='Au', eta=1e-9, T=0):
+    def setContactBethe(self, contactList, latFile='Au', eta=ETA, T=TEMPERATURE):
         """
         Set energy-dependent Bethe lattice contacts.
 
@@ -95,7 +95,7 @@ class NEGFE(NEGF):
         return inds
 
     # Set energy dependent 1D contact using surfG() object
-    def setContact1D(self, contactList, tauList=None, stauList=None, alphas=None, aOverlaps=None, betas=None, bOverlaps=None, neList=None, eta=1e-9, T=0):
+    def setContact1D(self, contactList, tauList=None, stauList=None, alphas=None, aOverlaps=None, betas=None, bOverlaps=None, neList=None, eta=ETA, T=TEMPERATURE):
         """
         Set energy-dependent 1D chain contacts.
 
@@ -151,7 +151,7 @@ class NEGFE(NEGF):
         return inds
    
     # Set constant sigma contact for testing or adding non-zero temperature
-    def setSigma(self, lContact=None, rContact=None, sig=-0.1j, sig2=None, T=0):
+    def setSigma(self, lContact=None, rContact=None, sig=-0.1j, sig2=None, T=TEMPERATURE):
         """
         Set constant self-energy contacts with temperature.
 
@@ -213,10 +213,14 @@ class NEGFE(NEGF):
 
         Parameters
         ----------
-        N1 : int
-            Number of points for complex contour
-        N2 : int
-            Number of points for real axis
+        N1 : int, optional
+            Number of points for complex contour (default: None)
+        N2 : int, optional
+            Number of points for real axis (default: None)
+        Nnegf : int, optional
+            Number of points for non-equilibrium integration (default: None)
+        tol : float, optional
+            Tolerance for integration (default: 1e-4)
         Emin : float or None, optional
             Minimum energy for integration (default: None)
         """
@@ -235,8 +239,6 @@ class NEGFE(NEGF):
 
         Parameters
         ----------
-        tol : float, optional
-            Tolerance for integration (default: 1e-4)
         cycles : int, optional
             Number of SCF cycles to run (default: 10)
         damp : float, optional
@@ -266,7 +268,7 @@ class NEGFE(NEGF):
                                          self.qV, self.Eminf, self.tol, self.T)
         if self.updFermi:
                 print('CALCULATING FERMI ENERGY')
-                ne = self.nae if self.spin is 'r' else self.nae+self.nbe
+                ne = self.nae if self.spin == 'r' else self.nae+self.nbe
                 self.fermi, dE, P = calcFermiSecant(self.g, ne-nLower, self.Emin, self.fermi, 
                                                     self.N1, tol=self.tol, maxcycles=20)
                 print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')

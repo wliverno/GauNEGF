@@ -5,16 +5,50 @@ from scipy.linalg import fractional_matrix_power
 
 # Developed packages
 from gauNEGF.density import *
+from gauNEGF.config import (ETA, TEMPERATURE, ENERGY_MIN)
 
 #Constants
 kB = 8.617e-5           # eV/Kelvin
 dim = 9                 # size of single atom matrix: 1s + 3p + 5d
 har_to_eV = 27.211386   # eV/Hartree
-Eminf = -1e6            # Setting lower bound to -1e6 eV
+Eminf = ENERGY_MIN      # Setting lower bound to -1e6 eV
 
 # Bethe lattice surface Green's function for a device with contacts
 class surfG3:
-    def __init__(self, F, S, contacts, bar,  latFile='Au', spin='r', eta=1e-9, T=0):
+    """
+    Surface Green's function calculator for 3D lattice. 
+    
+    Work in progress- need to implement k-space integration (Gamma only)
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix from DFT calculation
+    S : ndarray
+        Overlap matrix from DFT calculation
+    contacts : list of lists
+        Lists of atom indices for each contact region
+    bar : QCBinAr
+        Gaussian interface object containing geometry and orbital information
+    latFile : str, optional
+        Name of .bethe file containing Slater-Koster parameters (default: 'Au')
+    spin : {'r', 'u', 'ro', 'g'}, optional
+        Spin treatment: restricted, unrestricted, or generalized (default: 'r')
+    eta : float, optional
+        Broadening parameter in eV (default: 1e-9)
+    T : float, optional
+        Temperature in Kelvin (default: 0)
+
+    Attributes
+    ----------
+    F : ndarray
+        Fock matrix
+    S : ndarray
+        Overlap matrix
+    gList : list of surfGAt
+        List of atomic surface Green's function calculators for each contact
+    """
+    def __init__(self, F, S, contacts, bar,  latFile='Au', spin='r', eta=ETA, T=TEMPERATURE):
         #Read contact/orbital information and store
         self.cVecs = []
         self.latVecs = []
@@ -723,7 +757,7 @@ class surfGAt:
     S : ndarray
         Extended overlap matrix including neighbors
     """
-    def __init__(self, H, Slist, Vlist, eta, T=0):
+    def __init__(self, H, Slist, Vlist, eta, T=TEMPERATURE):
         """
         Initialize surfGAt with Hamiltonian and neighbor matrices.
 
@@ -759,6 +793,7 @@ class surfGAt:
         self.T = T
         self.sigmaKprev = None
         self.Eprev = Eminf
+        self.fermi = None
 
         self.updateH()
 
@@ -960,8 +995,32 @@ class surfGAt:
         """
         pass # Bethe lattice bulk properties are intrinsic (dependent on TB parameters)
     
-    # Wrapper function for compatibility with density.py methods
     def sigmaTot(self, E, conv=1e-5):
+        """
+        Calculate total self-energy matrix for the extended Bethe lattice system.
+
+        Computes self-energies for the full extended system including 12 neighbor sites
+        plus 1 central site. This is a wrapper function for compatibility with density.py
+        methods that require a single total self-energy matrix.
+
+        Parameters
+        ----------
+        E : float
+            Energy point for self-energy calculation (in eV)
+        conv : float, optional
+            Convergence criterion for self-energy calculation (default: 1e-5)
+
+        Returns
+        -------
+        ndarray
+            Total self-energy matrix for the extended system ((NN+1)*dim, (NN+1)*dim)
+
+        Notes
+        -----
+        For each neighbor direction k, the self-energy includes contributions from all
+        other directions except the opposite direction (k+6)%12, following the Bethe
+        lattice construction.
+        """
         sig = np.zeros(((self.NN + 1)*dim, (self.NN+1)*dim), dtype=complex)
         sigK = self.sigmaK(E, conv)
         sigTot = np.sum(sigK, axis=0)
@@ -990,7 +1049,7 @@ class surfGAt:
 
     
     # Calculate fermi energy using bisection (to specified tolerance)
-    def calcFermi(self, ne, fGuess=5, tol=1e-5):
+    def calcFermi(self, ne, tol=1e-5):
         """
         Calculate Fermi energy using bisection method.
 
@@ -1001,8 +1060,6 @@ class surfGAt:
         ----------
         ne : float
             Target number of electrons
-        fGuess : float, optional
-            Initial guess for Fermi energy in eV (default: 5)
         tol : float, optional
             Convergence tolerance (default: 1e-5)
 

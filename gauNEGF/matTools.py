@@ -29,6 +29,8 @@ AlphaSCFDen = "ALPHA SCF DENSITY MATRIX"
 BetaSCFDen = "BETA SCF DENSITY MATRIX"
 AlphaFock = "ALPHA FOCK MATRIX"
 BetaFock = "BETA FOCK MATRIX"
+AlphaEnergies = "ALPHA ORBITAL ENERGIES"
+BetaEnergies = "BETA ORBITAL ENERGIES"
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
@@ -104,7 +106,7 @@ def getDen(bar, spin):
         If spin treatment is not recognized
     """
     # Set up Fock matrix and atom indexing
-    # Note: positive ind1ices are alpha/paired orbitals, negative are beta orbitals
+    # Note: positive indices are alpha/paired orbitals, negative are beta orbitals
     if spin == "r" or spin == "g":
         P = np.array(bar.matlist[AlphaSCFDen].expand())
     elif spin == "ro" or spin == "u":
@@ -148,7 +150,7 @@ def getFock(bar, spin):
         If spin treatment is not recognized
     """
     # Set up Fock matrix and atom indexing
-    # Note: positive ind1ices are alpha/paired orbitals, negative are beta orbitals
+    # Note: positive indices are alpha/paired orbitals, negative are beta orbitals
     if spin == "r":
         locs = bar.ibfatm
         Fock = np.array(bar.matlist[AlphaFock].expand())

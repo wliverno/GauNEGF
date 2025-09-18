@@ -24,6 +24,25 @@ First, create a Gaussian input file `ethane.gjf`:
     H   -0.882443    0.509483   -1.157832
     H    0.882443    0.509483   -1.157832
 
+Configuration
+-----------
+GauNEGF uses global configuration constants defined in ``gauNEGF.config`` for default parameters. You can customize these before running calculations:
+
+.. code-block:: python
+
+    from gauNEGF import config
+    
+    # View current defaults
+    print(f"Default temperature: {config.TEMPERATURE} K")
+    print(f"Default SCF tolerance: {config.SCF_CONVERGENCE_TOL}")
+    
+    # Customize global defaults
+    config.TEMPERATURE = 77.0  # Liquid nitrogen temperature
+    config.SCF_CONVERGENCE_TOL = 1e-6  # Higher precision
+    config.SCF_DAMPING = 0.01  # More aggressive damping
+
+All configuration constants use ``ALL_CAPS`` naming following PEP 8. Key parameters include ``TEMPERATURE``, ``SCF_CONVERGENCE_TOL``, ``SCF_DAMPING``, ``ETA`` (broadening), and various integration tolerances. See the main documentation for the complete list.
+
 Basic Calculation
 --------------
 Run a basic NEGF-DFT calculation:

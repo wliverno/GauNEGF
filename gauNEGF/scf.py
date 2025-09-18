@@ -48,7 +48,9 @@ from gauopen import QCBinAr as qcb
 
 # Developed packages
 from gauNEGF.matTools import *
-from gauNEGF.density import * 
+from gauNEGF.density import *
+from gauNEGF.config import (SCF_CONVERGENCE_TOL, SCF_DAMPING, SCF_MAX_CYCLES, 
+                            PULAY_MIXING_SIZE, ENERGY_MIN) 
 
 
 # CONSTANTS:
@@ -122,7 +124,7 @@ class NEGF(object):
 
     """
 
-    def __init__(self, fn, basis="chkbasis", func="hf", spin="r", fullSCF=True, route=None, section=None, nPulay=4):
+    def __init__(self, fn, basis="chkbasis", func="hf", spin="r", fullSCF=True, route=None, section=None, nPulay=PULAY_MIXING_SIZE):
         """
         Initialize NEGF calculator and run initial DFT calculation.
 
@@ -146,7 +148,7 @@ class NEGF(object):
         self.Total_E_Old=9999.0;
         
         #Default Integration Limits
-        self.Eminf = -1e5
+        self.Eminf = ENERGY_MIN
         self.fSearch = None
         self.fermi = None
         self.updFermi = False
@@ -258,12 +260,12 @@ class NEGF(object):
 
     def setFock(self, F_):
         """
-        Set the Fock matrix, converting from eV to atomic units.
+        Set the Fock matrix, converting from Hartree to eV units.
 
         Parameters
         ----------
         F_ : ndarray
-            Fock matrix in Hartree units
+            Fock matrix in eV units
         """
         self.F = np.array(F_)/har_to_eV
 
@@ -374,9 +376,9 @@ class NEGF(object):
         else:
             vecNorm = vec/dist
             field = -1*vecNorm*qV*V_to_au/(dist*0.0001)
-        self.bar.scalar("X-EFIELD", int(field[0]))
-        self.bar.scalar("Y-EFIELD", int(field[1]))
-        self.bar.scalar("Z-EFIELD", int(field[2]))
+        self.bar.scalar("X-EFIELD", round(field[0]))
+        self.bar.scalar("Y-EFIELD", round(field[1]))
+        self.bar.scalar("Z-EFIELD", round(field[2]))
         if not self.updFermi:
             print("E-field set to "+str(LA.norm(field))+" au")
     
@@ -679,7 +681,7 @@ class NEGF(object):
 
     # Main SCF loop, runs Fock <-> Density cycle until convergence reached
     # Convergence criteria: dE, RMSDP, and MaxDP < conv, or maxcycles reached
-    def SCF(self, conv=1e-5, damping=0.02, maxcycles=100, checkpoint=True, pulay=True):
+    def SCF(self, conv=SCF_CONVERGENCE_TOL, damping=SCF_DAMPING, maxcycles=SCF_MAX_CYCLES, checkpoint=True, pulay=True):
         """
         Run self-consistent field calculation until convergence.
 
