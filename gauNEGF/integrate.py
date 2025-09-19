@@ -1,8 +1,8 @@
 """
-Memory-Efficient Vectorized Green's Functions
+Simple Loop-Based Green's Functions
 
-A standalone package for computing retarded and lesser Green's functions 
-with automatic GPU memory management using CuPy when available.
+A standalone package for computing retarded and lesser Green's functions
+with automatic GPU acceleration using CuPy when available.
 
 Author: William Livernois
 """
@@ -38,60 +38,6 @@ if not gpu_logger.handlers:  # Avoid duplicate handlers on reload
     ))
     gpu_logger.addHandler(handler)
 
-def get_optimal_chunk_size(N, M, calculation_type='Gr'):
-    """
-    Calculate optimal chunk size based on available memory using CuPy built-in APIs.
-
-    Parameters
-    ----------
-    N : int
-        Matrix dimension (NxN)
-    M : int
-        Number of energy points
-    calculation_type : str
-        Type of calculation: 'Gr' (peak 3 arrays) or 'GrLess' (peak 5 arrays)
-
-    Returns
-    -------
-    int
-        Optimal chunk size for energy points
-    """
-
-    if not isCuda:
-        # For CPU, use conservative chunking to avoid memory issues
-        chunk_size = max(1, M // 4)
-        gpu_logger.debug(f"CPU mode: chunk size {chunk_size} for N={N}, M={M}")
-        return chunk_size
-
-    try:
-        # Use CuPy memory pool to get accurate memory info
-        mempool = cp.get_default_memory_pool()
-        device = cp.cuda.Device()
-        free_mem, total_mem = device.mem_info
-
-        # Account for memory already in use by the pool
-        used_by_pool = mempool.used_bytes()
-        available_mem = free_mem - used_by_pool
-
-        # Use actual peak memory counts from memory tracking analysis:
-        # GrIntVectorized: peak 3 NxNxM arrays
-        # GrLessVectorized: peak 5 NxNxM arrays
-        peak_arrays = 3 if calculation_type == 'Gr' else 5
-        bytes_per_array = N * N * 16  # complex128 = 16 bytes per element
-        bytes_per_energy = peak_arrays * bytes_per_array
-
-        # Use 90% of available memory for safety
-        safe_mem = int(0.9 * available_mem)
-        chunk_size = max(1, min(M, safe_mem // bytes_per_energy))
-
-        gpu_logger.debug(f"Memory calc: N={N}, {calculation_type}, peak_arrays={peak_arrays}, "
-                        f"available={available_mem/1e9:.2f}GB, chunk_size={chunk_size}")
-
-        return chunk_size
-
-    except Exception as e:
-        gpu_logger.warning(f"Memory calculation failed: {e}, using conservative chunk size")
-        return max(1, M // 4)
 
 def Gr(F, S, g, E):
     """
@@ -142,8 +88,8 @@ def DOSg(F, S, g, E):
 
 def GrInt(F, S, g, Elist, weights):
     """
-    Integrate retarded Green's function for a list of energies using vectorization.
-    Uses proactive memory management with performance logging.
+    Integrate retarded Green's function for a list of energies using simple loops.
+    Relies on CuPy/NumPy built-in parallelization for matrix operations.
 
     Parameters
     ----------
@@ -154,7 +100,7 @@ def GrInt(F, S, g, Elist, weights):
     g : surfG object
         Surface Green's function calculator with sigmaTot(E) method
     Elist : ndarray
-        Array of energies in eV (Mx1) - kept as numpy for g.sigmaTot()
+        Array of energies in eV (Mx1)
     weights : ndarray
         Array of weights for each energy (Mx1)
 
@@ -173,70 +119,40 @@ def GrInt(F, S, g, Elist, weights):
     solver = cp if isCuda else np
     device_name = 'GPU' if isCuda else 'CPU'
 
-    # Get optimal chunk size proactively
-    chunk_size = get_optimal_chunk_size(N, M, 'Gr')
-
     # Log calculation start
-    memory_mb = N * N * M * 16 / 1e6
-    gpu_logger.info(f"Starting GrInt: Matrix {N}x{N}x{M} ({memory_mb:.1f}MB) | Device: {device_name} | Chunk: {chunk_size}")
+    memory_gb = N * N * 16 / 1e9  # Memory per matrix in GB
+    gpu_logger.info(f"Starting GrInt: {N}x{N} matrices, {M} energies ({memory_gb:.2f}GB per matrix) | Device: {device_name}")
 
-    if isCuda:
-        mempool = cp.get_default_memory_pool()
-        initial_memory = mempool.used_bytes()
-        peak_memory = initial_memory
+    # Convert to solver arrays once
+    F_solver = solver.array(F, dtype=solver.complex128)
+    S_solver = solver.array(S, dtype=solver.complex128)
+    Gint = solver.zeros((N, N), dtype=solver.complex128)
 
-    # Use chunking approach similar to existing GrIntChunked but with proactive sizing
-    Gint = np.zeros((N, N), dtype=solver.complex128)
-
-    i = 0
-    chunk_count = 0
-    while i < M:
-        end_idx = min(i + chunk_size, M)
-        actual_chunk_size = end_idx - i
-        chunk_count += 1
-
-        chunk_start = time.perf_counter()
-
+    # Simple loop over energy points
+    for i, (E, weight) in enumerate(zip(Elist, weights)):
+        sigma_E = solver.array(g.sigmaTot(E), dtype=solver.complex128)
+        mat = E * S_solver - F_solver - sigma_E
         try:
-            Elist_chunk = Elist[i:end_idx]
-            weights_chunk = weights[i:end_idx]
+            Gr_E = solver.linalg.inv(mat)
+        except (np.linalg.LinAlgError, (cp.linalg.LinAlgError if isCuda else Exception)):
+            gpu_logger.warning(f"Singular matrix at energy {E:.6f} eV, using pseudoinverse")
+            Gr_E = solver.linalg.pinv(mat)
+        Gint += weight * Gr_E
 
-            # Use existing GrIntVectorized function - no math changes
-            chunk_result = GrIntVectorized(F, S, g, Elist_chunk, weights_chunk, solver)
-            Gint += chunk_result
-
-            chunk_time = time.perf_counter() - chunk_start
-            throughput = actual_chunk_size / chunk_time
-            current_memory = mempool.used_bytes()
-            peak_memory = max(peak_memory, current_memory)
-
-            gpu_logger.debug(f"Chunk {chunk_count}: {actual_chunk_size} energies in {chunk_time:.3f}s ({throughput:.2E} energies/s)")
-
-            i = end_idx  # Success - move to next chunk
-
-        except (MemoryError, (cp.cuda.memory.OutOfMemoryError if isCuda else Exception)) as e:
-            gpu_logger.warning(f"Memory error in chunk {chunk_count}: {e}")
-
-            if isCuda:
-                cp.get_default_memory_pool().free_all_blocks()
-
-            old_chunk_size = chunk_size
-            chunk_size = max(1, chunk_size // 2)
-            gpu_logger.info(f"Reducing chunk size: {old_chunk_size} -> {chunk_size}")
-            # Don't increment i - retry this chunk
+        if i % max(1, M // 10) == 0:  # Log progress at 10% intervals
+            elapsed = time.perf_counter() - start_time
+            rate = (i + 1) / elapsed
+            progress = 100 * (i + 1) / M
+            gpu_logger.debug(f"Progress: {progress:.1f}% ({i+1}/{M}) ({rate:.1f} energies/s)")
 
     total_time = time.perf_counter() - start_time
+    throughput = total_time / M
+    gpu_logger.info(f"Completed GrInt: {total_time:.3f}s total ({throughput:.2e} sec/energy)")
 
-    # Final logging
     if isCuda:
-        actual_peak = peak_memory - initial_memory
-        gpu_logger.info(f"Completed GrInt: Total {total_time:.3f}s | Chunks: {chunk_count} | Peak memory: {actual_peak/1e6:.1f}MB")
         cp.get_default_memory_pool().free_all_blocks()
-        cp.cuda.Device().synchronize()  # Ensure cleanup completes
-    else:
-        gpu_logger.info(f"Completed GrInt: Total {total_time:.3f}s | Chunks: {chunk_count}")
 
-    return Gint
+    return Gint.get() if isCuda else Gint
 
 
 def GrIntVectorized(F, S, g, Elist, weights, solver):
@@ -300,8 +216,8 @@ def GrIntVectorized(F, S, g, Elist, weights, solver):
 
 def GrLessInt(F, S, g, Elist, weights, ind=None):
     """
-    Integrate nonequilibrium Green's function for a list of energies using vectorization.
-    Uses proactive memory management with performance logging.
+    Integrate nonequilibrium Green's function for a list of energies using simple loops.
+    Relies on CuPy/NumPy built-in parallelization for matrix operations.
 
     Parameters
     ----------
@@ -333,70 +249,55 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
     solver = cp if isCuda else np
     device_name = 'GPU' if isCuda else 'CPU'
 
-    # Get optimal chunk size proactively
-    chunk_size = get_optimal_chunk_size(N, M, 'GrLess')
-
     # Log calculation start
-    memory_mb = N * N * M * 16 / 1e6
-    gpu_logger.info(f"Starting GrLessInt: Matrix {N}x{N}x{M} ({memory_mb:.1f}MB) | Device: {device_name} | Chunk: {chunk_size}")
+    memory_gb = N * N * 16 / 1e9  # Memory per matrix in GB
+    gpu_logger.info(f"Starting GrLessInt: {N}x{N} matrices, {M} energies ({memory_gb:.2f}GB per matrix) | Device: {device_name}")
 
-    if isCuda:
-        mempool = cp.get_default_memory_pool()
-        initial_memory = mempool.used_bytes()
-        peak_memory=initial_memory
+    # Convert to solver arrays once
+    F_solver = solver.array(F, dtype=solver.complex128)
+    S_solver = solver.array(S, dtype=solver.complex128)
+    Gint = solver.zeros((N, N), dtype=solver.complex128)
 
-    # Use chunking approach similar to existing GrLessChunked but with proactive sizing
-    Gint = np.zeros((N, N), dtype=solver.complex128)
-
-    i = 0
-    chunk_count = 0
-    while i < M:
-        end_idx = min(i + chunk_size, M)
-        actual_chunk_size = end_idx - i
-        chunk_count += 1
-
-        chunk_start = time.perf_counter()
-
+    # Simple loop over energy points
+    for i, (E, weight) in enumerate(zip(Elist, weights)):
+        # Calculate Gr
+        sigma_tot = solver.array(g.sigmaTot(E), dtype=solver.complex128)
+        mat = E * S_solver - F_solver - sigma_tot
         try:
-            Elist_chunk = Elist[i:end_idx]
-            weights_chunk = weights[i:end_idx]
+            Gr_E = solver.linalg.inv(mat)
+        except (np.linalg.LinAlgError, (cp.linalg.LinAlgError if isCuda else Exception)):
+            gpu_logger.warning(f"Singular matrix at energy {E:.6f} eV, using pseudoinverse")
+            Gr_E = solver.linalg.pinv(mat)
 
-            # Use existing GrLessVectorized function - no math changes
-            chunk_result = GrLessVectorized(F, S, g, Elist_chunk, weights_chunk, solver, ind)
-            Gint += chunk_result
+        # Calculate Ga = Gr†
+        Ga_E = solver.conj(Gr_E).T
 
-            chunk_time = time.perf_counter() - chunk_start
-            throughput = actual_chunk_size / chunk_time
-            current_memory = mempool.used_bytes()
-            peak_memory = max(peak_memory, current_memory)
+        # Calculate Gamma
+        if ind is None:
+            Sigma_E = sigma_tot  # Reuse already computed sigmaTot
+        else:
+            Sigma_E = solver.array(g.sigma(E, ind), dtype=solver.complex128)
 
-            gpu_logger.debug(f"Chunk {chunk_count}: {actual_chunk_size} energies in {chunk_time:.3f}s ({throughput:.2e} energies/s)")
+        Gamma_E = 1j * (Sigma_E - solver.conj(Sigma_E).T)
 
-            i = end_idx  # Success - move to next chunk
+        # Calculate G< = Gr * Gamma * Ga
+        Gless_E = solver.matmul(solver.matmul(Gr_E, Gamma_E), Ga_E)
+        Gint += weight * Gless_E
 
-        except (MemoryError, (cp.cuda.memory.OutOfMemoryError if isCuda else Exception)) as e:
-            gpu_logger.warning(f"Memory error in chunk {chunk_count}: {e}")
-
-            if isCuda:
-                cp.get_default_memory_pool().free_all_blocks()
-
-            old_chunk_size = chunk_size
-            chunk_size = max(1, chunk_size // 2)
-            gpu_logger.info(f"Reducing chunk size: {old_chunk_size} -> {chunk_size}")
-            # Don't increment i - retry this chunk
+        if i % max(1, M // 10) == 0:  # Log progress at 10% intervals
+            elapsed = time.perf_counter() - start_time
+            rate = (i + 1) / elapsed
+            progress = 100 * (i + 1) / M
+            gpu_logger.debug(f"Progress: {progress:.1f}% ({i+1}/{M}) ({rate:.1f} energies/s)")
 
     total_time = time.perf_counter() - start_time
+    throughput = total_time/M
+    gpu_logger.info(f"Completed GrLessInt: {total_time:.3f}s total ({throughput:.2e} sec/energy)")
 
-    # Final logging
     if isCuda:
-        actual_peak = peak_memory - initial_memory
-        gpu_logger.info(f"Completed GlessInt: Total {total_time:.3f}s | Chunks: {chunk_count} | Peak memory: {actual_peak/1e6:.1f}MB")
         cp.get_default_memory_pool().free_all_blocks()
-        cp.cuda.Device().synchronize()  # Ensure cleanup completes
-    else:
-        gpu_logger.info(f"Completed GrLessInt: Total {total_time:.3f}s | Chunks: {chunk_count}")
 
-    return Gint
+    return Gint.get() if isCuda else Gint
 
 
 
