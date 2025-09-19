@@ -5,13 +5,14 @@ This module provides centralized default parameters used throughout the gauNEGF 
 """
 
 # Physical Parameters
-TEMPERATURE = 300.0              # Kelvin - ambient temperature
+TEMPERATURE = 0.0               # Kelvin - ambient temperature
 ETA = 1e-9                      # eV - broadening parameter  
 ENERGY_STEP = 0.001             # eV - default energy step size
 
 # Convergence Tolerances
 ADAPTIVE_INTEGRATION_TOL = 1e-4     # Adaptive integration tolerance
 FERMI_CALCULATION_TOL = 1e-5        # Fermi energy calculation tolerance
+FERMI_SEARCH_CYCLES = 10            # Number of cycles to run search before returning
 SCF_CONVERGENCE_TOL = 1e-5          # SCF convergence tolerance
 SURFACE_GREEN_CONVERGENCE = 1e-5    # Surface Green's function convergence
 
