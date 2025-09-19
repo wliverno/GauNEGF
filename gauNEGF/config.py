@@ -29,3 +29,7 @@ PULAY_MIXING_SIZE = 4           # Number of iterations for Pulay mixing
 
 # Surface Green's Function Parameters
 SURFACE_RELAXATION_FACTOR = 0.1 # Relaxation factor for surface calculations
+
+# GPU/CPU Integration Logging Configuration
+LOG_LEVEL = 'DEBUG'              # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_PERFORMANCE = True           # Enable GPU performance logging

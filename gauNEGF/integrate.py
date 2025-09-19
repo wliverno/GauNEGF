@@ -21,14 +21,20 @@ import logging
 import socket
 import os
 import time
+from gauNEGF.config import LOG_LEVEL, LOG_PERFORMANCE
 
 # Setup node-specific logging for GPU/parallel operations
 hostname = socket.gethostname()
 pid = os.getpid()
-log_file = f'gpu_performance_{hostname}_{pid}.log'
+
+if LOG_PERFORMANCE:
+    log_file = f'integrate_performance_{hostname}_{pid}.log'
+else:
+    log_file = f'/tmp/integrate_performance_{hostname}_{pid}.log'
 
 gpu_logger = logging.getLogger('gauNEGF.gpu')
-gpu_logger.setLevel(logging.DEBUG)
+log_level = getattr(logging, LOG_LEVEL.upper(), logging.DEBUG)
+gpu_logger.setLevel(log_level)
 
 # Create file handler that appends
 if not gpu_logger.handlers:  # Avoid duplicate handlers on reload
