@@ -23,7 +23,8 @@ from numpy import linalg as LA
 
 # Configuration
 from gauNEGF.config import (TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, 
-                            SCF_CONVERGENCE_TOL, N_KT, ENERGY_MIN, MAX_CYCLES, MAX_GRID_POINTS)
+                            FERMI_SEARCH_CYCLES, SCF_CONVERGENCE_TOL, N_KT, ENERGY_MIN, 
+                            MAX_CYCLES, MAX_GRID_POINTS)
 from scipy.linalg import fractional_matrix_power
 from scipy.special import roots_legendre
 from scipy.special import roots_chebyu
@@ -1173,7 +1174,7 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONV
         print(f'Warning: Max cycles reached, convergence = {abs(Ncurr-ne):.2E}')
     return Ef, dE, P
 
-def calcFermiSecant(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONVERGENCE_TOL, maxcycles=MAX_CYCLES, T=TEMPERATURE):
+def calcFermiSecant(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONVERGENCE_TOL, maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE):
     """
     Calculate Fermi energy using Secant method, updating dE at each step
     """
@@ -1208,7 +1209,7 @@ def calcFermiSecant(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONV
         print(f'Warning: Max cycles reached, convergence = {abs(nCurr-ne):.2E}')
     return Ef, dE, P, abs(nCurr-ne)
 
-def calcFermiMuller(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONVERGENCE_TOL, maxcycles=MAX_CYCLES, T=TEMPERATURE):
+def calcFermiMuller(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONVERGENCE_TOL, maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE):
     """
     Calculate Fermi energy using Muller's method, starting with 3 initial points
     """
@@ -1222,7 +1223,6 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONV
     # Initialize three points around initial guess
     E2 = Ef
     E1 = E2 - conv
-    E0 = E1 - conv
 
     # Get initial density matrices and electron counts
     g.setF(g.F, E2, E2)
@@ -1237,19 +1237,17 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONV
         return E1, conv, P, abs(n1)
 
     # Calculate E0 as the energy where n=0 using linear extrapolation.
-    # Add a check to prevent division by zero if n1 and n2 are too close.
     delta_n = n2 - n1
-    E0 = E1 - conv
-    if abs(delta_n) > conv:
-        delta_E = E2 - E1
-        E0 = E1 - n1 * delta_E / delta_n
+    delta_n += np.sign(delta_n)*small
+    delta_E = E2 - E1 
+    E0 = E1 - (n1 * delta_E / delta_n)
     g.setF(g.F, E0, E0)
     P = pMu(E0)
     n0 = np.trace(P@g.S).real - ne
     if abs(n0) < conv:
         return E0, delta_E, P, abs(n0)
 
-    counter = 0
+    counter = 3
     while counter < maxcycles:
         # Calculate differences between points
         h0 = E0 - E2

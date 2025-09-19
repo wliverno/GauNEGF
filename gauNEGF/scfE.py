@@ -356,11 +356,11 @@ class NEGFE(NEGF):
                     print(f'Fermi Energy set to {self.fermi:.2f} eV, shifting by {dN:.2E} electrons ')
                 else:
                     print('Warning: Local sigma approximation not valid, Fermi energy not updated...')
-                print('Calculating equilibrium density matrix:')
                 if self.fermiMethod.lower()=='default':
                     fermi_old = self.fermi + 0.0
                     print('Switching to Muller method...')
                 else:
+                    print('Calculating equilibrium density matrix:')
                     P += compContourP2(self.mu1)
 
             # Full integration methods (progession: muller/secant --> bisect):

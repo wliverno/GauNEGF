@@ -25,7 +25,7 @@ import time
 # Setup node-specific logging for GPU/parallel operations
 hostname = socket.gethostname()
 pid = os.getpid()
-log_file = os.path.join(os.path.dirname(__file__), f'gpu_performance_{hostname}_{pid}.log')
+log_file = f'gpu_performance_{hostname}_{pid}.log'
 
 gpu_logger = logging.getLogger('gauNEGF.gpu')
 gpu_logger.setLevel(logging.DEBUG)
@@ -38,9 +38,6 @@ if not gpu_logger.handlers:  # Avoid duplicate handlers on reload
     ))
     gpu_logger.addHandler(handler)
 
-# In-memory cache for chunk sizes
-chunk_cache = {}
-
 def get_optimal_chunk_size(N, M, calculation_type='Gr'):
     """
     Calculate optimal chunk size based on available memory using CuPy built-in APIs.
@@ -48,7 +45,7 @@ def get_optimal_chunk_size(N, M, calculation_type='Gr'):
     Parameters
     ----------
     N : int
-        Matrix dimension (N×N)
+        Matrix dimension (NxN)
     M : int
         Number of energy points
     calculation_type : str
@@ -59,13 +56,6 @@ def get_optimal_chunk_size(N, M, calculation_type='Gr'):
     int
         Optimal chunk size for energy points
     """
-    cache_key = f"N{N}_{calculation_type}"
-
-    # Check cache first
-    if cache_key in chunk_cache:
-        cached_size = chunk_cache[cache_key]
-        gpu_logger.debug(f"Using cached chunk size {cached_size} for N={N}, {calculation_type}")
-        return min(cached_size, M)  # Don't exceed total energy points
 
     if not isCuda:
         # For CPU, use conservative chunking to avoid memory issues
@@ -84,14 +74,14 @@ def get_optimal_chunk_size(N, M, calculation_type='Gr'):
         available_mem = free_mem - used_by_pool
 
         # Use actual peak memory counts from memory tracking analysis:
-        # GrIntVectorized: peak 3 N×N×M arrays
-        # GrLessVectorized: peak 5 N×N×M arrays
+        # GrIntVectorized: peak 3 NxNxM arrays
+        # GrLessVectorized: peak 5 NxNxM arrays
         peak_arrays = 3 if calculation_type == 'Gr' else 5
         bytes_per_array = N * N * 16  # complex128 = 16 bytes per element
         bytes_per_energy = peak_arrays * bytes_per_array
 
-        # Use 70% of available memory for safety (accounts for N×N matrices and other overhead)
-        safe_mem = int(0.7 * available_mem)
+        # Use 90% of available memory for safety
+        safe_mem = int(0.9 * available_mem)
         chunk_size = max(1, min(M, safe_mem // bytes_per_energy))
 
         gpu_logger.debug(f"Memory calc: N={N}, {calculation_type}, peak_arrays={peak_arrays}, "
@@ -102,29 +92,6 @@ def get_optimal_chunk_size(N, M, calculation_type='Gr'):
     except Exception as e:
         gpu_logger.warning(f"Memory calculation failed: {e}, using conservative chunk size")
         return max(1, M // 4)
-
-def update_cache(N, chunk_size, elapsed_time, calculation_type):
-    """
-    Update cache with successful chunk size based on performance.
-
-    Parameters
-    ----------
-    N : int
-        Matrix dimension
-    chunk_size : int
-        Chunk size that worked well
-    elapsed_time : float
-        Time taken for calculation
-    calculation_type : str
-        Type of calculation: 'Gr' or 'GrLess'
-    """
-    cache_key = f"N{N}_{calculation_type}"
-
-    # Only cache if this is a reasonable performance (not too slow)
-    # and if we don't already have a better cached size
-    if cache_key not in chunk_cache or chunk_size > chunk_cache[cache_key]:
-        chunk_cache[cache_key] = chunk_size
-        gpu_logger.debug(f"Cached chunk size {chunk_size} for N={N}, {calculation_type} (time: {elapsed_time:.3f}s)")
 
 def Gr(F, S, g, E):
     """
@@ -216,9 +183,10 @@ def GrInt(F, S, g, Elist, weights):
     if isCuda:
         mempool = cp.get_default_memory_pool()
         initial_memory = mempool.used_bytes()
+        peak_memory = initial_memory
 
     # Use chunking approach similar to existing GrIntChunked but with proactive sizing
-    Gint = solver.zeros((N, N), dtype=solver.complex128)
+    Gint = np.zeros((N, N), dtype=solver.complex128)
 
     i = 0
     chunk_count = 0
@@ -239,8 +207,10 @@ def GrInt(F, S, g, Elist, weights):
 
             chunk_time = time.perf_counter() - chunk_start
             throughput = actual_chunk_size / chunk_time
+            current_memory = mempool.used_bytes()
+            peak_memory = max(peak_memory, current_memory)
 
-            gpu_logger.debug(f"Chunk {chunk_count}: {actual_chunk_size} energies in {chunk_time:.3f}s ({throughput:.1f} energies/s)")
+            gpu_logger.debug(f"Chunk {chunk_count}: {actual_chunk_size} energies in {chunk_time:.3f}s ({throughput:.2E} energies/s)")
 
             i = end_idx  # Success - move to next chunk
 
@@ -259,16 +229,14 @@ def GrInt(F, S, g, Elist, weights):
 
     # Final logging
     if isCuda:
-        peak_memory = mempool.used_bytes() - initial_memory
-        gpu_logger.info(f"Completed GrInt: Total {total_time:.3f}s | Chunks: {chunk_count} | Peak memory: {peak_memory/1e6:.1f}MB")
+        actual_peak = peak_memory - initial_memory
+        gpu_logger.info(f"Completed GrInt: Total {total_time:.3f}s | Chunks: {chunk_count} | Peak memory: {actual_peak/1e6:.1f}MB")
+        cp.get_default_memory_pool().free_all_blocks()
+        cp.cuda.Device().synchronize()  # Ensure cleanup completes
     else:
         gpu_logger.info(f"Completed GrInt: Total {total_time:.3f}s | Chunks: {chunk_count}")
 
-    # Update cache with successful configuration
-    if chunk_count <= 4:  # Only cache if chunking was reasonable
-        update_cache(N, chunk_size, total_time, 'Gr')
-
-    return Gint.get() if isCuda else Gint
+    return Gint
 
 
 def GrIntVectorized(F, S, g, Elist, weights, solver):
@@ -330,8 +298,6 @@ def GrIntVectorized(F, S, g, Elist, weights, solver):
     return Gint.get() if isCuda else Gint
 
 
-
-
 def GrLessInt(F, S, g, Elist, weights, ind=None):
     """
     Integrate nonequilibrium Green's function for a list of energies using vectorization.
@@ -377,9 +343,10 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
     if isCuda:
         mempool = cp.get_default_memory_pool()
         initial_memory = mempool.used_bytes()
+        peak_memory=initial_memory
 
     # Use chunking approach similar to existing GrLessChunked but with proactive sizing
-    Gint = solver.zeros((N, N), dtype=solver.complex128)
+    Gint = np.zeros((N, N), dtype=solver.complex128)
 
     i = 0
     chunk_count = 0
@@ -400,8 +367,10 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
 
             chunk_time = time.perf_counter() - chunk_start
             throughput = actual_chunk_size / chunk_time
+            current_memory = mempool.used_bytes()
+            peak_memory = max(peak_memory, current_memory)
 
-            gpu_logger.debug(f"Chunk {chunk_count}: {actual_chunk_size} energies in {chunk_time:.3f}s ({throughput:.1f} energies/s)")
+            gpu_logger.debug(f"Chunk {chunk_count}: {actual_chunk_size} energies in {chunk_time:.3f}s ({throughput:.2e} energies/s)")
 
             i = end_idx  # Success - move to next chunk
 
@@ -420,16 +389,14 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
 
     # Final logging
     if isCuda:
-        peak_memory = mempool.used_bytes() - initial_memory
-        gpu_logger.info(f"Completed GrLessInt: Total {total_time:.3f}s | Chunks: {chunk_count} | Peak memory: {peak_memory/1e6:.1f}MB")
+        actual_peak = peak_memory - initial_memory
+        gpu_logger.info(f"Completed GlessInt: Total {total_time:.3f}s | Chunks: {chunk_count} | Peak memory: {actual_peak/1e6:.1f}MB")
+        cp.get_default_memory_pool().free_all_blocks()
+        cp.cuda.Device().synchronize()  # Ensure cleanup completes
     else:
         gpu_logger.info(f"Completed GrLessInt: Total {total_time:.3f}s | Chunks: {chunk_count}")
 
-    # Update cache with successful configuration
-    if chunk_count <= 4:  # Only cache if chunking was reasonable
-        update_cache(N, chunk_size, total_time, 'GrLess')
-
-    return Gint.get() if isCuda else Gint
+    return Gint
 
 
 
