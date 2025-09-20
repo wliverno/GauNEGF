@@ -56,12 +56,10 @@ def detect_devices():
     Returns
     -------
     dict
-        Dictionary with device information including GPU count and total workers
+        Dictionary with device information including GPU count and device details
     """
     device_info = {
-        'cpu_workers': 1,
         'gpu_workers': 0,
-        'total_workers': 1,
         'gpu_devices': []
     }
 
@@ -69,7 +67,6 @@ def detect_devices():
         try:
             gpu_count = cp.cuda.runtime.getDeviceCount()
             device_info['gpu_workers'] = gpu_count
-            device_info['total_workers'] = gpu_count + 1  # +1 for CPU
 
             # Get individual GPU info
             for i in range(gpu_count):
@@ -83,209 +80,17 @@ def detect_devices():
                         'total_memory_gb': total_mem / 1e9
                     })
 
-            gpu_logger.info(f"Detected {gpu_count} GPU(s) + 1 CPU = {device_info['total_workers']} total workers")
+            gpu_logger.info(f"Detected {gpu_count} GPU(s)")
             for gpu in device_info['gpu_devices']:
                 gpu_logger.debug(f"GPU {gpu['id']}: {gpu['name']} ({gpu['free_memory_gb']:.1f}GB free)")
 
         except Exception as e:
             gpu_logger.warning(f"Error detecting GPUs: {e}, falling back to CPU-only")
             device_info['gpu_workers'] = 0
-            device_info['total_workers'] = 1
     else:
         gpu_logger.info("CUDA not available, using CPU-only computation")
 
     return device_info
-
-
-def analyze_blas_configuration():
-    """
-    Analyze the current BLAS backend and threading configuration.
-
-    Returns
-    -------
-    dict
-        Information about BLAS backend and threading setup
-    """
-    config_info = {
-        'cpu_cores': multiprocessing.cpu_count(),
-        'blas_backend': 'unknown',
-        'current_threads': 'auto',
-        'blas_info': {}
-    }
-
-    try:
-        # Get NumPy configuration
-        import numpy as np
-        config_info['numpy_version'] = np.__version__
-
-        # Try to get BLAS info
-        try:
-            config_info['blas_info'] = np.__config__.blas_opt_info
-            if 'libraries' in config_info['blas_info']:
-                libs = config_info['blas_info']['libraries']
-                if any('mkl' in lib.lower() for lib in libs):
-                    config_info['blas_backend'] = 'Intel MKL'
-                elif any('openblas' in lib.lower() for lib in libs):
-                    config_info['blas_backend'] = 'OpenBLAS'
-                elif any('blas' in lib.lower() for lib in libs):
-                    config_info['blas_backend'] = 'Generic BLAS'
-        except:
-            pass
-
-        # Check current threading environment
-        threading_vars = ['OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'BLAS_NUM_THREADS']
-        for var in threading_vars:
-            if var in os.environ:
-                config_info['current_threads'] = os.environ[var]
-                break
-
-    except Exception as e:
-        gpu_logger.warning(f"Could not analyze BLAS configuration: {e}")
-
-    return config_info
-
-
-def benchmark_matrix_threading(matrix_size=3000, test_threads=None):
-    """
-    Benchmark matrix inversion performance across different thread counts.
-
-    Parameters
-    ----------
-    matrix_size : int
-        Size of square matrix to test (default: 3000 for realistic workload)
-    test_threads : list, optional
-        List of thread counts to test. If None, auto-generates based on system
-
-    Returns
-    -------
-    dict
-        Performance results for each thread count
-    """
-    cpu_cores = multiprocessing.cpu_count()
-
-    if test_threads is None:
-        # Generate reasonable test points based on system size
-        if cpu_cores <= 8:
-            test_threads = [1, 2, 4, cpu_cores]
-        elif cpu_cores <= 20:
-            test_threads = [1, 2, 4, 8, cpu_cores//2, cpu_cores]
-        else:
-            # Large HPC system - test more points
-            test_threads = [1, 2, 4, 8, 16, 24, 32, cpu_cores//2, cpu_cores]
-
-    results = {}
-    original_threads = os.environ.get('OMP_NUM_THREADS', None)
-
-    gpu_logger.info(f"Benchmarking {matrix_size}×{matrix_size} complex matrix inversion scaling")
-
-    try:
-        # Create test matrix once
-        np.random.seed(42)  # Reproducible results
-        test_matrix = np.random.random((matrix_size, matrix_size)).astype(np.complex128)
-        test_matrix += 1j * np.random.random((matrix_size, matrix_size))
-        # Make it well-conditioned
-        test_matrix += np.eye(matrix_size) * matrix_size
-
-        for num_threads in test_threads:
-            try:
-                # Set thread count
-                os.environ['OMP_NUM_THREADS'] = str(num_threads)
-                os.environ['MKL_NUM_THREADS'] = str(num_threads)
-                os.environ['OPENBLAS_NUM_THREADS'] = str(num_threads)
-
-                # Warm up
-                _ = np.linalg.inv(test_matrix[:100, :100])
-
-                # Benchmark
-                start_time = time.perf_counter()
-                result = np.linalg.inv(test_matrix)
-                end_time = time.perf_counter()
-
-                duration = end_time - start_time
-                results[num_threads] = {
-                    'time_seconds': duration,
-                    'performance_ratio': results.get(1, {}).get('time_seconds', duration) / duration,
-                    'efficiency': (results.get(1, {}).get('time_seconds', duration) / duration) / num_threads
-                }
-
-                gpu_logger.debug(f"Threads: {num_threads:2d}, Time: {duration:.3f}s, "
-                               f"Speedup: {results[num_threads]['performance_ratio']:.2f}x, "
-                               f"Efficiency: {results[num_threads]['efficiency']:.2f}")
-
-            except Exception as e:
-                gpu_logger.warning(f"Benchmark failed for {num_threads} threads: {e}")
-                results[num_threads] = {'error': str(e)}
-
-    finally:
-        # Restore original threading
-        if original_threads is not None:
-            os.environ['OMP_NUM_THREADS'] = original_threads
-        else:
-            os.environ.pop('OMP_NUM_THREADS', None)
-
-        # Also clean up other threading vars
-        for var in ['MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS']:
-            os.environ.pop(var, None)
-
-    return results
-
-
-def find_optimal_cpu_configuration(benchmark_results=None):
-    """
-    Determine optimal CPU worker configuration based on benchmarking or heuristics.
-
-    Parameters
-    ----------
-    benchmark_results : dict, optional
-        Results from benchmark_matrix_threading(). If None, uses heuristics.
-
-    Returns
-    -------
-    tuple
-        (num_cpu_workers, threads_per_worker) optimal configuration
-    """
-    cpu_cores = multiprocessing.cpu_count()
-
-    if benchmark_results:
-        # Find optimal configuration from benchmark data
-        valid_results = {k: v for k, v in benchmark_results.items()
-                        if 'error' not in v and v.get('time_seconds', float('inf')) < float('inf')}
-
-        if valid_results:
-            # Find the thread count with best efficiency for high thread counts
-            high_thread_results = {k: v for k, v in valid_results.items() if k >= 8}
-            if high_thread_results:
-                # Find best efficiency among high thread counts
-                best_threads = max(high_thread_results.keys(),
-                                 key=lambda k: high_thread_results[k].get('efficiency', 0))
-
-                # Use this as threads per worker, calculate number of workers
-                threads_per_worker = min(best_threads, 32)  # Cap at 32 threads per worker
-                num_workers = max(1, cpu_cores // threads_per_worker)
-
-                gpu_logger.info(f"Benchmark-based config: {num_workers} workers × {threads_per_worker} threads")
-                return num_workers, threads_per_worker
-
-    # Fallback heuristics based on system size and known patterns
-    if cpu_cores <= 8:
-        # Small system: single worker using all cores
-        return 1, cpu_cores
-    elif cpu_cores <= 16:
-        # Medium system: 1-2 workers
-        return 2, cpu_cores // 2
-    elif cpu_cores <= 32:
-        # Large system: multiple workers with ~8-16 threads each
-        threads_per_worker = 16
-        num_workers = max(1, cpu_cores // threads_per_worker)
-        return num_workers, threads_per_worker
-    else:
-        # HPC system: conservative approach
-        # Memory bandwidth typically saturates around 16-24 threads for dense matrices
-        threads_per_worker = 20
-        num_workers = max(1, min(cpu_cores // threads_per_worker, 8))  # Cap at 8 workers
-
-        gpu_logger.info(f"Heuristic config for {cpu_cores}-core system: {num_workers} workers × {threads_per_worker} threads")
-        return num_workers, threads_per_worker
 
 
 def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker_id):
@@ -590,7 +395,7 @@ def DOSg(F, S, g, E):
 
 def configure_workers_for_system(device_info, M):
     """
-    Configure optimal worker setup based on system characteristics and workload.
+    Simple, aggressive worker configuration that actually uses available resources.
 
     Parameters
     ----------
@@ -611,44 +416,36 @@ def configure_workers_for_system(device_info, M):
     for var in ['OMP_NUM_THREADS', 'MKL_NUM_THREADS']:
         original_env_vars[var] = os.environ.get(var)
 
-    # Handle edge cases first
+    # Simple logic: use 8 threads per worker (works well for 3000x3000 matrices)
+    threads_per_worker = 8
+
     if M <= 1:
-        # Single energy point: use sequential processing
+        # Single energy point: use all cores in one worker
         num_cpu_workers = 1
         os.environ['OMP_NUM_THREADS'] = str(cpu_cores)
         os.environ['MKL_NUM_THREADS'] = str(cpu_cores)
-        gpu_logger.info(f"Single energy point: using 1 CPU worker with {cpu_cores} threads")
-        return num_cpu_workers, original_env_vars
+        gpu_logger.info(f"Single energy point: 1 worker with {cpu_cores} threads")
 
-    if M < cpu_cores and device_info['gpu_workers'] == 0:
-        # Few energy points, CPU-only: limit workers to avoid overhead
+    elif M < 10:
+        # Few energy points: limit workers to avoid overhead
         num_cpu_workers = min(M, max(1, cpu_cores // 4))
-        threads_per_worker = cpu_cores // num_cpu_workers
-        os.environ['OMP_NUM_THREADS'] = str(threads_per_worker)
-        os.environ['MKL_NUM_THREADS'] = str(threads_per_worker)
-        gpu_logger.info(f"Few energy points ({M}): using {num_cpu_workers} CPU workers")
-        return num_cpu_workers, original_env_vars
+        os.environ['OMP_NUM_THREADS'] = str(cpu_cores // num_cpu_workers)
+        os.environ['MKL_NUM_THREADS'] = str(cpu_cores // num_cpu_workers)
+        gpu_logger.info(f"Few energy points ({M}): {num_cpu_workers} workers")
 
-    # Main logic for larger workloads
-    if cpu_cores > 20 and device_info['gpu_workers'] == 0:
-        # CPU-only HPC system: multiple workers with optimal threading
-        threads_per_worker = 20  # Conservative for memory bandwidth
-        num_cpu_workers = min(cpu_cores // threads_per_worker, 8)  # Cap at 8 workers
+    elif device_info['gpu_workers'] == 0:
+        # CPU-only: use lots of workers (no arbitrary caps!)
+        num_cpu_workers = max(1, cpu_cores // threads_per_worker)
         os.environ['OMP_NUM_THREADS'] = str(threads_per_worker)
         os.environ['MKL_NUM_THREADS'] = str(threads_per_worker)
-        gpu_logger.info(f"HPC CPU-only mode: {num_cpu_workers} workers × {threads_per_worker} threads")
-    elif cpu_cores > 20:
-        # HPC system with GPUs: fewer CPU workers to avoid oversubscription
-        num_cpu_workers = min(2, cpu_cores // 16)
-        threads_per_worker = min(16, cpu_cores // num_cpu_workers)
-        os.environ['OMP_NUM_THREADS'] = str(threads_per_worker)
-        os.environ['MKL_NUM_THREADS'] = str(threads_per_worker)
-        gpu_logger.info(f"HPC mixed mode: {num_cpu_workers} CPU workers + {device_info['gpu_workers']} GPU workers")
+        gpu_logger.info(f"CPU-only: {num_cpu_workers} workers × {threads_per_worker} threads = {num_cpu_workers * threads_per_worker} total threads")
+
     else:
-        # Small/medium system: single CPU worker using all cores
-        num_cpu_workers = 1
-        os.environ['OMP_NUM_THREADS'] = str(cpu_cores)
-        os.environ['MKL_NUM_THREADS'] = str(cpu_cores)
+        # With GPU: still use lots of CPU workers (much more aggressive than before!)
+        num_cpu_workers = max(1, cpu_cores // 4)  # 4 threads per worker when GPUs present
+        os.environ['OMP_NUM_THREADS'] = '4'
+        os.environ['MKL_NUM_THREADS'] = '4'
+        gpu_logger.info(f"With {device_info['gpu_workers']} GPU(s): {num_cpu_workers} CPU workers × 4 threads + GPUs")
 
     return num_cpu_workers, original_env_vars
 
@@ -783,7 +580,7 @@ def GrInt(F, S, g, Elist, weights):
 
 def GrIntVectorized(F, S, g, Elist, weights, solver):
     """
-    Original vectorized implementation - preserved exactly.
+    Reference implementation for math verification - preserved exactly from original code.
 
     Parameters
     ----------
@@ -957,7 +754,7 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
 
 def GrLessVectorized(F, S, g, Elist, weights, solver, ind):
     """
-    Full Vectorized G< implementation.
+    Reference implementation for math verification - full vectorized G< implementation.
 
     Parameters
     ----------

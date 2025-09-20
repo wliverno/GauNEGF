@@ -32,4 +32,4 @@ SURFACE_RELAXATION_FACTOR = 0.1 # Relaxation factor for surface calculations
 
 # GPU/CPU Integration Logging Configuration
 LOG_LEVEL = 'DEBUG'              # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
-LOG_PERFORMANCE = True           # Enable GPU performance logging
+LOG_PERFORMANCE = False          # Enable GPU performance logging
