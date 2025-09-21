@@ -222,6 +222,7 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
         gpu_logger.error(f"{device_name} worker {worker_id} failed to initialize: {e}")
 
 
+
 def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_id, worker_id, progress_counter=None):
     """
     Memory-optimized unified worker function for processing GrLess energy points on CPU or GPU.
@@ -374,6 +375,8 @@ def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_i
         gpu_logger.error(f"{device_name} worker {worker_id} failed to initialize: {e}")
 
 
+
+
 def Gr(F, S, g, E):
     """
     Calculate retarded Green's function at given energy.
@@ -469,9 +472,9 @@ def times(A, B, C=None, use_gpu=None):
     # Return CPU array
     return result.get() if use_gpu else result
 
-def configure_workers_for_system(device_info, M):
+def configure_workers_for_system(device_info, M, matrix_size=None):
     """
-    Simple, aggressive worker configuration that actually uses available resources.
+    Smart worker configuration that respects energy points and matrix size.
 
     Parameters
     ----------
@@ -479,6 +482,8 @@ def configure_workers_for_system(device_info, M):
         Device information from detect_devices()
     M : int
         Number of energy points to process
+    matrix_size : int, optional
+        Matrix dimension N for size-aware optimization
 
     Returns
     -------
@@ -492,39 +497,57 @@ def configure_workers_for_system(device_info, M):
     for var in ['OMP_NUM_THREADS', 'MKL_NUM_THREADS']:
         original_env_vars[var] = os.environ.get(var)
 
-    # Simple logic: use 8 threads per worker (works well for 3000x3000 matrices)
-    threads_per_worker = 8
+    # Matrix-size-aware threading configuration for parallel approach
+    if matrix_size is None or matrix_size < 500:
+        # Small matrices: Fewer workers with more threads (better BLAS utilization)
+        threads_per_worker = max(8, cpu_cores // 2)
+        optimal_cpu_workers = max(1, cpu_cores // threads_per_worker)
+    elif matrix_size < 1500:
+        # Medium matrices: Balanced threading
+        threads_per_worker = 4
+        optimal_cpu_workers = max(1, cpu_cores // threads_per_worker)
+    else:
+        # Large matrices: More workers with moderate threading
+        threads_per_worker = 8
+        optimal_cpu_workers = max(1, cpu_cores // threads_per_worker)
 
+    # CRITICAL: Never create more workers than energy points!
     if M <= 1:
         # Single energy point: use all cores in one worker
         num_cpu_workers = 1
-        os.environ['OMP_NUM_THREADS'] = str(cpu_cores)
-        os.environ['MKL_NUM_THREADS'] = str(cpu_cores)
-        gpu_logger.info(f"Single energy point: 1 worker with {cpu_cores} threads")
-
+        threads_to_use = cpu_cores
     elif M < 10:
-        # Few energy points: limit workers to avoid overhead
-        num_cpu_workers = min(M, max(1, cpu_cores // 4))
-        os.environ['OMP_NUM_THREADS'] = str(cpu_cores // num_cpu_workers)
-        os.environ['MKL_NUM_THREADS'] = str(cpu_cores // num_cpu_workers)
-        gpu_logger.info(f"Few energy points ({M}): {num_cpu_workers} workers")
-
+        # Few energy points: limit workers but ensure good threading
+        num_cpu_workers = min(M, optimal_cpu_workers, 4)  # Cap at 4 workers for small workloads
+        threads_to_use = max(4, cpu_cores // num_cpu_workers)
     elif device_info['gpu_workers'] == 0:
-        # CPU-only: use lots of workers (no arbitrary caps!)
-        num_cpu_workers = max(1, cpu_cores // threads_per_worker)
-        os.environ['OMP_NUM_THREADS'] = str(threads_per_worker)
-        os.environ['MKL_NUM_THREADS'] = str(threads_per_worker)
-        gpu_logger.info(f"CPU-only: {num_cpu_workers} workers x {threads_per_worker} threads = {num_cpu_workers * threads_per_worker} total threads")
-
+        # CPU-only: CREATE AS MANY WORKERS AS POSSIBLE (respect energy point limit)
+        num_cpu_workers = min(M, optimal_cpu_workers)
+        threads_to_use = threads_per_worker
+        gpu_logger.info(f"CPU-only: Maximizing workers - {num_cpu_workers} workers for {M} energies")
     else:
-        # With GPU: reserve cores for GPU management, use rest for CPU workers
+        # With GPU: Use fewer CPU workers (GPU is 19-47x faster, will get most work naturally)
         cores_per_gpu = 4  # Reserve 4 cores per GPU for thread management
         reserved_cores = device_info['gpu_workers'] * cores_per_gpu
-        available_cores = max(4, cpu_cores - reserved_cores)  # Ensure minimum 4 cores
-        num_cpu_workers = max(1, available_cores // 4)  # 4 threads per worker
-        os.environ['OMP_NUM_THREADS'] = '4'
-        os.environ['MKL_NUM_THREADS'] = '4'
-        gpu_logger.info(f"With {device_info['gpu_workers']} GPU(s): reserved {reserved_cores} cores for GPU management, {num_cpu_workers} CPU workers x 4 threads = {num_cpu_workers * 4} cores for CPU")
+        available_cores = max(8, cpu_cores - reserved_cores)  # Ensure decent minimum
+        max_cpu_workers = max(1, available_cores // 4)
+
+        # Use fewer CPU workers when GPU present for natural load balancing
+        num_cpu_workers = min(M, max_cpu_workers // 2)  # Use half the CPU workers when GPU present
+        threads_to_use = max(4, available_cores // num_cpu_workers)
+        gpu_logger.info(f"With GPU: Using {num_cpu_workers} CPU workers (reduced for GPU priority), {reserved_cores} cores reserved for {device_info['gpu_workers']} GPUs")
+
+    # Set threading environment
+    os.environ['OMP_NUM_THREADS'] = str(threads_to_use)
+    os.environ['MKL_NUM_THREADS'] = str(threads_to_use)
+
+    # Log configuration
+    matrix_info = f"matrix={matrix_size}x{matrix_size}, " if matrix_size else ""
+    gpu_logger.info(f"Worker config: {matrix_info}M={M} energies, {num_cpu_workers} CPU workers x {threads_to_use} threads")
+    if device_info['gpu_workers'] > 0:
+        gpu_logger.info(f"GPU config: {device_info['gpu_workers']} GPU workers (natural priority through speed)")
+    if num_cpu_workers >= M and M > 1:
+        gpu_logger.warning(f"Note: {num_cpu_workers} workers for {M} energy points - some workers will be idle")
 
     return num_cpu_workers, original_env_vars
 
@@ -576,9 +599,21 @@ def GrInt(F, S, g, Elist, weights):
     M = Elist.size
     N = F.shape[0]
 
-    # Detect available devices and configure workers
+    # Check if we should use optimized small matrix path
+    if N < 500 and M < 20:
+        gpu_logger.info(f"Small matrix optimization: {N}x{N} with {M} energies - using vectorized approach")
+        solver = cp if isCuda else np
+        try:
+            result = GrIntVectorized(F, S, g, Elist, weights, solver)
+            total_time = time.perf_counter() - start_time
+            gpu_logger.info(f"Completed GrInt (small matrix): {total_time:.3f}s total")
+            return result
+        finally:
+            pass  # No environment cleanup needed for vectorized approach
+
+    # Detect available devices and configure workers for parallel approach
     device_info = detect_devices()
-    num_cpu_workers, original_env_vars = configure_workers_for_system(device_info, M)
+    num_cpu_workers, original_env_vars = configure_workers_for_system(device_info, M, N)
     total_workers = num_cpu_workers + device_info['gpu_workers']
 
     # Log calculation start
@@ -587,7 +622,7 @@ def GrInt(F, S, g, Elist, weights):
     gpu_logger.info(f"Using {total_workers} workers: {device_info['gpu_workers']} GPU(s) + {num_cpu_workers} CPU")
 
     try:
-        # Create work queue with all energy points
+        # Simple shared queue approach (like original) - GPU gets priority through fewer CPU workers
         work_queue = queue.Queue()
         for i, (E, weight) in enumerate(zip(Elist, weights)):
             work_queue.put((E, weight, i))
@@ -600,6 +635,15 @@ def GrInt(F, S, g, Elist, weights):
         # Create and start worker threads
         threads = []
 
+        # Start GPU workers FIRST (they're faster, so they'll get most work naturally)
+        for gpu_id in range(device_info['gpu_workers']):
+            gpu_thread = threading.Thread(
+                target=worker_gr,
+                args=(work_queue, result_lock, shared_result, F, S, g, gpu_id, f"GPU-{gpu_id}", progress_counter)
+            )
+            threads.append(gpu_thread)
+            gpu_thread.start()
+
         # Start CPU workers
         for cpu_id in range(num_cpu_workers):
             cpu_thread = threading.Thread(
@@ -609,32 +653,35 @@ def GrInt(F, S, g, Elist, weights):
             threads.append(cpu_thread)
             cpu_thread.start()
 
-        # Start GPU workers (if available)
-        for gpu_id in range(device_info['gpu_workers']):
-            gpu_thread = threading.Thread(
-                target=worker_gr,
-                args=(work_queue, result_lock, shared_result, F, S, g, gpu_id, f"GPU-{gpu_id}", progress_counter)
-            )
-            threads.append(gpu_thread)
-            gpu_thread.start()
-
-        # Progress monitoring
+        # Progress monitoring with corrected timing
         def monitor_progress():
             last_completed = 0
+            work_start_time = None
+
             while any(t.is_alive() for t in threads):
                 try:
                     with result_lock:
                         completed = progress_counter['completed']
-                    if completed != last_completed:
+
+                    if completed > 0 and work_start_time is None:
+                        # Start timing when first energy point completes (after GPU initialization)
+                        work_start_time = time.perf_counter()
+                        gpu_logger.info("First energy point completed, starting performance timing")
+
+                    if completed != last_completed and work_start_time is not None:
                         progress = 100.0 * completed / M
-                        elapsed = time.perf_counter() - start_time
-                        rate = completed / elapsed if elapsed > 0 else 0
+                        work_elapsed = time.perf_counter() - work_start_time
+                        rate = completed / work_elapsed if work_elapsed > 0.01 else 0
                         remaining = M - completed
-                        gpu_logger.debug(f"Progress: {progress:.1f}% ({completed}/{M}) ({rate:.1f} energies/s, {remaining} remaining)")
+                        eta = remaining / rate if rate > 0 else 0
+
+                        if completed < M:
+                            gpu_logger.debug(f"Progress: {progress:.1f}% ({completed}/{M}) ({rate:.1f} energies/s, ETA: {eta:.1f}s)")
+
                         last_completed = completed
                 except:
                     pass
-                time.sleep(1.0)
+                time.sleep(0.5)  # More frequent updates for fast GPU work
 
         # Start progress monitor
         monitor_thread = threading.Thread(target=monitor_progress)
@@ -657,7 +704,7 @@ def GrInt(F, S, g, Elist, weights):
         speedup_potential = "19-47x" if USE_FLOAT32 and gpu_workers > 0 else "2.5x"
 
         gpu_logger.info(f"Completed GrInt: {total_time:.3f}s total ({throughput:.2e} sec/energy)")
-        gpu_logger.info(f"Performance: {precision_str} precision, {gpu_workers} GPU workers, potential speedup: {speedup_potential}")
+        gpu_logger.info(f"Performance: {precision_str} precision, {gpu_workers} GPU workers (natural priority), potential speedup: {speedup_potential}")
 
         if gpu_workers > 0 and not USE_FLOAT32:
             gpu_logger.warning(f"GPU performance penalty: Using float64 instead of float32 (expected 19-47x slower)")
@@ -762,9 +809,21 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
     M = Elist.size
     N = F.shape[0]
 
-    # Detect available devices and configure workers
+    # Check if we should use optimized small matrix path
+    if N < 500 and M < 20:
+        gpu_logger.info(f"Small matrix optimization: {N}x{N} with {M} energies - using vectorized approach")
+        solver = cp if isCuda else np
+        try:
+            result = GrLessVectorized(F, S, g, Elist, weights, solver, ind)
+            total_time = time.perf_counter() - start_time
+            gpu_logger.info(f"Completed GrLessInt (small matrix): {total_time:.3f}s total")
+            return result
+        finally:
+            pass  # No environment cleanup needed for vectorized approach
+
+    # Detect available devices and configure workers for parallel approach
     device_info = detect_devices()
-    num_cpu_workers, original_env_vars = configure_workers_for_system(device_info, M)
+    num_cpu_workers, original_env_vars = configure_workers_for_system(device_info, M, N)
     total_workers = num_cpu_workers + device_info['gpu_workers']
 
     # Log calculation start
@@ -773,7 +832,7 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
     gpu_logger.info(f"Using {total_workers} workers: {device_info['gpu_workers']} GPU(s) + {num_cpu_workers} CPU")
 
     try:
-        # Create work queue with all energy points
+        # Simple shared queue approach (like original) - GPU gets priority through fewer CPU workers
         work_queue = queue.Queue()
         for i, (E, weight) in enumerate(zip(Elist, weights)):
             work_queue.put((E, weight, i))
@@ -786,6 +845,15 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
         # Create and start worker threads
         threads = []
 
+        # Start GPU workers FIRST (they're faster, so they'll get most work naturally)
+        for gpu_id in range(device_info['gpu_workers']):
+            gpu_thread = threading.Thread(
+                target=worker_grless,
+                args=(work_queue, result_lock, shared_result, F, S, g, ind, gpu_id, f"GPU-{gpu_id}", progress_counter)
+            )
+            threads.append(gpu_thread)
+            gpu_thread.start()
+
         # Start CPU workers
         for cpu_id in range(num_cpu_workers):
             cpu_thread = threading.Thread(
@@ -795,32 +863,35 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
             threads.append(cpu_thread)
             cpu_thread.start()
 
-        # Start GPU workers (if available)
-        for gpu_id in range(device_info['gpu_workers']):
-            gpu_thread = threading.Thread(
-                target=worker_grless,
-                args=(work_queue, result_lock, shared_result, F, S, g, ind, gpu_id, f"GPU-{gpu_id}", progress_counter)
-            )
-            threads.append(gpu_thread)
-            gpu_thread.start()
-
-        # Progress monitoring
+        # Progress monitoring with corrected timing
         def monitor_progress():
             last_completed = 0
+            work_start_time = None
+
             while any(t.is_alive() for t in threads):
                 try:
                     with result_lock:
                         completed = progress_counter['completed']
-                    if completed != last_completed:
+
+                    if completed > 0 and work_start_time is None:
+                        # Start timing when first energy point completes (after GPU initialization)
+                        work_start_time = time.perf_counter()
+                        gpu_logger.info("First energy point completed, starting performance timing")
+
+                    if completed != last_completed and work_start_time is not None:
                         progress = 100.0 * completed / M
-                        elapsed = time.perf_counter() - start_time
-                        rate = completed / elapsed if elapsed > 0 else 0
+                        work_elapsed = time.perf_counter() - work_start_time
+                        rate = completed / work_elapsed if work_elapsed > 0.01 else 0
                         remaining = M - completed
-                        gpu_logger.debug(f"Progress: {progress:.1f}% ({completed}/{M}) ({rate:.1f} energies/s, {remaining} remaining)")
+                        eta = remaining / rate if rate > 0 else 0
+
+                        if completed < M:
+                            gpu_logger.debug(f"Progress: {progress:.1f}% ({completed}/{M}) ({rate:.1f} energies/s, ETA: {eta:.1f}s)")
+
                         last_completed = completed
                 except:
                     pass
-                time.sleep(1.0)
+                time.sleep(0.5)  # More frequent updates for fast GPU work
 
         # Start progress monitor
         monitor_thread = threading.Thread(target=monitor_progress)
@@ -843,7 +914,7 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
         speedup_potential = "31-57x" if USE_FLOAT32 and gpu_workers > 0 else "2.6x"
 
         gpu_logger.info(f"Completed GrLessInt: {total_time:.3f}s total ({throughput:.2e} sec/energy)")
-        gpu_logger.info(f"Performance: {precision_str} precision, {gpu_workers} GPU workers, potential speedup: {speedup_potential}")
+        gpu_logger.info(f"Performance: {precision_str} precision, {gpu_workers} GPU workers (natural priority), potential speedup: {speedup_potential}")
 
         if gpu_workers > 0 and not USE_FLOAT32:
             gpu_logger.warning(f"GPU performance penalty: Using float64 instead of float32 (expected 31-57x slower)")
