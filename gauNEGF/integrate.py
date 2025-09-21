@@ -93,7 +93,7 @@ def detect_devices():
     return device_info
 
 
-def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker_id):
+def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker_id, progress_counter=None):
     """
     Memory-optimized unified worker function for processing Gr energy points on CPU or GPU.
 
@@ -160,7 +160,7 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
 
                 try:
                     Gr_E = solver.linalg.inv(mat)
-                except (np.linalg.LinAlgError, (cp.linalg.LinAlgError if is_gpu else type(None))):
+                except (solver.linalg.LinAlgError):
                     gpu_logger.warning(f"{device_name} worker {worker_id}: Singular matrix at E={E:.6f} eV, using pseudoinverse")
                     Gr_E = solver.linalg.pinv(mat)
 
@@ -169,6 +169,11 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
 
                 local_count += 1
                 work_queue.task_done()
+
+                # Update progress counter
+                if progress_counter is not None:
+                    with result_lock:
+                        progress_counter['completed'] += 1
 
                 # Clean up temporary arrays if not reused
                 if not is_gpu:
@@ -202,7 +207,7 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
         gpu_logger.error(f"{device_name} worker {worker_id} failed to initialize: {e}")
 
 
-def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_id, worker_id):
+def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_id, worker_id, progress_counter=None):
     """
     Memory-optimized unified worker function for processing GrLess energy points on CPU or GPU.
 
@@ -274,7 +279,7 @@ def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_i
 
                 try:
                     Gr_E = solver.linalg.inv(mat)
-                except (np.linalg.LinAlgError, (cp.linalg.LinAlgError if is_gpu else type(None))):
+                except (solver.linalg.LinAlgError):
                     gpu_logger.warning(f"{device_name} worker {worker_id}: Singular matrix at E={E:.6f} eV, using pseudoinverse")
                     Gr_E = solver.linalg.pinv(mat)
 
@@ -312,6 +317,11 @@ def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_i
 
                 local_count += 1
                 work_queue.task_done()
+
+                # Update progress counter
+                if progress_counter is not None:
+                    with result_lock:
+                        progress_counter['completed'] += 1
 
                 # Clean up temporary arrays if not reused
                 if not is_gpu:
@@ -441,11 +451,14 @@ def configure_workers_for_system(device_info, M):
         gpu_logger.info(f"CPU-only: {num_cpu_workers} workers × {threads_per_worker} threads = {num_cpu_workers * threads_per_worker} total threads")
 
     else:
-        # With GPU: still use lots of CPU workers (much more aggressive than before!)
-        num_cpu_workers = max(1, cpu_cores // 4)  # 4 threads per worker when GPUs present
+        # With GPU: reserve cores for GPU management, use rest for CPU workers
+        cores_per_gpu = 4  # Reserve 4 cores per GPU for thread management
+        reserved_cores = device_info['gpu_workers'] * cores_per_gpu
+        available_cores = max(4, cpu_cores - reserved_cores)  # Ensure minimum 4 cores
+        num_cpu_workers = max(1, available_cores // 4)  # 4 threads per worker
         os.environ['OMP_NUM_THREADS'] = '4'
         os.environ['MKL_NUM_THREADS'] = '4'
-        gpu_logger.info(f"With {device_info['gpu_workers']} GPU(s): {num_cpu_workers} CPU workers × 4 threads + GPUs")
+        gpu_logger.info(f"With {device_info['gpu_workers']} GPU(s): reserved {reserved_cores} cores for GPU management, {num_cpu_workers} CPU workers × 4 threads = {num_cpu_workers * 4} cores for CPU")
 
     return num_cpu_workers, original_env_vars
 
@@ -513,9 +526,10 @@ def GrInt(F, S, g, Elist, weights):
         for i, (E, weight) in enumerate(zip(Elist, weights)):
             work_queue.put((E, weight, i))
 
-        # Initialize shared result
+        # Initialize shared result and progress counter
         result_lock = threading.Lock()
         shared_result = {'matrix': np.zeros((N, N), dtype=np.complex128)}
+        progress_counter = {'completed': 0}
 
         # Create and start worker threads
         threads = []
@@ -524,7 +538,7 @@ def GrInt(F, S, g, Elist, weights):
         for cpu_id in range(num_cpu_workers):
             cpu_thread = threading.Thread(
                 target=worker_gr,
-                args=(work_queue, result_lock, shared_result, F, S, g, None, f"CPU-{cpu_id}")
+                args=(work_queue, result_lock, shared_result, F, S, g, None, f"CPU-{cpu_id}", progress_counter)
             )
             threads.append(cpu_thread)
             cpu_thread.start()
@@ -533,24 +547,25 @@ def GrInt(F, S, g, Elist, weights):
         for gpu_id in range(device_info['gpu_workers']):
             gpu_thread = threading.Thread(
                 target=worker_gr,
-                args=(work_queue, result_lock, shared_result, F, S, g, gpu_id, f"GPU-{gpu_id}")
+                args=(work_queue, result_lock, shared_result, F, S, g, gpu_id, f"GPU-{gpu_id}", progress_counter)
             )
             threads.append(gpu_thread)
             gpu_thread.start()
 
         # Progress monitoring
         def monitor_progress():
-            last_remaining = M
+            last_completed = 0
             while any(t.is_alive() for t in threads):
                 try:
-                    remaining = work_queue.qsize()
-                    if remaining != last_remaining:
-                        completed = M - remaining
+                    with result_lock:
+                        completed = progress_counter['completed']
+                    if completed != last_completed:
                         progress = 100.0 * completed / M
                         elapsed = time.perf_counter() - start_time
                         rate = completed / elapsed if elapsed > 0 else 0
-                        gpu_logger.debug(f"Progress: {progress:.1f}% ({completed}/{M}) ({rate:.1f} energies/s)")
-                        last_remaining = remaining
+                        remaining = M - completed
+                        gpu_logger.debug(f"Progress: {progress:.1f}% ({completed}/{M}) ({rate:.1f} energies/s, {remaining} remaining)")
+                        last_completed = completed
                 except:
                     pass
                 time.sleep(1.0)
@@ -686,9 +701,10 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
         for i, (E, weight) in enumerate(zip(Elist, weights)):
             work_queue.put((E, weight, i))
 
-        # Initialize shared result
+        # Initialize shared result and progress counter
         result_lock = threading.Lock()
         shared_result = {'matrix': np.zeros((N, N), dtype=np.complex128)}
+        progress_counter = {'completed': 0}
 
         # Create and start worker threads
         threads = []
@@ -697,7 +713,7 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
         for cpu_id in range(num_cpu_workers):
             cpu_thread = threading.Thread(
                 target=worker_grless,
-                args=(work_queue, result_lock, shared_result, F, S, g, ind, None, f"CPU-{cpu_id}")
+                args=(work_queue, result_lock, shared_result, F, S, g, ind, None, f"CPU-{cpu_id}", progress_counter)
             )
             threads.append(cpu_thread)
             cpu_thread.start()
@@ -706,24 +722,25 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
         for gpu_id in range(device_info['gpu_workers']):
             gpu_thread = threading.Thread(
                 target=worker_grless,
-                args=(work_queue, result_lock, shared_result, F, S, g, ind, gpu_id, f"GPU-{gpu_id}")
+                args=(work_queue, result_lock, shared_result, F, S, g, ind, gpu_id, f"GPU-{gpu_id}", progress_counter)
             )
             threads.append(gpu_thread)
             gpu_thread.start()
 
         # Progress monitoring
         def monitor_progress():
-            last_remaining = M
+            last_completed = 0
             while any(t.is_alive() for t in threads):
                 try:
-                    remaining = work_queue.qsize()
-                    if remaining != last_remaining:
-                        completed = M - remaining
+                    with result_lock:
+                        completed = progress_counter['completed']
+                    if completed != last_completed:
                         progress = 100.0 * completed / M
                         elapsed = time.perf_counter() - start_time
                         rate = completed / elapsed if elapsed > 0 else 0
-                        gpu_logger.debug(f"Progress: {progress:.1f}% ({completed}/{M}) ({rate:.1f} energies/s)")
-                        last_remaining = remaining
+                        remaining = M - completed
+                        gpu_logger.debug(f"Progress: {progress:.1f}% ({completed}/{M}) ({rate:.1f} energies/s, {remaining} remaining)")
+                        last_completed = completed
                 except:
                     pass
                 time.sleep(1.0)
