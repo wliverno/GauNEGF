@@ -26,11 +26,7 @@ import queue
 import multiprocessing
 from gauNEGF.config import LOG_LEVEL, LOG_PERFORMANCE, USE_FLOAT32
 
-# Precision configuration based on benchmark results
-if USE_FLOAT32:
-    COMPUTE_DTYPE = np.complex64
-else:
-    COMPUTE_DTYPE = np.complex128
+# No global dtype - use solver-specific logic
 
 # Setup node-specific logging for GPU/parallel operations
 hostname = socket.gethostname()
@@ -141,23 +137,15 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
         local_count = 0
         N = F.shape[0]
 
-        # Convert to device arrays once with configurable precision
-        if is_gpu and isCuda:
-            device_dtype = cp.complex64 if USE_FLOAT32 else cp.complex128
-            gpu_logger.debug(f"{device_name} worker {worker_id} using dtype: {device_dtype} (CuPy), is_gpu={is_gpu}, isCuda={isCuda}")
-        else:
-            device_dtype = COMPUTE_DTYPE
-            gpu_logger.debug(f"{device_name} worker {worker_id} using dtype: {device_dtype} (NumPy), is_gpu={is_gpu}, isCuda={isCuda}")
-        F_device = solver.array(F, dtype=device_dtype)
-        S_device = solver.array(S, dtype=device_dtype)
+        dtype = solver.complex64 if USE_FLOAT32 else solver.complex128
+        gpu_logger.debug(f"{device_name} worker {worker_id} using dtype: {dtype}")
+        F_device = solver.array(F, dtype=dtype)
+        S_device = solver.array(S, dtype=dtype)
+        local_result = solver.zeros((N, N), dtype=dtype)
 
-        # Local accumulator to minimize GPU-to-CPU transfers
-        local_result = solver.zeros((N, N), dtype=device_dtype)
-
-        # Pre-allocate workspace arrays for GPU memory efficiency
         if is_gpu:
-            workspace_sigma = solver.zeros((N, N), dtype=device_dtype)
-            workspace_mat = solver.zeros((N, N), dtype=device_dtype)
+            workspace_sigma = solver.zeros((N, N), dtype=dtype)
+            workspace_mat = solver.zeros((N, N), dtype=dtype)
 
         while True:
             try:
@@ -168,33 +156,25 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
 
                 # Compute Green's function for this energy point
                 if is_gpu:
-                    # Get sigma from surface calculator (CPU) and transfer to GPU workspace
                     sigma_start = time.perf_counter()
                     sigma_cpu = g.sigmaTot(E)
                     sigma_time = time.perf_counter() - sigma_start
 
                     transfer_start = time.perf_counter()
-                    workspace_sigma[:] = cp.asarray(sigma_cpu, dtype=device_dtype)
-                    # Cast E to device precision only for matrix computation
-                    E_device = device_dtype.type(E)
-                    workspace_mat[:] = E_device * S_device - F_device - workspace_sigma
+                    workspace_sigma[:] = cp.asarray(sigma_cpu, dtype=dtype)
+                    workspace_mat[:] = E * S_device - F_device - workspace_sigma
                     transfer_time = time.perf_counter() - transfer_start
 
                     sigma_E = workspace_sigma
                     mat = workspace_mat
-
                     gpu_logger.debug(f"{device_name} worker {worker_id} timing: queue={queue_time:.4f}s, sigma={sigma_time:.4f}s, transfer={transfer_time:.4f}s for E={E:.6f}")
                 else:
-                    # For CPU, ensure we get proper numpy array
                     sigma_start = time.perf_counter()
                     sigma_cpu = g.sigmaTot(E)
                     sigma_time = time.perf_counter() - sigma_start
 
-                    sigma_E = np.asarray(sigma_cpu, dtype=COMPUTE_DTYPE)
-                    # Cast E to device precision only for matrix computation
-                    E_device = COMPUTE_DTYPE.type(E)
-                    mat = E_device * S_device - F_device - sigma_E
-
+                    sigma_E = np.asarray(sigma_cpu, dtype=dtype)
+                    mat = E * S_device - F_device - sigma_E
                     gpu_logger.debug(f"{device_name} worker {worker_id} timing: queue={queue_time:.4f}s, sigma={sigma_time:.4f}s for E={E:.6f}")
 
                 try:
@@ -236,9 +216,6 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
         # Single GPU-to-CPU transfer at the end (much more efficient)
         if local_count > 0:
             local_result_cpu = local_result.get() if is_gpu else local_result
-            # Ensure accumulation in float64 precision for adaptive integration convergence
-            if local_result_cpu.dtype != COMPUTE_DTYPE:
-                local_result_cpu = local_result_cpu.astype(COMPUTE_DTYPE)
             with result_lock:
                 shared_result['matrix'] += local_result_cpu
 
@@ -293,26 +270,18 @@ def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_i
         local_count = 0
         N = F.shape[0]
 
-        # Convert to device arrays once with configurable precision
-        if is_gpu and isCuda:
-            device_dtype = cp.complex64 if USE_FLOAT32 else cp.complex128
-            gpu_logger.debug(f"{device_name} worker {worker_id} using dtype: {device_dtype} (CuPy), is_gpu={is_gpu}, isCuda={isCuda}")
-        else:
-            device_dtype = COMPUTE_DTYPE
-            gpu_logger.debug(f"{device_name} worker {worker_id} using dtype: {device_dtype} (NumPy), is_gpu={is_gpu}, isCuda={isCuda}")
-        F_device = solver.array(F, dtype=device_dtype)
-        S_device = solver.array(S, dtype=device_dtype)
+        dtype = solver.complex64 if USE_FLOAT32 else solver.complex128
+        gpu_logger.debug(f"{device_name} worker {worker_id} using dtype: {dtype}")
+        F_device = solver.array(F, dtype=dtype)
+        S_device = solver.array(S, dtype=dtype)
+        local_result = solver.zeros((N, N), dtype=dtype)
 
-        # Local accumulator to minimize GPU-to-CPU transfers
-        local_result = solver.zeros((N, N), dtype=device_dtype)
-
-        # Pre-allocate workspace arrays for GPU memory efficiency
         if is_gpu:
-            workspace_sigma_tot = solver.zeros((N, N), dtype=device_dtype)
-            workspace_mat = solver.zeros((N, N), dtype=device_dtype)
-            workspace_sigma_E = solver.zeros((N, N), dtype=device_dtype)
-            workspace_gamma = solver.zeros((N, N), dtype=device_dtype)
-            workspace_temp = solver.zeros((N, N), dtype=device_dtype)
+            workspace_sigma_tot = solver.zeros((N, N), dtype=dtype)
+            workspace_mat = solver.zeros((N, N), dtype=dtype)
+            workspace_sigma_E = solver.zeros((N, N), dtype=dtype)
+            workspace_gamma = solver.zeros((N, N), dtype=dtype)
+            workspace_temp = solver.zeros((N, N), dtype=dtype)
 
         while True:
             try:
@@ -323,14 +292,14 @@ def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_i
                 if is_gpu:
                     # Get sigma from surface calculator (CPU) and transfer to GPU workspace
                     sigma_cpu = g.sigmaTot(E)
-                    workspace_sigma_tot[:] = cp.asarray(sigma_cpu, dtype=device_dtype)
+                    workspace_sigma_tot[:] = cp.asarray(sigma_cpu, dtype=dtype)
                     workspace_mat[:] = E * S_device - F_device - workspace_sigma_tot
                     sigma_tot = workspace_sigma_tot
                     mat = workspace_mat
                 else:
                     # For CPU, ensure we get proper numpy array
                     sigma_cpu = g.sigmaTot(E)
-                    sigma_tot = np.asarray(sigma_cpu, dtype=COMPUTE_DTYPE)
+                    sigma_tot = np.asarray(sigma_cpu, dtype=dtype)
                     mat = E * S_device - F_device - sigma_tot
 
                 try:
@@ -353,11 +322,11 @@ def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_i
                 else:
                     if is_gpu:
                         sigma_ind_cpu = g.sigma(E, ind)
-                        workspace_sigma_E[:] = cp.asarray(sigma_ind_cpu, dtype=device_dtype)
+                        workspace_sigma_E[:] = cp.asarray(sigma_ind_cpu, dtype=dtype)
                         sigma_E = workspace_sigma_E
                     else:
                         sigma_ind_cpu = g.sigma(E, ind)
-                        sigma_E = np.asarray(sigma_ind_cpu, dtype=COMPUTE_DTYPE)
+                        sigma_E = np.asarray(sigma_ind_cpu, dtype=dtype)
 
                 if is_gpu:
                     workspace_gamma[:] = 1j * (sigma_E - solver.conj(sigma_E).T)
@@ -394,9 +363,6 @@ def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_i
         # Single GPU-to-CPU transfer at the end (much more efficient)
         if local_count > 0:
             local_result_cpu = local_result.get() if is_gpu else local_result
-            # Ensure accumulation in float64 precision for adaptive integration convergence
-            if local_result_cpu.dtype != COMPUTE_DTYPE:
-                local_result_cpu = local_result_cpu.astype(COMPUTE_DTYPE)
             with result_lock:
                 shared_result['matrix'] += local_result_cpu
 
@@ -436,10 +402,7 @@ def Gr(F, S, g, E):
         Retarded Green's function G(E) = [ES - F - Σ(E)]^(-1)
     """
     solver = cp if isCuda else np
-    if isCuda:
-        dtype = cp.complex64 if USE_FLOAT32 else cp.complex128
-    else:
-        dtype = COMPUTE_DTYPE
+    dtype = solver.complex64 if USE_FLOAT32 else solver.complex128
     mat = solver.array(E*S - F - g.sigmaTot(E), dtype=dtype)
     I = solver.eye(mat.shape[0], dtype=dtype)
     result = solver.linalg.solve(mat, I)
@@ -490,12 +453,9 @@ def times(A, B, C=None, use_gpu=None):
         use_gpu = isCuda
 
     solver = cp if use_gpu else np
-    if use_gpu and isCuda:
-        dtype = cp.complex64 if USE_FLOAT32 else cp.complex128
-    else:
-        dtype = COMPUTE_DTYPE
+    dtype = solver.complex64 if USE_FLOAT32 else solver.complex128
 
-    # Convert inputs to device arrays with optimized precision
+    # Convert inputs to device arrays
     A_device = solver.asarray(A, dtype=dtype)
     B_device = solver.asarray(B, dtype=dtype)
 
@@ -696,7 +656,8 @@ def GrInt(F, S, g, Elist, weights):
 
         # Initialize shared result
         result_lock = threading.Lock()
-        shared_result = {'matrix': np.zeros((N, N), dtype=COMPUTE_DTYPE)}
+        dtype = np.complex64 if USE_FLOAT32 else np.complex128
+        shared_result = {'matrix': np.zeros((N, N), dtype=dtype)}
 
         # Create and start worker threads
         threads = []
@@ -796,41 +757,22 @@ def GrIntVectorized(F, S, g, Elist, weights, solver):
     M = Elist.size
     N = F.shape[0]
 
-    # Convert array types to match solver with configurable precision:
-    if isCuda and solver == cp:
-        device_dtype = solver.complex64 if USE_FLOAT32 else solver.complex128
-    else:
-        device_dtype = COMPUTE_DTYPE
+    # Convert array types to match solver:
+    dtype = solver.complex64 if USE_FLOAT32 else solver.complex128
+    Elist_ = solver.array(Elist, dtype=dtype)
+    weights = solver.array(weights, dtype=dtype)
+    S = solver.array(S, dtype=dtype)
+    F = solver.array(F, dtype=dtype)
 
-    # Keep energies and weights in high precision
-    Elist_ = solver.array(Elist, dtype=solver.complex128)
-    weights = solver.array(weights, dtype=solver.float64)
-    # Only cast matrices to device precision for GPU operations
-    S = solver.array(S, dtype=device_dtype)
-    F = solver.array(F, dtype=device_dtype)
-
-    # Memory tracking: 0 NxNxM arrays allocated
-
-    #Generate vectorized matrices conserving memory
-    ES_minus_F_minus_Sig = (Elist_[:, None, None] * solver.tile(S, (M, 1, 1))).astype(device_dtype)
-    # Memory tracking: 1 NxNxM array (ES_minus_F_minus_Sig)
-
+    ES_minus_F_minus_Sig = Elist_[:, None, None] * solver.tile(S, (M, 1, 1))
     ES_minus_F_minus_Sig -= solver.tile(F, (M, 1, 1))
-    ES_minus_F_minus_Sig -= solver.array([g.sigmaTot(E) for E in Elist], dtype=device_dtype)
-    # Memory tracking: Still 1 NxNxM array (ES_minus_F_minus_Sig, temp tiles destroyed)
+    ES_minus_F_minus_Sig -= solver.array([g.sigmaTot(E) for E in Elist], dtype=dtype)
 
-    Gr_vec = solver.linalg.solve(ES_minus_F_minus_Sig, solver.tile(solver.eye(N, dtype=device_dtype), (M, 1, 1)))
-    # Memory tracking: PEAK 3 NxNxM arrays (ES_minus_F_minus_Sig + Gr_vec + temp eye tile)
-
+    Gr_vec = solver.linalg.solve(ES_minus_F_minus_Sig, solver.tile(solver.eye(N, dtype=dtype), (M, 1, 1)))
     del ES_minus_F_minus_Sig
-    # Memory tracking: 1-2 NxNxM arrays (Gr_vec + potential linalg temp)
 
-    #Sum up using weights, convert back to numpy array
-    Gint = solver.sum((Gr_vec.astype(COMPUTE_DTYPE)*weights[:, None, None]), axis=0)
-    # Memory tracking: 1-2 NxNxM arrays (temp from multiplication)
-
+    Gint = solver.sum(Gr_vec*weights[:, None, None], axis=0)
     del Gr_vec
-    # Memory tracking: 0 NxNxM arrays
 
     return Gint.get() if isCuda else Gint
 
@@ -899,7 +841,8 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
 
         # Initialize shared result
         result_lock = threading.Lock()
-        shared_result = {'matrix': np.zeros((N, N), dtype=COMPUTE_DTYPE)}
+        dtype = np.complex64 if USE_FLOAT32 else np.complex128
+        shared_result = {'matrix': np.zeros((N, N), dtype=dtype)}
 
         # Create and start worker threads
         threads = []
@@ -1002,67 +945,35 @@ def GrLessVectorized(F, S, g, Elist, weights, solver, ind):
     M = Elist.size
     N = F.shape[0]
 
-    # Convert array types to match solver with configurable precision:
-    if isCuda and solver == cp:
-        device_dtype = solver.complex64 if USE_FLOAT32 else solver.complex128
-    else:
-        device_dtype = COMPUTE_DTYPE
+    dtype = solver.complex64 if USE_FLOAT32 else solver.complex128
+    Elist_ = solver.array(Elist, dtype=dtype)
+    weights = solver.array(weights, dtype=dtype)
+    S = solver.array(S, dtype=dtype)
+    F = solver.array(F, dtype=dtype)
 
-    # Keep energies and weights in high precision
-    Elist_ = solver.array(Elist, dtype=solver.complex128)
-    weights = solver.array(weights, dtype=solver.float64)
-    # Only cast matrices to device precision for GPU operations
-    S = solver.array(S, dtype=device_dtype)
-    F = solver.array(F, dtype=device_dtype)
-
-    # Memory tracking: 0 NxNxM arrays allocated
-
-    #Generate Gr and Ga vectorized matrices conserving memory
-    ES_minus_F_minus_Sig = (Elist_[:, None, None] * solver.tile(S, (M, 1, 1))).astype(device_dtype)
-    # Memory tracking: 1 NxNxM array (ES_minus_F_minus_Sig)
-
+    ES_minus_F_minus_Sig = Elist_[:, None, None] * solver.tile(S, (M, 1, 1))
     ES_minus_F_minus_Sig -= solver.tile(F, (M, 1, 1))
-    SigmaTot = solver.array([g.sigmaTot(E) for E in Elist], dtype=device_dtype)
-    # Memory tracking: 2 NxNxM arrays (ES_minus_F_minus_Sig + SigmaTot)
-
+    SigmaTot = solver.array([g.sigmaTot(E) for E in Elist], dtype=dtype)
     ES_minus_F_minus_Sig -= SigmaTot
-    # Memory tracking: Still 2 NxNxM arrays
 
-    Gr_vec = solver.linalg.solve(ES_minus_F_minus_Sig, solver.tile(solver.eye(N, dtype=device_dtype), (M, 1, 1)))
-    # Memory tracking: PEAK 4 NxNxM arrays (ES_minus_F_minus_Sig + SigmaTot + Gr_vec + temp eye)
-
+    Gr_vec = solver.linalg.solve(ES_minus_F_minus_Sig, solver.tile(solver.eye(N, dtype=dtype), (M, 1, 1)))
     del ES_minus_F_minus_Sig
-    # Memory tracking: 2-3 NxNxM arrays (SigmaTot + Gr_vec + potential linalg temp)
-
     Ga_vec = solver.conj(Gr_vec).transpose(0, 2, 1)
-    # Memory tracking: 3-4 NxNxM arrays (SigmaTot + Gr_vec + Ga_vec + potential temp)
 
-    # Calculate Gamma:
     if ind is None:
-        SigList = SigmaTot  # Memory tracking: No new array, just reference
+        SigList = SigmaTot
     else:
         del SigmaTot
-        # Memory tracking: Reduces by 1 NxNxM array
-        SigList = solver.array([g.sigma(E, ind) for E in Elist], dtype=device_dtype)
-        # Memory tracking: Back to same count with new SigList
+        SigList = solver.array([g.sigma(E, ind) for E in Elist], dtype=dtype)
 
     GammaList = 1j * (SigList - solver.conj(SigList).transpose(0, 2, 1))
-    # Memory tracking: PEAK 5 NxNxM arrays (SigList + Gr_vec + Ga_vec + GammaList + temp from subtraction)
-
     del SigList
-    # Memory tracking: 3-4 NxNxM arrays (Gr_vec + Ga_vec + GammaList + potential temp)
 
-    # Calculate Gless:
     Gless_vec = solver.matmul(solver.matmul(Gr_vec, GammaList), Ga_vec)
-    # Memory tracking: 4-5 NxNxM arrays during matmul chain
-
     del Gr_vec, Ga_vec, GammaList
-    # Memory tracking: 1 NxNxM array (Gless_vec)
 
-    #Sum up using weights, convert back to numpy array
-    Gint = solver.sum((Gless_vec.astype(COMPUTE_DTYPE)*weights[:, None, None]), axis=0)
+    Gint = solver.sum(Gless_vec*weights[:, None, None], axis=0)
     del Gless_vec
-    # Memory tracking: 0 NxNxM arrays
 
     return Gint.get() if isCuda else Gint
 
