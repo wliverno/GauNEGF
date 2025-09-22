@@ -39,7 +39,9 @@ pid = os.getpid()
 if LOG_PERFORMANCE:
     log_file = f'integrate_performance_{hostname}_{pid}.log'
 else:
-    log_file = f'/tmp/integrate_performance_{hostname}_{pid}.log'
+    import tempfile
+    temp_dir = tempfile.gettempdir()
+    log_file = os.path.join(temp_dir, f'integrate_performance_{hostname}_{pid}.log')
 
 gpu_logger = logging.getLogger('gauNEGF.gpu')
 log_level = getattr(logging, LOG_LEVEL.upper(), logging.DEBUG)
@@ -160,21 +162,36 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
         while True:
             try:
                 # Get work from queue with timeout
+                queue_start = time.perf_counter()
                 E, weight, idx = work_queue.get(timeout=1.0)
+                queue_time = time.perf_counter() - queue_start
 
                 # Compute Green's function for this energy point
                 if is_gpu:
                     # Get sigma from surface calculator (CPU) and transfer to GPU workspace
+                    sigma_start = time.perf_counter()
                     sigma_cpu = g.sigmaTot(E)
+                    sigma_time = time.perf_counter() - sigma_start
+
+                    transfer_start = time.perf_counter()
                     workspace_sigma[:] = cp.asarray(sigma_cpu, dtype=device_dtype)
                     workspace_mat[:] = E * S_device - F_device - workspace_sigma
+                    transfer_time = time.perf_counter() - transfer_start
+
                     sigma_E = workspace_sigma
                     mat = workspace_mat
+
+                    gpu_logger.debug(f"{device_name} worker {worker_id} timing: queue={queue_time:.4f}s, sigma={sigma_time:.4f}s, transfer={transfer_time:.4f}s for E={E:.6f}")
                 else:
                     # For CPU, ensure we get proper numpy array
+                    sigma_start = time.perf_counter()
                     sigma_cpu = g.sigmaTot(E)
+                    sigma_time = time.perf_counter() - sigma_start
+
                     sigma_E = np.asarray(sigma_cpu, dtype=COMPUTE_DTYPE)
                     mat = E * S_device - F_device - sigma_E
+
+                    gpu_logger.debug(f"{device_name} worker {worker_id} timing: queue={queue_time:.4f}s, sigma={sigma_time:.4f}s for E={E:.6f}")
 
                 try:
                     # Use solve() for better performance than inv()
@@ -188,10 +205,17 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
                     Gr_E = solver.linalg.pinv(mat)
 
                 # Accumulate locally (on device) to minimize transfers
+                accum_start = time.perf_counter()
                 local_result += weight * Gr_E
+                accum_time = time.perf_counter() - accum_start
 
                 local_count += 1
                 work_queue.task_done()
+
+                if is_gpu:
+                    gpu_logger.debug(f"{device_name} worker {worker_id} accumulate: {accum_time:.4f}s for E={E:.6f}")
+                else:
+                    gpu_logger.debug(f"{device_name} worker {worker_id} accumulate: {accum_time:.4f}s for E={E:.6f}")
 
                 # Clean up temporary arrays if not reused
                 if not is_gpu:
@@ -633,12 +657,13 @@ def GrInt(F, S, g, Elist, weights):
 
     # Check if we should use optimized small matrix path
     if N < 500 and M < 20:
-        gpu_logger.info(f"Small matrix optimization: {N}x{N} with {M} energies - using vectorized approach")
         solver = cp if isCuda else np
+        solver_name = "CuPy (GPU)" if isCuda else "NumPy (CPU)"
+        gpu_logger.info(f"Small matrix optimization: {N}x{N} with {M} energies - using vectorized approach with {solver_name}")
         try:
             result = GrIntVectorized(F, S, g, Elist, weights, solver)
             total_time = time.perf_counter() - start_time
-            gpu_logger.info(f"Completed GrInt (small matrix): {total_time:.3f}s total")
+            gpu_logger.info(f"Completed GrInt (small matrix): {total_time:.3f}s total with {solver_name}")
             return result
         finally:
             pass  # No environment cleanup needed for vectorized approach
@@ -832,12 +857,13 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
 
     # Check if we should use optimized small matrix path
     if N < 500 and M < 20:
-        gpu_logger.info(f"Small matrix optimization: {N}x{N} with {M} energies - using vectorized approach")
         solver = cp if isCuda else np
+        solver_name = "CuPy (GPU)" if isCuda else "NumPy (CPU)"
+        gpu_logger.info(f"Small matrix optimization: {N}x{N} with {M} energies - using vectorized approach with {solver_name}")
         try:
             result = GrLessVectorized(F, S, g, Elist, weights, solver, ind)
             total_time = time.perf_counter() - start_time
-            gpu_logger.info(f"Completed GrLessInt (small matrix): {total_time:.3f}s total")
+            gpu_logger.info(f"Completed GrLessInt (small matrix): {total_time:.3f}s total with {solver_name}")
             return result
         finally:
             pass  # No environment cleanup needed for vectorized approach

@@ -10,7 +10,7 @@ ETA = 1e-9                      # eV - broadening parameter
 ENERGY_STEP = 0.001             # eV - default energy step size
 
 # Convergence Tolerances
-ADAPTIVE_INTEGRATION_TOL = 1e-4     # Adaptive integration tolerance
+ADAPTIVE_INTEGRATION_TOL = 1e-3     # Adaptive integration tolerance
 FERMI_CALCULATION_TOL = 1e-5        # Fermi energy calculation tolerance
 FERMI_SEARCH_CYCLES = 10            # Number of cycles to run search before returning
 SCF_CONVERGENCE_TOL = 1e-5          # SCF convergence tolerance
@@ -35,5 +35,5 @@ LOG_LEVEL = 'DEBUG'              # Logging level: DEBUG, INFO, WARNING, ERROR, C
 LOG_PERFORMANCE = False          # Enable GPU performance logging
 
 # Precision Configuration
-USE_FLOAT32 = True               # WARNING: Float64 causes major GPU performance slowdown (19-47x slower)
-                                 # Float32 preserves quantum transport physics accuracy (tested error < 1e-6)
+USE_FLOAT32 = True               # WARNING: 32-bit precision requires adaptive integration tolerance of 1e-3
+                                 # at the expense of major GPU performance slowdown (19-47x slower)
