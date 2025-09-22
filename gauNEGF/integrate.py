@@ -105,7 +105,7 @@ def detect_devices():
     return device_info
 
 
-def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker_id, progress_counter=None):
+def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker_id):
     """
     Memory-optimized unified worker function for processing Gr energy points on CPU or GPU.
 
@@ -193,11 +193,6 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
                 local_count += 1
                 work_queue.task_done()
 
-                # Update progress counter
-                if progress_counter is not None:
-                    with result_lock:
-                        progress_counter['completed'] += 1
-
                 # Clean up temporary arrays if not reused
                 if not is_gpu:
                     del sigma_cpu, sigma_E, mat, I, Gr_E
@@ -231,7 +226,7 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
 
 
 
-def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_id, worker_id, progress_counter=None):
+def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_id, worker_id):
     """
     Memory-optimized unified worker function for processing GrLess energy points on CPU or GPU.
 
@@ -353,11 +348,6 @@ def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_i
                 local_count += 1
                 work_queue.task_done()
 
-                # Update progress counter
-                if progress_counter is not None:
-                    with result_lock:
-                        progress_counter['completed'] += 1
-
                 # Clean up temporary arrays if not reused
                 if not is_gpu:
                     del sigma_tot, mat, Gr_E, Ga_E, sigma_E, gamma_E, Gless_E
@@ -389,8 +379,6 @@ def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_i
 
     except Exception as e:
         gpu_logger.error(f"{device_name} worker {worker_id} failed to initialize: {e}")
-
-
 
 
 def Gr(F, S, g, E):
@@ -671,10 +659,9 @@ def GrInt(F, S, g, Elist, weights):
         for i, (E, weight) in enumerate(zip(Elist, weights)):
             work_queue.put((E, weight, i))
 
-        # Initialize shared result and progress counter
+        # Initialize shared result
         result_lock = threading.Lock()
         shared_result = {'matrix': np.zeros((N, N), dtype=COMPUTE_DTYPE)}
-        progress_counter = {'completed': 0}
 
         # Create and start worker threads
         threads = []
@@ -683,7 +670,7 @@ def GrInt(F, S, g, Elist, weights):
         for gpu_id in range(device_info['gpu_workers']):
             gpu_thread = threading.Thread(
                 target=worker_gr,
-                args=(work_queue, result_lock, shared_result, F, S, g, gpu_id, f"GPU-{gpu_id}", progress_counter)
+                args=(work_queue, result_lock, shared_result, F, S, g, gpu_id, f"GPU-{gpu_id}")
             )
             threads.append(gpu_thread)
             gpu_thread.start()
@@ -692,40 +679,27 @@ def GrInt(F, S, g, Elist, weights):
         for cpu_id in range(num_cpu_workers):
             cpu_thread = threading.Thread(
                 target=worker_gr,
-                args=(work_queue, result_lock, shared_result, F, S, g, None, f"CPU-{cpu_id}", progress_counter)
+                args=(work_queue, result_lock, shared_result, F, S, g, None, f"CPU-{cpu_id}")
             )
             threads.append(cpu_thread)
             cpu_thread.start()
 
-        # Progress monitoring with corrected timing
+        # Progress monitoring
         def monitor_progress():
-            last_completed = 0
-            work_start_time = None
-
+            last_remaining = M
             while any(t.is_alive() for t in threads):
                 try:
-                    with result_lock:
-                        completed = progress_counter['completed']
-
-                    if completed > 0 and work_start_time is None:
-                        # Start timing when first energy point completes (after GPU initialization)
-                        work_start_time = time.perf_counter()
-                        gpu_logger.info("First energy point completed, starting performance timing")
-
-                    if completed != last_completed and work_start_time is not None:
+                    remaining = work_queue.qsize()
+                    if remaining != last_remaining:
+                        completed = M - remaining
                         progress = 100.0 * completed / M
-                        work_elapsed = time.perf_counter() - work_start_time
-                        rate = completed / work_elapsed if work_elapsed > 0.01 else 0
-                        remaining = M - completed
-                        eta = remaining / rate if rate > 0 else 0
-
-                        if completed < M:
-                            gpu_logger.debug(f"Progress: {progress:.1f}% ({completed}/{M}) ({rate:.1f} energies/s, ETA: {eta:.1f}s)")
-
-                        last_completed = completed
-                except Exception:
+                        elapsed = time.perf_counter() - start_time
+                        rate = completed / elapsed if elapsed > 0 else 0
+                        gpu_logger.debug(f"Progress: {progress:.1f}% ({completed}/{M}) ({rate:.1f} energies/s)")
+                        last_remaining = remaining
+                except:
                     pass
-                time.sleep(0.5)  # More frequent updates for fast GPU work
+                time.sleep(1.0)
 
         # Start progress monitor
         monitor_thread = threading.Thread(target=monitor_progress)
@@ -884,10 +858,9 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
         for i, (E, weight) in enumerate(zip(Elist, weights)):
             work_queue.put((E, weight, i))
 
-        # Initialize shared result and progress counter
+        # Initialize shared result
         result_lock = threading.Lock()
         shared_result = {'matrix': np.zeros((N, N), dtype=COMPUTE_DTYPE)}
-        progress_counter = {'completed': 0}
 
         # Create and start worker threads
         threads = []
@@ -896,7 +869,7 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
         for gpu_id in range(device_info['gpu_workers']):
             gpu_thread = threading.Thread(
                 target=worker_grless,
-                args=(work_queue, result_lock, shared_result, F, S, g, ind, gpu_id, f"GPU-{gpu_id}", progress_counter)
+                args=(work_queue, result_lock, shared_result, F, S, g, ind, gpu_id, f"GPU-{gpu_id}")
             )
             threads.append(gpu_thread)
             gpu_thread.start()
@@ -905,40 +878,27 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
         for cpu_id in range(num_cpu_workers):
             cpu_thread = threading.Thread(
                 target=worker_grless,
-                args=(work_queue, result_lock, shared_result, F, S, g, ind, None, f"CPU-{cpu_id}", progress_counter)
+                args=(work_queue, result_lock, shared_result, F, S, g, ind, None, f"CPU-{cpu_id}")
             )
             threads.append(cpu_thread)
             cpu_thread.start()
 
-        # Progress monitoring with corrected timing
+        # Progress monitoring
         def monitor_progress():
-            last_completed = 0
-            work_start_time = None
-
+            last_remaining = M
             while any(t.is_alive() for t in threads):
                 try:
-                    with result_lock:
-                        completed = progress_counter['completed']
-
-                    if completed > 0 and work_start_time is None:
-                        # Start timing when first energy point completes (after GPU initialization)
-                        work_start_time = time.perf_counter()
-                        gpu_logger.info("First energy point completed, starting performance timing")
-
-                    if completed != last_completed and work_start_time is not None:
+                    remaining = work_queue.qsize()
+                    if remaining != last_remaining:
+                        completed = M - remaining
                         progress = 100.0 * completed / M
-                        work_elapsed = time.perf_counter() - work_start_time
-                        rate = completed / work_elapsed if work_elapsed > 0.01 else 0
-                        remaining = M - completed
-                        eta = remaining / rate if rate > 0 else 0
-
-                        if completed < M:
-                            gpu_logger.debug(f"Progress: {progress:.1f}% ({completed}/{M}) ({rate:.1f} energies/s, ETA: {eta:.1f}s)")
-
-                        last_completed = completed
-                except Exception:
+                        elapsed = time.perf_counter() - start_time
+                        rate = completed / elapsed if elapsed > 0 else 0
+                        gpu_logger.debug(f"Progress: {progress:.1f}% ({completed}/{M}) ({rate:.1f} energies/s)")
+                        last_remaining = remaining
+                except:
                     pass
-                time.sleep(0.5)  # More frequent updates for fast GPU work
+                time.sleep(1.0)
 
         # Start progress monitor
         monitor_thread = threading.Thread(target=monitor_progress)
