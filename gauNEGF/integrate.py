@@ -142,9 +142,10 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
         # Convert to device arrays once with configurable precision
         if is_gpu and isCuda:
             device_dtype = cp.complex64 if USE_FLOAT32 else cp.complex128
+            gpu_logger.debug(f"{device_name} worker {worker_id} using dtype: {device_dtype} (CuPy), is_gpu={is_gpu}, isCuda={isCuda}")
         else:
             device_dtype = COMPUTE_DTYPE
-        gpu_logger.debug(f"{device_name} worker {worker_id} using dtype: {device_dtype}")
+            gpu_logger.debug(f"{device_name} worker {worker_id} using dtype: {device_dtype} (NumPy), is_gpu={is_gpu}, isCuda={isCuda}")
         F_device = solver.array(F, dtype=device_dtype)
         S_device = solver.array(S, dtype=device_dtype)
 
@@ -182,7 +183,7 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
                     Gr_E = solver.linalg.solve(mat, I)
                     solve_time = time.perf_counter() - solve_start
                     gpu_logger.debug(f"{device_name} worker {worker_id} matrix solve: {solve_time:.4f}s for E={E:.6f}")
-                except (solver.linalg.LinAlgError):
+                except (solver.linalg.LinAlgError, np.linalg.LinAlgError):
                     gpu_logger.warning(f"{device_name} worker {worker_id}: Singular matrix at E={E:.6f} eV, using pseudoinverse")
                     Gr_E = solver.linalg.pinv(mat)
 
@@ -199,7 +200,7 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
 
                 # Clean up temporary arrays if not reused
                 if not is_gpu:
-                    del sigma_E, mat, Gr_E
+                    del sigma_cpu, sigma_E, mat, I, Gr_E
 
             except queue.Empty:
                 # No more work available
@@ -269,9 +270,10 @@ def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_i
         # Convert to device arrays once with configurable precision
         if is_gpu and isCuda:
             device_dtype = cp.complex64 if USE_FLOAT32 else cp.complex128
+            gpu_logger.debug(f"{device_name} worker {worker_id} using dtype: {device_dtype} (CuPy), is_gpu={is_gpu}, isCuda={isCuda}")
         else:
             device_dtype = COMPUTE_DTYPE
-        gpu_logger.debug(f"{device_name} worker {worker_id} using dtype: {device_dtype}")
+            gpu_logger.debug(f"{device_name} worker {worker_id} using dtype: {device_dtype} (NumPy), is_gpu={is_gpu}, isCuda={isCuda}")
         F_device = solver.array(F, dtype=device_dtype)
         S_device = solver.array(S, dtype=device_dtype)
 
@@ -312,7 +314,7 @@ def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_i
                     Gr_E = solver.linalg.solve(mat, I)
                     solve_time = time.perf_counter() - solve_start
                     gpu_logger.debug(f"{device_name} worker {worker_id} matrix solve: {solve_time:.4f}s for E={E:.6f}")
-                except (solver.linalg.LinAlgError):
+                except (solver.linalg.LinAlgError, np.linalg.LinAlgError):
                     gpu_logger.warning(f"{device_name} worker {worker_id}: Singular matrix at E={E:.6f} eV, using pseudoinverse")
                     Gr_E = solver.linalg.pinv(mat)
 
@@ -358,7 +360,7 @@ def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_i
 
                 # Clean up temporary arrays if not reused
                 if not is_gpu:
-                    del sigma_tot, mat, Gr_E, Ga_E, Sigma_E, Gamma_E, Gless_E
+                    del sigma_tot, mat, Gr_E, Ga_E, sigma_E, gamma_E, Gless_E
 
             except queue.Empty:
                 # No more work available
@@ -510,7 +512,22 @@ def configure_workers_for_system(device_info, M, matrix_size=None):
     tuple
         (num_cpu_workers, original_env_vars) where original_env_vars is for cleanup
     """
-    cpu_cores = multiprocessing.cpu_count()
+    # Check for SLURM allocated cores first, then fall back to all available cores
+    cpu_cores = None
+    if 'SLURM_CPUS_PER_TASK' in os.environ:
+        cpu_cores = int(os.environ['SLURM_CPUS_PER_TASK'])
+        gpu_logger.info(f"SLURM detected: Using {cpu_cores} allocated CPU cores (SLURM_CPUS_PER_TASK)")
+    elif 'SLURM_CPUS_ON_NODE' in os.environ:
+        cpu_cores = int(os.environ['SLURM_CPUS_ON_NODE'])
+        gpu_logger.info(f"SLURM detected: Using {cpu_cores} allocated CPU cores (SLURM_CPUS_ON_NODE)")
+    elif 'SLURM_NPROCS' in os.environ:
+        cpu_cores = int(os.environ['SLURM_NPROCS'])
+        gpu_logger.info(f"SLURM detected: Using {cpu_cores} allocated CPU cores (SLURM_NPROCS)")
+
+    if cpu_cores is None:
+        cpu_cores = multiprocessing.cpu_count()
+        gpu_logger.info(f"No SLURM detected: Using all {cpu_cores} available CPU cores")
+
     original_env_vars = {}
 
     # Store original environment variables for cleanup
