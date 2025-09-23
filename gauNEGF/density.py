@@ -38,7 +38,8 @@ import os
 # Developed Packages:
 from gauNEGF.fermiSearch import DOSFermiSearch
 from gauNEGF.surfG1D import surfG
-from gauNEGF.integrate import *
+from gauNEGF.integrate import GrInt, GrLessInt
+from gauNEGF.linalg import Gr, DOSg
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree

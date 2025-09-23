@@ -24,9 +24,12 @@ import time
 import threading
 import queue
 import multiprocessing
-from gauNEGF.config import LOG_LEVEL, LOG_PERFORMANCE, USE_FLOAT32
+from gauNEGF.config import LOG_LEVEL, LOG_PERFORMANCE
+from gauNEGF.linalg import times, Gr, DOSg
 
-# No global dtype - use solver-specific logic
+# Re-export functions for backward compatibility
+__all__ = ['times', 'Gr', 'DOSg', 'GrInt', 'GrLessInt', 'detect_devices', 'configure_workers_for_system', 'cleanup_environment_variables']
+
 
 # Setup node-specific logging for GPU/parallel operations
 hostname = socket.gethostname()
@@ -52,10 +55,7 @@ if not gpu_logger.handlers:  # Avoid duplicate handlers on reload
     gpu_logger.addHandler(handler)
 
 # Log precision configuration after logger is set up
-if USE_FLOAT32:
-    gpu_logger.info("Using float32 precision for 19-47x GPU speedup")
-else:
-    gpu_logger.warning("Using float64 precision - expect 19-47x GPU performance penalty")
+gpu_logger.info("Using float64 precision")
 
 
 # Device detection for multi-device computing
@@ -103,7 +103,7 @@ def detect_devices():
     return device_info
 
 
-def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker_id):
+def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker_id, threads_per_worker=1):
     """
     Memory-optimized unified worker function for processing Gr energy points on CPU or GPU.
 
@@ -132,20 +132,22 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
     try:
         if is_gpu:
             cp.cuda.Device(device_id).use()
+        else:
+            # Set per-worker threading for CPU workers to avoid oversubscription
+            os.environ['OMP_NUM_THREADS'] = str(threads_per_worker)
+            os.environ['MKL_NUM_THREADS'] = str(threads_per_worker)
 
         gpu_logger.debug(f"{device_name} worker {worker_id} started")
         local_count = 0
         N = F.shape[0]
 
-        dtype = solver.complex64 if USE_FLOAT32 else solver.complex128
-        gpu_logger.debug(f"{device_name} worker {worker_id} using dtype: {dtype}")
-        F_device = solver.array(F, dtype=dtype)
-        S_device = solver.array(S, dtype=dtype)
-        local_result = solver.zeros((N, N), dtype=dtype)
+        F_device = solver.array(F)
+        S_device = solver.array(S)
+        local_result = solver.zeros((N, N), dtype=complex)
 
         if is_gpu:
-            workspace_sigma = solver.zeros((N, N), dtype=dtype)
-            workspace_mat = solver.zeros((N, N), dtype=dtype)
+            workspace_sigma = solver.zeros((N, N), dtype=complex)
+            workspace_mat = solver.zeros((N, N), dtype=complex)
 
         while True:
             try:
@@ -161,7 +163,7 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
                     sigma_time = time.perf_counter() - sigma_start
 
                     transfer_start = time.perf_counter()
-                    workspace_sigma[:] = cp.asarray(sigma_cpu, dtype=dtype)
+                    workspace_sigma[:] = cp.asarray(sigma_cpu)
                     workspace_mat[:] = E * S_device - F_device - workspace_sigma
                     transfer_time = time.perf_counter() - transfer_start
 
@@ -173,14 +175,14 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
                     sigma_cpu = g.sigmaTot(E)
                     sigma_time = time.perf_counter() - sigma_start
 
-                    sigma_E = np.asarray(sigma_cpu, dtype=dtype)
+                    sigma_E = np.asarray(sigma_cpu)
                     mat = E * S_device - F_device - sigma_E
                     gpu_logger.debug(f"{device_name} worker {worker_id} timing: queue={queue_time:.4f}s, sigma={sigma_time:.4f}s for E={E:.6f}")
 
                 try:
                     # Use solve() for better performance than inv()
                     solve_start = time.perf_counter()
-                    I = solver.eye(mat.shape[0], dtype=mat.dtype)
+                    I = solver.eye(mat.shape[0])
                     Gr_E = solver.linalg.solve(mat, I)
                     solve_time = time.perf_counter() - solve_start
                     gpu_logger.debug(f"{device_name} worker {worker_id} matrix solve: {solve_time:.4f}s for E={E:.6f}")
@@ -234,7 +236,7 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
 
 
 
-def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_id, worker_id):
+def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_id, worker_id, threads_per_worker=1):
     """
     Memory-optimized unified worker function for processing GrLess energy points on CPU or GPU.
 
@@ -265,23 +267,25 @@ def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_i
     try:
         if is_gpu:
             cp.cuda.Device(device_id).use()
+        else:
+            # Set per-worker threading for CPU workers to avoid oversubscription
+            os.environ['OMP_NUM_THREADS'] = str(threads_per_worker)
+            os.environ['MKL_NUM_THREADS'] = str(threads_per_worker)
 
         gpu_logger.debug(f"{device_name} worker {worker_id} started for GrLess")
         local_count = 0
         N = F.shape[0]
 
-        dtype = solver.complex64 if USE_FLOAT32 else solver.complex128
-        gpu_logger.debug(f"{device_name} worker {worker_id} using dtype: {dtype}")
-        F_device = solver.array(F, dtype=dtype)
-        S_device = solver.array(S, dtype=dtype)
-        local_result = solver.zeros((N, N), dtype=dtype)
+        F_device = solver.array(F)
+        S_device = solver.array(S)
+        local_result = solver.zeros((N, N), dtype=complex)
 
         if is_gpu:
-            workspace_sigma_tot = solver.zeros((N, N), dtype=dtype)
-            workspace_mat = solver.zeros((N, N), dtype=dtype)
-            workspace_sigma_E = solver.zeros((N, N), dtype=dtype)
-            workspace_gamma = solver.zeros((N, N), dtype=dtype)
-            workspace_temp = solver.zeros((N, N), dtype=dtype)
+            workspace_sigma_tot = solver.zeros((N, N), dtype=complex)
+            workspace_mat = solver.zeros((N, N), dtype=complex)
+            workspace_sigma_E = solver.zeros((N, N), dtype=complex)
+            workspace_gamma = solver.zeros((N, N), dtype=complex)
+            workspace_temp = solver.zeros((N, N), dtype=complex)
 
         while True:
             try:
@@ -292,20 +296,20 @@ def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_i
                 if is_gpu:
                     # Get sigma from surface calculator (CPU) and transfer to GPU workspace
                     sigma_cpu = g.sigmaTot(E)
-                    workspace_sigma_tot[:] = cp.asarray(sigma_cpu, dtype=dtype)
+                    workspace_sigma_tot[:] = cp.asarray(sigma_cpu)
                     workspace_mat[:] = E * S_device - F_device - workspace_sigma_tot
                     sigma_tot = workspace_sigma_tot
                     mat = workspace_mat
                 else:
                     # For CPU, ensure we get proper numpy array
                     sigma_cpu = g.sigmaTot(E)
-                    sigma_tot = np.asarray(sigma_cpu, dtype=dtype)
+                    sigma_tot = np.asarray(sigma_cpu)
                     mat = E * S_device - F_device - sigma_tot
 
                 try:
                     # Use solve() for better performance than inv()
                     solve_start = time.perf_counter()
-                    I = solver.eye(mat.shape[0], dtype=mat.dtype)
+                    I = solver.eye(mat.shape[0])
                     Gr_E = solver.linalg.solve(mat, I)
                     solve_time = time.perf_counter() - solve_start
                     gpu_logger.debug(f"{device_name} worker {worker_id} matrix solve: {solve_time:.4f}s for E={E:.6f}")
@@ -322,11 +326,11 @@ def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_i
                 else:
                     if is_gpu:
                         sigma_ind_cpu = g.sigma(E, ind)
-                        workspace_sigma_E[:] = cp.asarray(sigma_ind_cpu, dtype=dtype)
+                        workspace_sigma_E[:] = cp.asarray(sigma_ind_cpu)
                         sigma_E = workspace_sigma_E
                     else:
                         sigma_ind_cpu = g.sigma(E, ind)
-                        sigma_E = np.asarray(sigma_ind_cpu, dtype=dtype)
+                        sigma_E = np.asarray(sigma_ind_cpu)
 
                 if is_gpu:
                     workspace_gamma[:] = 1j * (sigma_E - solver.conj(sigma_E).T)
@@ -380,101 +384,6 @@ def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_i
     except Exception as e:
         gpu_logger.error(f"{device_name} worker {worker_id} failed to initialize: {e}")
 
-
-def Gr(F, S, g, E):
-    """
-    Calculate retarded Green's function at given energy.
-
-    Parameters
-    ----------
-    F : ndarray
-        Fock matrix
-    S : ndarray
-        Overlap matrix
-    g : surfG object
-        Surface Green's function calculator
-    E : float
-        Energy in eV
-
-    Returns
-    -------
-    ndarray
-        Retarded Green's function G(E) = [ES - F - Σ(E)]^(-1)
-    """
-    solver = cp if isCuda else np
-    dtype = solver.complex64 if USE_FLOAT32 else solver.complex128
-    mat = solver.array(E*S - F - g.sigmaTot(E), dtype=dtype)
-    I = solver.eye(mat.shape[0], dtype=dtype)
-    result = solver.linalg.solve(mat, I)
-    return result.get() if isCuda else result
-
-def DOSg(F, S, g, E):
-    """
-    Calculate density of states at given energy.
-
-    Parameters
-    ----------
-    F : ndarray
-        Fock matrix
-    S : ndarray
-        Overlap matrix
-    g : surfG object
-        Surface Green's function calculator
-    E : float
-        Energy in eV
-
-    Returns
-    -------
-    float
-        Density of states at energy E
-    """
-    return -np.trace(np.imag(Gr(F,S, g, E)))/np.pi
-
-def times(A, B, C=None, use_gpu=None):
-    """
-    Optimized matrix multiplication with optional GPU acceleration.
-    Performs A @ B or A @ B @ C with automatic GPU/CPU selection and precision optimization.
-
-    Parameters
-    ----------
-    A, B : ndarray
-        Input matrices for multiplication
-    C : ndarray, optional
-        Third matrix for triple product A @ B @ C
-    use_gpu : bool, optional
-        Force GPU usage (True) or CPU usage (False). If None, auto-detect.
-
-    Returns
-    -------
-    ndarray
-        Result of matrix multiplication A @ B or A @ B @ C
-    """
-    if use_gpu is None:
-        use_gpu = isCuda
-
-    solver = cp if use_gpu else np
-    dtype = solver.complex64 if USE_FLOAT32 else solver.complex128
-
-    # Convert inputs to device arrays
-    A_device = solver.asarray(A, dtype=dtype)
-    B_device = solver.asarray(B, dtype=dtype)
-
-    if C is None:
-        # Simple multiplication A @ B
-        result = solver.matmul(A_device, B_device)
-    else:
-        # Triple product A @ B @ C (common in NEGF: Gr @ Gamma @ Ga)
-        C_device = solver.asarray(C, dtype=dtype)
-        if use_gpu:
-            # Use intermediate result to minimize GPU memory allocation
-            temp = solver.matmul(A_device, B_device)
-            result = solver.matmul(temp, C_device)
-        else:
-            # CPU can handle chained operations efficiently
-            result = solver.matmul(solver.matmul(A_device, B_device), C_device)
-
-    # Return CPU array
-    return result.get() if use_gpu else result
 
 def configure_workers_for_system(device_info, M, matrix_size=None):
     """
@@ -563,10 +472,6 @@ def configure_workers_for_system(device_info, M, matrix_size=None):
         threads_to_use = max(4, available_cores // num_cpu_workers)
         gpu_logger.info(f"With GPU: Using {num_cpu_workers} CPU workers (reduced for GPU priority), {reserved_cores} cores reserved for {device_info['gpu_workers']} GPUs")
 
-    # Set threading environment
-    os.environ['OMP_NUM_THREADS'] = str(threads_to_use)
-    os.environ['MKL_NUM_THREADS'] = str(threads_to_use)
-
     # Log configuration
     matrix_info = f"matrix={matrix_size}x{matrix_size}, " if matrix_size else ""
     gpu_logger.info(f"Worker config: {matrix_info}M={M} energies, {num_cpu_workers} CPU workers x {threads_to_use} threads")
@@ -575,7 +480,7 @@ def configure_workers_for_system(device_info, M, matrix_size=None):
     if num_cpu_workers > M and M > 1:
         gpu_logger.warning(f"Note: {num_cpu_workers} workers for {M} energy points - some workers will be idle")
 
-    return num_cpu_workers, original_env_vars
+    return num_cpu_workers, original_env_vars, threads_to_use
 
 
 def cleanup_environment_variables(original_env_vars):
@@ -640,7 +545,7 @@ def GrInt(F, S, g, Elist, weights):
 
     # Detect available devices and configure workers for parallel approach
     device_info = detect_devices()
-    num_cpu_workers, original_env_vars = configure_workers_for_system(device_info, M, N)
+    num_cpu_workers, original_env_vars, threads_to_use = configure_workers_for_system(device_info, M, N)
     total_workers = num_cpu_workers + device_info['gpu_workers']
 
     # Log calculation start
@@ -656,8 +561,7 @@ def GrInt(F, S, g, Elist, weights):
 
         # Initialize shared result
         result_lock = threading.Lock()
-        dtype = np.complex64 if USE_FLOAT32 else np.complex128
-        shared_result = {'matrix': np.zeros((N, N), dtype=dtype)}
+        shared_result = {'matrix': np.zeros((N, N), dtype=complex)}
 
         # Create and start worker threads
         threads = []
@@ -666,16 +570,19 @@ def GrInt(F, S, g, Elist, weights):
         for gpu_id in range(device_info['gpu_workers']):
             gpu_thread = threading.Thread(
                 target=worker_gr,
-                args=(work_queue, result_lock, shared_result, F, S, g, gpu_id, f"GPU-{gpu_id}")
+                args=(work_queue, result_lock, shared_result, F, S, g, gpu_id, f"GPU-{gpu_id}", 1)
             )
             threads.append(gpu_thread)
             gpu_thread.start()
+
+        # Calculate per-worker thread allocation to avoid oversubscription
+        threads_per_worker = max(1, threads_to_use // num_cpu_workers) if num_cpu_workers > 0 else 1
 
         # Start CPU workers
         for cpu_id in range(num_cpu_workers):
             cpu_thread = threading.Thread(
                 target=worker_gr,
-                args=(work_queue, result_lock, shared_result, F, S, g, None, f"CPU-{cpu_id}")
+                args=(work_queue, result_lock, shared_result, F, S, g, None, f"CPU-{cpu_id}", threads_per_worker)
             )
             threads.append(cpu_thread)
             cpu_thread.start()
@@ -713,15 +620,10 @@ def GrInt(F, S, g, Elist, weights):
         throughput = total_time / M
 
         # Performance monitoring
-        precision_str = "float32" if USE_FLOAT32 else "float64"
         gpu_workers = device_info['gpu_workers']
-        speedup_potential = "19-47x" if USE_FLOAT32 and gpu_workers > 0 else "2.5x"
 
         gpu_logger.info(f"Completed GrInt: {total_time:.3f}s total ({throughput:.2e} sec/energy)")
-        gpu_logger.info(f"Performance: {precision_str} precision, {gpu_workers} GPU workers (natural priority), potential speedup: {speedup_potential}")
-
-        if gpu_workers > 0 and not USE_FLOAT32:
-            gpu_logger.warning(f"GPU performance penalty: Using float64 instead of float32 (expected 19-47x slower)")
+        gpu_logger.info(f"Performance: float64 precision, {gpu_workers} GPU workers (natural priority)")
 
         return shared_result['matrix']
 
@@ -757,18 +659,17 @@ def GrIntVectorized(F, S, g, Elist, weights, solver):
     M = Elist.size
     N = F.shape[0]
 
-    # Convert array types to match solver:
-    dtype = solver.complex64 if USE_FLOAT32 else solver.complex128
-    Elist_ = solver.array(Elist, dtype=dtype)
-    weights = solver.array(weights, dtype=dtype)
-    S = solver.array(S, dtype=dtype)
-    F = solver.array(F, dtype=dtype)
+    # Convert arrays to solver format:
+    Elist_ = solver.array(Elist)
+    weights = solver.array(weights)
+    S = solver.array(S)
+    F = solver.array(F)
 
     ES_minus_F_minus_Sig = Elist_[:, None, None] * solver.tile(S, (M, 1, 1))
     ES_minus_F_minus_Sig -= solver.tile(F, (M, 1, 1))
-    ES_minus_F_minus_Sig -= solver.array([g.sigmaTot(E) for E in Elist], dtype=dtype)
+    ES_minus_F_minus_Sig -= solver.array([g.sigmaTot(E) for E in Elist])
 
-    Gr_vec = solver.linalg.solve(ES_minus_F_minus_Sig, solver.tile(solver.eye(N, dtype=dtype), (M, 1, 1)))
+    Gr_vec = solver.linalg.solve(ES_minus_F_minus_Sig, solver.tile(solver.eye(N), (M, 1, 1)))
     del ES_minus_F_minus_Sig
 
     Gint = solver.sum(Gr_vec*weights[:, None, None], axis=0)
@@ -825,7 +726,7 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
 
     # Detect available devices and configure workers for parallel approach
     device_info = detect_devices()
-    num_cpu_workers, original_env_vars = configure_workers_for_system(device_info, M, N)
+    num_cpu_workers, original_env_vars, threads_to_use = configure_workers_for_system(device_info, M, N)
     total_workers = num_cpu_workers + device_info['gpu_workers']
 
     # Log calculation start
@@ -841,8 +742,7 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
 
         # Initialize shared result
         result_lock = threading.Lock()
-        dtype = np.complex64 if USE_FLOAT32 else np.complex128
-        shared_result = {'matrix': np.zeros((N, N), dtype=dtype)}
+        shared_result = {'matrix': np.zeros((N, N), dtype=complex)}
 
         # Create and start worker threads
         threads = []
@@ -851,16 +751,19 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
         for gpu_id in range(device_info['gpu_workers']):
             gpu_thread = threading.Thread(
                 target=worker_grless,
-                args=(work_queue, result_lock, shared_result, F, S, g, ind, gpu_id, f"GPU-{gpu_id}")
+                args=(work_queue, result_lock, shared_result, F, S, g, ind, gpu_id, f"GPU-{gpu_id}", 1)
             )
             threads.append(gpu_thread)
             gpu_thread.start()
+
+        # Calculate per-worker thread allocation to avoid oversubscription
+        threads_per_worker = max(1, threads_to_use // num_cpu_workers) if num_cpu_workers > 0 else 1
 
         # Start CPU workers
         for cpu_id in range(num_cpu_workers):
             cpu_thread = threading.Thread(
                 target=worker_grless,
-                args=(work_queue, result_lock, shared_result, F, S, g, ind, None, f"CPU-{cpu_id}")
+                args=(work_queue, result_lock, shared_result, F, S, g, ind, None, f"CPU-{cpu_id}", threads_per_worker)
             )
             threads.append(cpu_thread)
             cpu_thread.start()
@@ -898,15 +801,10 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
         throughput = total_time / M
 
         # Performance monitoring
-        precision_str = "float32" if USE_FLOAT32 else "float64"
         gpu_workers = device_info['gpu_workers']
-        speedup_potential = "31-57x" if USE_FLOAT32 and gpu_workers > 0 else "2.6x"
 
         gpu_logger.info(f"Completed GrLessInt: {total_time:.3f}s total ({throughput:.2e} sec/energy)")
-        gpu_logger.info(f"Performance: {precision_str} precision, {gpu_workers} GPU workers (natural priority), potential speedup: {speedup_potential}")
-
-        if gpu_workers > 0 and not USE_FLOAT32:
-            gpu_logger.warning(f"GPU performance penalty: Using float64 instead of float32 (expected 31-57x slower)")
+        gpu_logger.info(f"Performance: float64 precision, {gpu_workers} GPU workers (natural priority)")
 
         return shared_result['matrix']
 
@@ -945,18 +843,17 @@ def GrLessVectorized(F, S, g, Elist, weights, solver, ind):
     M = Elist.size
     N = F.shape[0]
 
-    dtype = solver.complex64 if USE_FLOAT32 else solver.complex128
-    Elist_ = solver.array(Elist, dtype=dtype)
-    weights = solver.array(weights, dtype=dtype)
-    S = solver.array(S, dtype=dtype)
-    F = solver.array(F, dtype=dtype)
+    Elist_ = solver.array(Elist)
+    weights = solver.array(weights)
+    S = solver.array(S)
+    F = solver.array(F)
 
     ES_minus_F_minus_Sig = Elist_[:, None, None] * solver.tile(S, (M, 1, 1))
     ES_minus_F_minus_Sig -= solver.tile(F, (M, 1, 1))
-    SigmaTot = solver.array([g.sigmaTot(E) for E in Elist], dtype=dtype)
+    SigmaTot = solver.array([g.sigmaTot(E) for E in Elist])
     ES_minus_F_minus_Sig -= SigmaTot
 
-    Gr_vec = solver.linalg.solve(ES_minus_F_minus_Sig, solver.tile(solver.eye(N, dtype=dtype), (M, 1, 1)))
+    Gr_vec = solver.linalg.solve(ES_minus_F_minus_Sig, solver.tile(solver.eye(N), (M, 1, 1)))
     del ES_minus_F_minus_Sig
     Ga_vec = solver.conj(Gr_vec).transpose(0, 2, 1)
 
@@ -964,7 +861,7 @@ def GrLessVectorized(F, S, g, Elist, weights, solver, ind):
         SigList = SigmaTot
     else:
         del SigmaTot
-        SigList = solver.array([g.sigma(E, ind) for E in Elist], dtype=dtype)
+        SigList = solver.array([g.sigma(E, ind) for E in Elist])
 
     GammaList = 1j * (SigList - solver.conj(SigList).transpose(0, 2, 1))
     del SigList

@@ -29,7 +29,8 @@ from numpy import linalg as LA
 from scipy.linalg import fractional_matrix_power
 
 # Developed packages
-from gauNEGF.density import *
+from gauNEGF.density import getFermiContact
+from gauNEGF.linalg import times
 from gauNEGF.config import (ETA, TEMPERATURE, SURFACE_GREEN_CONVERGENCE, 
                             FERMI_CALCULATION_TOL, ENERGY_MIN)
 
@@ -500,7 +501,7 @@ class surfGB:
             sig[np.ix_(Finds, Finds)] = sigAtom
         # Apply de-orthonormalization technique from ANT.Gaussian if orthonormal
         if self.Sdict['sss'] == 0:
-            sig = self.Xi @ sig @ self.Xi
+            sig = times(self.Xi, sig, self.Xi)
         if self.spin == 'u' or self.spin == 'ro':
             sig = np.kron(np.eye(2), sig)
         elif self.spin =='g':
