@@ -13,7 +13,7 @@ try:
     device = cp.cuda.Device()
     free_memory, total_memory = device.mem_info
     print(f"GPU Memory configured: {free_memory/1e9:.1f} GB free of {total_memory/1e9:.1f} GB total")
-except ImportError:
+except:
     isCuda = False
 
 import numpy as np
@@ -660,14 +660,14 @@ def GrIntVectorized(F, S, g, Elist, weights, solver):
     N = F.shape[0]
 
     # Convert arrays to solver format:
-    Elist_ = solver.array(Elist)
-    weights = solver.array(weights)
-    S = solver.array(S)
-    F = solver.array(F)
+    Elist_ = solver.array(Elist, dtype=complex)
+    weights = solver.array(weights, dtype=complex)
+    S = solver.array(S, dtype=complex)
+    F = solver.array(F, dtype=complex)
 
     ES_minus_F_minus_Sig = Elist_[:, None, None] * solver.tile(S, (M, 1, 1))
     ES_minus_F_minus_Sig -= solver.tile(F, (M, 1, 1))
-    ES_minus_F_minus_Sig -= solver.array([g.sigmaTot(E) for E in Elist])
+    ES_minus_F_minus_Sig -= solver.array([g.sigmaTot(E) for E in Elist], dtype=complex)
 
     Gr_vec = solver.linalg.solve(ES_minus_F_minus_Sig, solver.tile(solver.eye(N), (M, 1, 1)))
     del ES_minus_F_minus_Sig
@@ -843,14 +843,14 @@ def GrLessVectorized(F, S, g, Elist, weights, solver, ind):
     M = Elist.size
     N = F.shape[0]
 
-    Elist_ = solver.array(Elist)
-    weights = solver.array(weights)
-    S = solver.array(S)
-    F = solver.array(F)
+    Elist_ = solver.array(Elist, dtype=complex)
+    weights = solver.array(weights, dtype=complex)
+    S = solver.array(S, dtype=complex)
+    F = solver.array(F, dtype=complex)
 
     ES_minus_F_minus_Sig = Elist_[:, None, None] * solver.tile(S, (M, 1, 1))
     ES_minus_F_minus_Sig -= solver.tile(F, (M, 1, 1))
-    SigmaTot = solver.array([g.sigmaTot(E) for E in Elist])
+    SigmaTot = solver.array([g.sigmaTot(E) for E in Elist], dtype=complex)
     ES_minus_F_minus_Sig -= SigmaTot
 
     Gr_vec = solver.linalg.solve(ES_minus_F_minus_Sig, solver.tile(solver.eye(N), (M, 1, 1)))
@@ -861,7 +861,7 @@ def GrLessVectorized(F, S, g, Elist, weights, solver, ind):
         SigList = SigmaTot
     else:
         del SigmaTot
-        SigList = solver.array([g.sigma(E, ind) for E in Elist])
+        SigList = solver.array([g.sigma(E, ind) for E in Elist], dtype=complex)
 
     GammaList = 1j * (SigList - solver.conj(SigList).transpose(0, 2, 1))
     del SigList

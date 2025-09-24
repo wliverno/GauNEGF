@@ -202,6 +202,7 @@ class NEGFE(NEGF):
             (default: 'default' - runs 'predict' method followed by 'muller')
         """
         super().setVoltage(qV, fermi, Emin, Eminf)
+        self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
         if self.mu1 != self.mu2 and self.N1 is not None:
             self.Nnegf=50 # Default grid
         if self.updFermi:
