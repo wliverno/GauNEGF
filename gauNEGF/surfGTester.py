@@ -9,7 +9,6 @@ or when computational efficiency is prioritized over full energy dependence.
 """
 
 import numpy as np
-from scipy.linalg import fractional_matrix_power
 from gauNEGF.matTools import formSigma
 from gauNEGF.config import SURFACE_GREEN_CONVERGENCE
 
@@ -79,7 +78,6 @@ class surfGTest:
         """
         self.F = Fock
         self.S = Overlap
-        self.X = fractional_matrix_power(Overlap, -0.5)
         self.N = len(Fock)
         self.indsList = indsList
         self.sig = [np.array(np.zeros((self.N, self.N)), dtype=complex)]*2

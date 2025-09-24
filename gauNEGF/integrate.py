@@ -9,11 +9,32 @@ Author: William Livernois
 
 try:
     import cupy as cp
+    import os
+
+    # Check if CUDA is available
     isCuda = cp.cuda.is_available()
-    device = cp.cuda.Device()
-    free_memory, total_memory = device.mem_info
-    print(f"GPU Memory configured: {free_memory/1e9:.1f} GB free of {total_memory/1e9:.1f} GB total")
-except:
+
+    if isCuda:
+        # Test basic GPU operations to ensure compatibility
+        try:
+            # Set conservative CUDA compilation flags for cluster compatibility
+            os.environ.setdefault('CUPY_CACHE_SAVE_CUDA_SOURCE', '1')
+
+            # Test with a simple operation to validate GPU functionality
+            test_array = cp.array([1.0])
+            test_result = test_array * 2.0
+            test_result.get()  # Force GPU->CPU transfer
+
+            device = cp.cuda.Device()
+            free_memory, total_memory = device.mem_info
+            print(f"GPU Memory configured: {free_memory/1e9:.1f} GB free of {total_memory/1e9:.1f} GB total")
+
+        except Exception as e:
+            print(f"GPU detected but not compatible (falling back to CPU): {e}")
+            isCuda = False
+
+except Exception as e:
+    print(f"CuPy not available or incompatible: {e}")
     isCuda = False
 
 import numpy as np
@@ -25,10 +46,6 @@ import threading
 import queue
 import multiprocessing
 from gauNEGF.config import LOG_LEVEL, LOG_PERFORMANCE
-from gauNEGF.linalg import times, Gr, DOSg
-
-# Re-export functions for backward compatibility
-__all__ = ['times', 'Gr', 'DOSg', 'GrInt', 'GrLessInt', 'detect_devices', 'configure_workers_for_system', 'cleanup_environment_variables']
 
 
 # Setup node-specific logging for GPU/parallel operations
@@ -405,19 +422,30 @@ def configure_workers_for_system(device_info, M, matrix_size=None):
     """
     # Check for SLURM allocated cores first, then fall back to all available cores
     cpu_cores = None
+    slurm_source = None
+
+    # Priority order: most specific to least specific
     if 'SLURM_CPUS_PER_TASK' in os.environ:
         cpu_cores = int(os.environ['SLURM_CPUS_PER_TASK'])
-        gpu_logger.info(f"SLURM detected: Using {cpu_cores} allocated CPU cores (SLURM_CPUS_PER_TASK)")
+        slurm_source = "SLURM_CPUS_PER_TASK"
+    elif 'SRUN_CPUS_PER_TASK' in os.environ:
+        cpu_cores = int(os.environ['SRUN_CPUS_PER_TASK'])
+        slurm_source = "SRUN_CPUS_PER_TASK"
+    elif 'SLURM_NTASKS_PER_NODE' in os.environ:
+        cpu_cores = int(os.environ['SLURM_NTASKS_PER_NODE'])
+        slurm_source = "SLURM_NTASKS_PER_NODE"
     elif 'SLURM_CPUS_ON_NODE' in os.environ:
         cpu_cores = int(os.environ['SLURM_CPUS_ON_NODE'])
-        gpu_logger.info(f"SLURM detected: Using {cpu_cores} allocated CPU cores (SLURM_CPUS_ON_NODE)")
+        slurm_source = "SLURM_CPUS_ON_NODE"
     elif 'SLURM_NPROCS' in os.environ:
         cpu_cores = int(os.environ['SLURM_NPROCS'])
-        gpu_logger.info(f"SLURM detected: Using {cpu_cores} allocated CPU cores (SLURM_NPROCS)")
+        slurm_source = "SLURM_NPROCS"
 
     if cpu_cores is None:
         cpu_cores = multiprocessing.cpu_count()
         gpu_logger.info(f"No SLURM detected: Using all {cpu_cores} available CPU cores")
+    else:
+        gpu_logger.info(f"SLURM detected: Using {cpu_cores} allocated CPU cores ({slurm_source})")
 
     original_env_vars = {}
 
@@ -474,7 +502,8 @@ def configure_workers_for_system(device_info, M, matrix_size=None):
 
     # Log configuration
     matrix_info = f"matrix={matrix_size}x{matrix_size}, " if matrix_size else ""
-    gpu_logger.info(f"Worker config: {matrix_info}M={M} energies, {num_cpu_workers} CPU workers x {threads_to_use} threads")
+    gpu_logger.info(f"Worker config: {matrix_info}M={M} energies, {num_cpu_workers} CPU workers")
+    gpu_logger.info(f"Thread allocation: {threads_to_use} total threads available for CPU workers")
     if device_info['gpu_workers'] > 0:
         gpu_logger.info(f"GPU config: {device_info['gpu_workers']} GPU workers (natural priority through speed)")
     if num_cpu_workers > M and M > 1:
@@ -576,13 +605,25 @@ def GrInt(F, S, g, Elist, weights):
             gpu_thread.start()
 
         # Calculate per-worker thread allocation to avoid oversubscription
-        threads_per_worker = max(1, threads_to_use // num_cpu_workers) if num_cpu_workers > 0 else 1
+        if num_cpu_workers > 0:
+            base_threads_per_worker = threads_to_use // num_cpu_workers
+            remainder_threads = threads_to_use % num_cpu_workers
+            base_threads_per_worker = max(1, base_threads_per_worker)
+            gpu_logger.debug(f"Thread distribution: {num_cpu_workers} workers, base {base_threads_per_worker} threads each")
+            if remainder_threads > 0:
+                gpu_logger.debug(f"Distributing {remainder_threads} extra threads to first {remainder_threads} workers")
+        else:
+            base_threads_per_worker = 1
+            remainder_threads = 0
 
-        # Start CPU workers
+        # Start CPU workers with proper thread distribution
         for cpu_id in range(num_cpu_workers):
+            # Give extra threads to first workers if there's a remainder
+            worker_threads = base_threads_per_worker + (1 if cpu_id < remainder_threads else 0)
+
             cpu_thread = threading.Thread(
                 target=worker_gr,
-                args=(work_queue, result_lock, shared_result, F, S, g, None, f"CPU-{cpu_id}", threads_per_worker)
+                args=(work_queue, result_lock, shared_result, F, S, g, None, f"CPU-{cpu_id}", worker_threads)
             )
             threads.append(cpu_thread)
             cpu_thread.start()
@@ -757,13 +798,25 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
             gpu_thread.start()
 
         # Calculate per-worker thread allocation to avoid oversubscription
-        threads_per_worker = max(1, threads_to_use // num_cpu_workers) if num_cpu_workers > 0 else 1
+        if num_cpu_workers > 0:
+            base_threads_per_worker = threads_to_use // num_cpu_workers
+            remainder_threads = threads_to_use % num_cpu_workers
+            base_threads_per_worker = max(1, base_threads_per_worker)
+            gpu_logger.debug(f"Thread distribution: {num_cpu_workers} workers, base {base_threads_per_worker} threads each")
+            if remainder_threads > 0:
+                gpu_logger.debug(f"Distributing {remainder_threads} extra threads to first {remainder_threads} workers")
+        else:
+            base_threads_per_worker = 1
+            remainder_threads = 0
 
-        # Start CPU workers
+        # Start CPU workers with proper thread distribution
         for cpu_id in range(num_cpu_workers):
+            # Give extra threads to first workers if there's a remainder
+            worker_threads = base_threads_per_worker + (1 if cpu_id < remainder_threads else 0)
+
             cpu_thread = threading.Thread(
                 target=worker_grless,
-                args=(work_queue, result_lock, shared_result, F, S, g, ind, None, f"CPU-{cpu_id}", threads_per_worker)
+                args=(work_queue, result_lock, shared_result, F, S, g, ind, None, f"CPU-{cpu_id}", worker_threads)
             )
             threads.append(cpu_thread)
             cpu_thread.start()

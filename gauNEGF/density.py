@@ -25,7 +25,6 @@ from numpy import linalg as LA
 from gauNEGF.config import (TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, 
                             FERMI_SEARCH_CYCLES, SCF_CONVERGENCE_TOL, N_KT, ENERGY_MIN, 
                             MAX_CYCLES, MAX_GRID_POINTS)
-from scipy.linalg import fractional_matrix_power
 from scipy.special import roots_legendre
 from scipy.special import roots_chebyu
 import matplotlib.pyplot as plt
@@ -39,7 +38,7 @@ import os
 from gauNEGF.fermiSearch import DOSFermiSearch
 from gauNEGF.surfG1D import surfG
 from gauNEGF.integrate import GrInt, GrLessInt
-from gauNEGF.linalg import Gr, DOSg
+from gauNEGF.linalg import Gr, DOSg, eig, inv
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
@@ -803,7 +802,7 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
 ## INTEGRATION LIMIT FUNCTIONS
 # Calculate Emin using DOS
 def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES):
-    D,_ = LA.eig(LA.inv(S)@F)
+    D,_ = eig(inv(S)@F)
     Emin = min(D.real.flatten())-5
     counter = 0
     dP = DOSg(F,S,g,Emin)
@@ -978,7 +977,7 @@ def getFermiContact(g, ne, tol=FERMI_CALCULATION_TOL, Eminf=ENERGY_MIN, maxcycle
     # Set up infinite system from contact
     S = g.S
     F = g.F
-    orbs, _ = LA.eig(LA.inv(S)@F)
+    orbs, _ = eig(inv(S)@F)
     orbs = np.sort(np.real(orbs))
     fermi = (orbs[int(ne)-1] + orbs[int(ne)])/2
     Emin, N1, N2 = integralFit(F, S, g, fermi, Eminf, tol, T, maxN=maxcycles)
@@ -1029,7 +1028,7 @@ def getFermi1DContact(gSys, ne, ind=0, tol=FERMI_CALCULATION_TOL, Eminf=ENERGY_M
     Forbs = np.block([[F, tau], [tau.conj().T, F]])
     Sorbs = np.block([[S, stau], [stau.T, S]])
     gorbs = surfG(Forbs, Sorbs, [inds], [tau], [stau], eta=1e-6)
-    orbs, _ = LA.eig(LA.inv(Sorbs)@Forbs)
+    orbs, _ = eig(inv(Sorbs)@Forbs)
     orbs = np.sort(np.real(orbs))
     fermi = (orbs[2*int(ne)-1] + orbs[2*int(ne)])/2
     Emin, N1, N2 = integralFit(Forbs, Sorbs, gorbs, fermi, Eminf, tol, T, maxN=maxcycles)

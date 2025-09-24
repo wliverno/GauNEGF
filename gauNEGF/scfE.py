@@ -12,19 +12,12 @@ References
 
 # Python Packages
 import numpy as np
-from numpy import linalg as LA
-
-# Gaussian interface packages
-from gauopen import QCOpMat as qco
-from gauopen import QCBinAr as qcb
-from gauopen import QCUtil as qcu
 
 # Developed Packages 
 from gauNEGF.matTools import *
 from gauNEGF.density import *
+from gauNEGF.linalg import eig, inv, times
 from gauNEGF.config import (ETA, TEMPERATURE)
-from gauNEGF.transport import DOS
-from gauNEGF.fermiSearch import DOSFermiSearch
 from gauNEGF.scf import NEGF
 from gauNEGF.surfG1D import surfG
 from gauNEGF.surfGBethe import surfGB
@@ -334,12 +327,12 @@ class NEGFE(NEGF):
                 # Generate inputs for energy-independent density calculation
                 X = np.array(self.X)
                 sig1, sig2 = self.getSigma(self.fermi)
-                Fbar = X@(self.F*har_to_eV + sig1 + sig2)@X
+                Fbar = times(X, (self.F*har_to_eV + sig1 + sig2), X)
                 Gam1 = (sig1 - sig1.conj().T)*1j
                 Gam2 = (sig2 - sig2.conj().T)*1j
-                GamBar = (X@Gam1@X)+(X@Gam2@X)
-                D, V = LA.eig(Fbar)
-                Vc = LA.inv(V.conj().T)
+                GamBar = times(X, Gam1, X) + times(X, Gam2, X)
+                D, V = eig(Fbar)
+                Vc = inv(V.conj().T)
 
                 # Number of electrons calculated assuming energy independent
                 Ncurr = np.trace(density(V,Vc,D,GamBar,self.Eminf, self.fermi)).real
@@ -432,9 +425,9 @@ class NEGFE(NEGF):
             #P2 = self.g.densityComplex(self.Emin, self.mu2, 1)
        
         # Calculate Level Occupation, Lowdin TF,  Return
-        D,V = LA.eig(self.X@(self.F*har_to_eV)@self.X)
-        self.Xi = LA.inv(self.X)
-        pshift = V.conj().T @ (self.Xi@P@self.Xi) @ V
+        D,V = eig(times(self.X, (self.F*har_to_eV), self.X))
+        self.Xi = inv(self.X)
+        pshift = times(V.conj().T, times(self.Xi, P, self.Xi), V)
         self.P = P.copy()
         occList = np.diag(np.real(pshift)) 
         EList = np.array(np.real(D)).flatten()
@@ -464,9 +457,9 @@ class NEGFE(NEGF):
         self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
        
         #DEBUG:
-        #D,V = LA.eig(self.X@(Fock_old*har_to_eV)@self.X) 
+        #D,V = eig(times(self.X, (Fock_old*har_to_eV), self.X)) 
         #EListBefore = np.sort(np.array(np.real(D)).flatten())
-        #D,V = LA.eig(self.X@(self.F*har_to_eV)@self.X) 
+        #D,V = eig(times(self.X, (self.F*har_to_eV), self.X)) 
         #EList = np.sort(np.array(np.real(D)).flatten())
         #for pair in zip(EListBefore, EList):                       
         #    print("Energy Before =", str(pair[0]), ", Energy After =", str(pair[1]))

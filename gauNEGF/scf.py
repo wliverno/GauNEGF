@@ -37,7 +37,6 @@ References
 # Python packages
 import numpy as np
 from scipy import linalg as LA
-from scipy.linalg import fractional_matrix_power
 from scipy import io
 import os
 import time
@@ -49,6 +48,7 @@ from gauopen import QCBinAr as qcb
 # Developed packages
 from gauNEGF.matTools import *
 from gauNEGF.density import *
+from gauNEGF.linalg import matrix_power, eig, inv, times
 from gauNEGF.config import (SCF_CONVERGENCE_TOL, SCF_DAMPING, SCF_MAX_CYCLES, 
                             PULAY_MIXING_SIZE, ENERGY_MIN) 
 
@@ -171,10 +171,10 @@ class NEGF(object):
             self.S = np.block([[Omat, np.zeros(Omat.shape)],[np.zeros(Omat.shape),Omat]])
         else:
             self.S = Omat
-        self.X = np.array(fractional_matrix_power(self.S, -0.5))
+        self.X = np.array(matrix_power(self.S, -0.5))
         
         # Set Emin/Emax from orbitals
-        orbs, _ = LA.eig(self.X@self.F@self.X)
+        orbs, _ = eig(times(self.X,self.F,self.X))
         self.Emin = min(orbs.real)*har_to_eV - 5
         self.Emax = max(orbs.real)*har_to_eV
         self.convLevel = 9999
@@ -251,7 +251,7 @@ class NEGF(object):
         float
             Total number of electrons
         """
-        nOcc =  np.real(np.trace(self.P@self.S))
+        nOcc =  np.real(np.trace(times(self.P,self.S)))
         if self.spin == 'r':
             self.nelec = 2*nOcc
         else:
@@ -300,7 +300,7 @@ class NEGF(object):
         ndarray
             Array of [HOMO, LUMO] energies in eV
         """
-        orbs, _ = LA.eig(self.X@self.F@self.X)
+        orbs, _ = eig(times(self.X,self.F,self.X))
         orbs = np.sort(orbs)*har_to_eV
         if self.spin=='r':
             homo_lumo = orbs[self.nae-1:self.nae+1].real
@@ -547,13 +547,13 @@ class NEGF(object):
         # Prepare Variables for Analytical Integration
         X = np.array(self.X)
         self.F, self.locs = getFock(self.bar, self.spin)
-        Fbar = X @ (self.F*har_to_eV + self.sigma12) @ X
-        GamBar1 = X @ self.Gam1 @ X
-        GamBar2 = X @ self.Gam2 @ X
+        Fbar = times(X, (self.F*har_to_eV + self.sigma12), X)
+        GamBar1 = times(X, self.Gam1, X)
+        GamBar2 = times(X, self.Gam2, X)
         
         
-        D,V = LA.eig(np.array(Fbar))
-        Vc = LA.inv(V.conj().T)
+        D,V = eig(np.array(Fbar))
+        Vc = inv(V.conj().T)
           
                 
         #Update Fermi Energy (if not constant)
@@ -575,8 +575,8 @@ class NEGF(object):
             P = P1 + P2 #+ Pw
         
         # Calculate Level Occupation, Lowdin TF,  Return
-        pshift = V.conj().T @ P @ V
-        self.P = X@P@X
+        pshift = times(V.conj().T, P, V)
+        self.P = times(X, P, X)
         occList = np.diag(np.real(pshift)) 
         EList = np.array(np.real(D)).flatten()
         inds = np.argsort(EList)
@@ -829,5 +829,5 @@ class NEGF(object):
                   "S": self.S, "fermi": self.fermi, "qV": self.qV, 
                   "spin": self.spin, "den": self.P, "conv": self.convLevel}
         io.savemat(matfile, matdict)
-        return self.X@self.F@self.X
+        return times(self.X, self.F, self.X)
 

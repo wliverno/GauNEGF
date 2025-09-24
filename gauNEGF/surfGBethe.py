@@ -26,11 +26,10 @@ References
 # Python packages
 import numpy as np
 from numpy import linalg as LA
-from scipy.linalg import fractional_matrix_power
 
 # Developed packages
 from gauNEGF.density import getFermiContact
-from gauNEGF.linalg import times
+from gauNEGF.linalg import times, matrix_power
 from gauNEGF.config import (ETA, TEMPERATURE, SURFACE_GREEN_CONVERGENCE, 
                             FERMI_CALCULATION_TOL, ENERGY_MIN)
 
@@ -108,7 +107,7 @@ class surfGB:
         self.indsLists = []
         self.dirLists = []
         self.nIndLists = []
-        self.Xi = fractional_matrix_power(S, 0.5)
+        self.Xi = matrix_power(S, 0.5)
         if spin != 'r':
             self.Xi = self.Xi[::2, ::2]
         

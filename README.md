@@ -37,6 +37,14 @@ Note: This package requires a licensed copy of Gaussian quantum chemistry softwa
 - numpy
 - scipy
 - matplotlib
+- cupy>=14.0.0a (optional, for GPU acceleration)
+
+### GPU Support (Optional)
+- **CUDA Toolkit** (recommended: CUDA 11.2 or later)
+- **CuPy**: For GPU-accelerated linear algebra operations
+  - Provides significant speedup for large matrix operations (>500x500)
+  - Automatic fallback to CPU when GPU unavailable
+  - **Note**: CuPy's general eigenvalue solver (`cupy.linalg.eig`) is not yet available; the package uses `cupy.linalg.eigh` for symmetric matrices and falls back to CPU for general eigenvalue problems
 
 ## Installation
 
@@ -47,6 +55,9 @@ cd GauNEGF
 
 # Install using pip
 pip install -e .
+
+# Optional: Install CuPy for GPU acceleration
+pip install cupy==14.0.0a1
 ```
 
 ## Quick Start
@@ -89,28 +100,28 @@ from gauNEGF import config
 print(f"Default temperature: {config.TEMPERATURE} K")
 print(f"Default SCF tolerance: {config.SCF_CONVERGENCE_TOL}")
 
-# Customize global defaults
-config.TEMPERATURE = 273.15  # Set to 0°C
-config.SCF_CONVERGENCE_TOL = 1e-6  # Higher precision
-config.SCF_DAMPING = 0.01  # More aggressive damping
 ```
 
 ### Available Configuration Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `TEMPERATURE` | 300.0 | Temperature in Kelvin for Fermi-Dirac statistics |
+| `TEMPERATURE` | 0.0 | Temperature in Kelvin for Fermi-Dirac statistics |
 | `ETA` | 1e-9 | Broadening parameter in eV |
 | `ENERGY_STEP` | 0.001 | Default energy step size in eV |
-| `ADAPTIVE_INTEGRATION_TOL` | 1e-4 | Tolerance for adaptive integration |
+| `ADAPTIVE_INTEGRATION_TOL` | 1e-3 | Tolerance for adaptive integration |
 | `FERMI_CALCULATION_TOL` | 1e-5 | Tolerance for Fermi energy calculations |
+| `FERMI_SEARCH_CYCLES` | 10 | Number of cycles to run search before returning |
 | `SCF_CONVERGENCE_TOL` | 1e-5 | SCF convergence tolerance |
 | `SURFACE_GREEN_CONVERGENCE` | 1e-5 | Surface Green's function convergence |
+| `N_KT` | 10 | Number of kT for integration limits |
+| `ENERGY_MIN` | -1e6 | Lower bound for energy integration in eV |
+| `MAX_CYCLES` | 1000 | Maximum iteration cycles |
+| `MAX_GRID_POINTS` | 1000 | Maximum number of grid points |
 | `SCF_DAMPING` | 0.02 | SCF damping parameter |
 | `SCF_MAX_CYCLES` | 100 | Maximum SCF cycles |
 | `PULAY_MIXING_SIZE` | 4 | Number of iterations for Pulay mixing |
-| `MAX_CYCLES` | 1000 | Maximum iteration cycles for various algorithms |
-| `ENERGY_MIN` | -1e6 | Lower bound for energy integration in eV |
+| `SURFACE_RELAXATION_FACTOR` | 0.1 | Relaxation factor for surface calculations |
 
 These parameters affect all calculations unless explicitly overridden in function calls.
 
