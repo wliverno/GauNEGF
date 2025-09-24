@@ -11,7 +11,7 @@ Author: William Livernois
 try:
     import cupy as cp
     isCuda = cp.cuda.is_available()
-except ImportError:
+except:
     isCuda = False
 
 import numpy as np
@@ -188,3 +188,45 @@ def eigh(A, use_gpu=None):
         return eigenvalues.get(), eigenvectors.get()
     else:
         return eigenvalues, eigenvectors
+
+def matrix_power(S, power, use_gpu=None):
+    """
+    Calculate matrix power S^p using eigendecomposition with GPU acceleration.
+
+    Parameters
+    ----------
+    S : ndarray
+        Input matrix (should be Hermitian for numerical stability)
+    power : float
+        Power to raise matrix to (e.g., 0.5 for sqrt, -0.5 for inverse sqrt)
+    use_gpu : bool, optional
+        Force GPU usage (True) or CPU usage (False). If None, auto-detect.
+
+    Returns
+    -------
+    ndarray
+        Matrix power S^p
+
+    Notes
+    -----
+    This function is optimized for Hermitian matrices (like overlap matrices)
+    and uses eigendecomposition: S^p = V @ D^p @ V^H where S = V @ D @ V^H.
+    For large matrices, GPU acceleration provides significant speedup.
+    """
+    if use_gpu is None:
+        use_gpu = isCuda
+
+    solver = cp if use_gpu else np
+    S_device = solver.asarray(S)
+
+    # Use eigh for Hermitian matrices (more stable and faster than eig)
+    eigenvalues, eigenvectors = solver.linalg.eigh(S_device)
+
+    # Handle numerical precision for near-zero eigenvalues
+    eigenvalues = solver.maximum(eigenvalues, 1e-16)
+    powered_eigenvalues = solver.power(eigenvalues, power)
+
+    # Reconstruct matrix: S^p = V @ D^p @ V^H
+    result = times(eigenvectors,solver.diag(powered_eigenvalues),eigenvectors.conj().T)
+
+    return result.get() if use_gpu else result
