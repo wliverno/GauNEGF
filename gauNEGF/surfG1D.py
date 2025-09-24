@@ -24,15 +24,10 @@ specification and automatic extraction from DFT calculations.
 
 # Python packages
 import numpy as np
-from numpy import linalg as LA
-from scipy.linalg import fractional_matrix_power
+from gauNEGF.linalg import matrix_power, inv, times
 
 # Configuration
-from gauNEGF.config import (ETA, SURFACE_GREEN_CONVERGENCE, SURFACE_RELAXATION_FACTOR, 
-                            TEMPERATURE, ENERGY_STEP)
-import time
-import matplotlib.pyplot as plt
-from numpy import savetxt
+from gauNEGF.config import (ETA, SURFACE_GREEN_CONVERGENCE, SURFACE_RELAXATION_FACTOR)
 
 #Constants
 kB = 8.617e-5           # eV/Kelvin
@@ -152,7 +147,7 @@ class surfG:
         # Set up system
         self.F = np.array(Fock)
         self.S = np.array(Overlap)
-        self.X = np.array(fractional_matrix_power(Overlap, -0.5))
+        self.X = np.array(matrix_power(Overlap, -0.5))
         self.indsList = indsList
         self.poleList = len(indsList)*[np.array([], dtype=complex)]
         self.Egrid = len(indsList)*[np.array([], dtype=complex)]
@@ -276,7 +271,7 @@ class surfG:
         diff = conv+1
         while diff>conv and count<maxIter:
             g_ = g.copy()
-            g = LA.inv(A - B@g@B.conj().T)
+            g = inv(A - times(B, g, B.conj().T))
             dg = abs(g - g_)/np.maximum(abs(g), 1e-12)
             g = g*relFactor + g_*(1-relFactor)
             diff = dg.max()
@@ -357,7 +352,7 @@ class surfG:
         stau = self.stauList[i]
         tau = self.tauList[i]
         t = E*stau - tau
-        sig = t@self.g(E, i, conv)@t.conj().T
+        sig = times(t, self.g(E, i, conv), t.conj().T)
         sigma[np.ix_(inds, inds)] += sig
         return sigma
     
@@ -386,104 +381,9 @@ class surfG:
             stau = self.stauList[i]
             tau = self.tauList[i]
             t = E*stau - tau
-            sig = t@self.g(E, i, conv)@t.conj().T
+            sig = times(t, self.g(E, i, conv), t.conj().T)
             sigma[np.ix_(inds, inds)] += sig
         return sigma
     
 
-    def denFunc(self, E, ind=None, mu=None, T=TEMPERATURE):
-        """
-        Calculate density matrix contribution at a single energy point.
-
-        Computes the contribution to the density matrix at energy E for
-        specified orbitals. This is used by integration routines to
-        calculate the total density matrix.
-
-        Parameters
-        ----------
-        E : float
-            Energy point in eV
-        ind : int or None, optional
-            Contact index for partial density calculation (default: None)
-        mu : float or None, optional
-            Chemical potential in eV (default: None)
-        T : float, optional
-            Temperature in Kelvin (default: 300)
-
-        Returns
-        -------
-        ndarray
-            Density matrix contribution at energy E
-        """
-        kT = kB*T
-        sigTot = self.sigmaTot(E)
-        if ind is None:
-            sig = sigTot
-        else:
-            sig = self.sigma(E, ind)
-        Gambar = self.X@(1j*(sig - sig.conj().T))@self.X
-        if mu is not None:
-            Gambar /= (np.exp((np.real(E)-mu)/kT)+1)
-        Fbar = self.X@(self.F + sigTot)@self.X
-        D, V_lhp = LA.eig(Fbar)
-        V_uhp = LA.inv(V_lhp).conj().T
-        Gr = np.zeros(np.shape(Fbar), dtype=complex)
-        for i in range(len(D)):
-            vl = V_lhp[:, i].reshape(-1, 1)
-            vu = V_uhp[i, :].reshape(1, -1)
-            Gr += (vl@vu)/(E-D[i])
-        Ga = Gr.conj().T
-        return (Gr@Gambar@Ga, D)
-    
-    def densityGrid(self, Emin, Emax, ind=None, dE=ENERGY_STEP, mu=None, T=TEMPERATURE):
-        """
-        Calculate density matrix contribution on a grid of energy points.
-
-        Computes the contribution to the density matrix for each energy
-        point in a grid from Emin to Emax. This is used for real-axis
-        integration of the density matrix.
-
-        Parameters
-        ----------
-        Emin : float
-            Minimum energy for integration in eV
-        Emax : float
-            Maximum energy for integration in eV
-        ind : int or None, optional
-            Contact index for partial density calculation (default: None)
-        dE : float, optional
-            Energy step size in eV (default: 0.001)
-        mu : float or None, optional
-            Chemical potential in eV (default: None)
-        T : float, optional
-            Temperature in Kelvin (default: 300)
-
-        Returns
-        -------
-        ndarray
-            Density matrix from real-axis integration
-
-        Notes
-        -----
-        This method is primarily for testing purposes and direct comparison
-        with other integration methods. For production calculations, use the
-        vectorized integration methods in the density module.
-        """
-        # Create Fermi function if mu given
-        kT = kB*T
-        fermi = lambda E: 1
-        if mu is not None:
-            Emax += 5*kT
-            fermi = lambda E: 1/(np.exp((E-mu)/kT)+1)
-        # Direct integration
-        Egrid = np.arange(Emin, Emax, dE)
-        den = np.array(np.zeros(np.shape(self.F)), dtype=complex)
-        print('Starting Integration...')
-        for i in range(1,len(Egrid)):
-            E = (Egrid[i]+Egrid[i-1])/2
-            dE = Egrid[i]-Egrid[i-1]
-            den += self.denFunc(E, ind)[0]*fermi(E)*dE
-        print('Integration done!')
-        den /= 2*np.pi
-        return den
     

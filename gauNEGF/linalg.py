@@ -10,8 +10,28 @@ Author: William Livernois
 
 try:
     import cupy as cp
+    import os
+
+    # Check if CUDA is available
     isCuda = cp.cuda.is_available()
-except:
+
+    if isCuda:
+        # Test basic GPU operations to ensure compatibility
+        try:
+            # Set conservative CUDA compilation flags for cluster compatibility
+            os.environ.setdefault('CUPY_CACHE_SAVE_CUDA_SOURCE', '1')
+
+            # Test with a simple operation to validate GPU functionality
+            test_array = cp.array([1.0])
+            test_result = test_array * 2.0
+            test_result.get()  # Force GPU->CPU transfer
+
+        except Exception as e:
+            print(f"GPU detected but not compatible (falling back to CPU): {e}")
+            isCuda = False
+
+except Exception as e:
+    print(f"CuPy not available or incompatible: {e}")
     isCuda = False
 
 import numpy as np
@@ -85,9 +105,38 @@ def Gr(F, S, g, E):
     """
     solver = cp if isCuda else np
     mat = solver.array(E*S - F - g.sigmaTot(E))
-    I = solver.eye(mat.shape[0])
-    result = solver.linalg.solve(mat, I)
-    return result.get() if isCuda else result
+    return inv(mat)
+
+
+def inv(A, use_gpu=None):
+    """
+    Calculate matrix inverse using GPU acceleration when available.
+
+    Parameters
+    ----------
+    A : ndarray
+        Input matrix to invert
+    use_gpu : bool, optional
+        Force GPU usage (True) or CPU usage (False). If None, auto-detect.
+
+    Returns
+    -------
+    ndarray
+        Inverse of matrix A
+
+    Notes
+    -----
+    Uses solve(A, I) method for better numerical stability than direct inversion.
+    GPU acceleration is used when available for improved performance on large matrices.
+    """
+    if use_gpu is None:
+        use_gpu = isCuda
+
+    solver = cp if use_gpu else np
+    A_device = solver.asarray(A)
+    I = solver.eye(A_device.shape[0], dtype=A_device.dtype)
+    result = solver.linalg.solve(A_device, I)
+    return result.get() if use_gpu else result
 
 
 def DOSg(F, S, g, E):
@@ -143,7 +192,15 @@ def eig(A, use_gpu=None):
     solver = cp if use_gpu else np
     A_device = solver.asarray(A)
 
-    eigenvalues, eigenvectors = solver.linalg.eig(A_device)
+    try:
+        eigenvalues, eigenvectors = solver.linalg.eig(A_device)
+    except AttributeError:
+        if use_gpu:
+            print("Warning: cupy.linalg.eig() not available in this CuPy version. Falling back to CPU.")
+            eigenvalues, eigenvectors = np.linalg.eig(A)
+            return eigenvalues, eigenvectors
+        else:
+            raise
 
     if use_gpu:
         # Return CPU arrays

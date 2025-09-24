@@ -1,11 +1,11 @@
 # Python packages
 import numpy as np
 from numpy import linalg as LA
-from scipy.linalg import fractional_matrix_power
 
 # Developed packages
 from gauNEGF.density import *
 from gauNEGF.config import (ETA, TEMPERATURE, ENERGY_MIN)
+from gauNEGF.linalg import times, matrix_power
 
 #Constants
 kB = 8.617e-5           # eV/Kelvin
@@ -55,7 +55,7 @@ class surfG3:
         self.indsLists = []
         self.dirLists = []
         self.nIndLists = []
-        self.Xi = fractional_matrix_power(S, 0.5)
+        self.Xi = matrix_power(S, 0.5)
         if spin != 'r':
             self.Xi = self.Xi[::2, ::2]
         
@@ -425,7 +425,7 @@ class surfG3:
             sig[np.ix_(Finds, Finds)] = sigAtom
         # Apply de-orthonormalization technique from ANT.Gaussian if orthonormal
         if self.Sdict['sss'] == 0:
-            sig = self.Xi @ sig @ self.Xi
+            sig = times(self.Xi, sig, self.Xi)
         if self.spin == 'u' or self.spin == 'ro':
             sig = np.kron(np.eye(2), sig)
         elif self.spin =='g':
