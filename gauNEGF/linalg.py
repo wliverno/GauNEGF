@@ -286,4 +286,4 @@ def matrix_power(S, power, use_gpu=None):
     # Reconstruct matrix: S^p = V @ D^p @ V^H
     result = times(eigenvectors,solver.diag(powered_eigenvalues),eigenvectors.conj().T)
 
-    return result.get() if use_gpu else result
+    return result

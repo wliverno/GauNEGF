@@ -7,9 +7,17 @@ with automatic GPU acceleration using CuPy when available.
 Author: William Livernois
 """
 
+# Set BLAS threading BEFORE any NumPy imports to prevent segfaults
+import os
+os.environ.setdefault('OMP_NUM_THREADS', '8')
+os.environ.setdefault('MKL_NUM_THREADS', '8')
+os.environ.setdefault('OPENBLAS_NUM_THREADS', '8')
+os.environ.setdefault('BLIS_NUM_THREADS', '8')
+os.environ.setdefault('MKL_DYNAMIC', 'FALSE')
+os.environ.setdefault('OMP_DYNAMIC', 'FALSE')
+
 try:
     import cupy as cp
-    import os
 
     # Check if CUDA is available
     isCuda = cp.cuda.is_available()
@@ -120,7 +128,7 @@ def detect_devices():
     return device_info
 
 
-def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker_id, threads_per_worker=1):
+def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker_id):
     """
     Memory-optimized unified worker function for processing Gr energy points on CPU or GPU.
 
@@ -149,10 +157,7 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
     try:
         if is_gpu:
             cp.cuda.Device(device_id).use()
-        else:
-            # Set per-worker threading for CPU workers to avoid oversubscription
-            os.environ['OMP_NUM_THREADS'] = str(threads_per_worker)
-            os.environ['MKL_NUM_THREADS'] = str(threads_per_worker)
+        # Note: BLAS threading set at process startup to avoid segfaults
 
         gpu_logger.debug(f"{device_name} worker {worker_id} started")
         local_count = 0
@@ -253,7 +258,7 @@ def worker_gr(work_queue, result_lock, shared_result, F, S, g, device_id, worker
 
 
 
-def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_id, worker_id, threads_per_worker=1):
+def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_id, worker_id):
     """
     Memory-optimized unified worker function for processing GrLess energy points on CPU or GPU.
 
@@ -284,10 +289,7 @@ def worker_grless(work_queue, result_lock, shared_result, F, S, g, ind, device_i
     try:
         if is_gpu:
             cp.cuda.Device(device_id).use()
-        else:
-            # Set per-worker threading for CPU workers to avoid oversubscription
-            os.environ['OMP_NUM_THREADS'] = str(threads_per_worker)
-            os.environ['MKL_NUM_THREADS'] = str(threads_per_worker)
+        # Note: BLAS threading set at process startup to avoid segfaults
 
         gpu_logger.debug(f"{device_name} worker {worker_id} started for GrLess")
         local_count = 0
@@ -453,63 +455,42 @@ def configure_workers_for_system(device_info, M, matrix_size=None):
     for var in ['OMP_NUM_THREADS', 'MKL_NUM_THREADS']:
         original_env_vars[var] = os.environ.get(var)
 
-    # Matrix-size-aware threading configuration for parallel approach
-    if matrix_size is None or matrix_size < 500:
-        # Small matrices: Fewer workers with more threads (better BLAS utilization)
-        threads_per_worker = max(8, cpu_cores // 2)
-        optimal_cpu_workers = max(1, cpu_cores // threads_per_worker)
-    elif matrix_size < 1500:
-        # Medium matrices: Balanced threading
-        threads_per_worker = 4
-        optimal_cpu_workers = max(1, cpu_cores // threads_per_worker)
-    else:
-        # Large matrices: More workers with moderate threading
-        threads_per_worker = 8
-        optimal_cpu_workers = max(1, cpu_cores // threads_per_worker)
+    # Simple worker calculation - BLAS threading set at process level (8 threads)
+    optimal_cpu_workers = max(1, cpu_cores // 2)  # Use half the cores for CPU workers
 
     # CRITICAL: Never create more workers than energy points!
     if M <= 1:
-        # Single energy point: use all cores in one worker
+        # Single energy point: use one worker
         num_cpu_workers = 1
-        threads_to_use = cpu_cores
     elif M < 10:
-        # Few energy points: limit workers but ensure good threading
+        # Few energy points: limit workers
         if device_info['gpu_workers'] > 0:
-            # With GPU: Ensure GPU gets guaranteed work by using fewer CPU workers
-            num_cpu_workers = max(1, min(M - 1, optimal_cpu_workers // 2, 2))  # Leave work for GPU
-            threads_to_use = max(4, cpu_cores // num_cpu_workers)
+            # With GPU: Use fewer CPU workers to ensure GPU gets work
+            num_cpu_workers = max(1, min(M - 1, 2))  # Leave work for GPU
             gpu_logger.info(f"Few energy points with GPU: Using {num_cpu_workers} CPU workers to ensure GPU gets work")
         else:
             # CPU-only: can use more workers
             num_cpu_workers = min(M, optimal_cpu_workers, 4)  # Cap at 4 workers for small workloads
-            threads_to_use = max(4, cpu_cores // num_cpu_workers)
     elif device_info['gpu_workers'] == 0:
         # CPU-only: CREATE AS MANY WORKERS AS POSSIBLE (respect energy point limit)
         num_cpu_workers = min(M, optimal_cpu_workers)
-        threads_to_use = threads_per_worker
         gpu_logger.info(f"CPU-only: Maximizing workers - {num_cpu_workers} workers for {M} energies")
     else:
-        # With GPU: Use fewer CPU workers (GPU is 19-47x faster, will get most work naturally)
-        cores_per_gpu = 4  # Reserve 4 cores per GPU for thread management
-        reserved_cores = device_info['gpu_workers'] * cores_per_gpu
-        available_cores = max(8, cpu_cores - reserved_cores)  # Ensure decent minimum
-        max_cpu_workers = max(1, available_cores // 4)
-
-        # Use fewer CPU workers when GPU present for natural load balancing
-        num_cpu_workers = min(M, max_cpu_workers // 2)  # Use half the CPU workers when GPU present
-        threads_to_use = max(4, available_cores // num_cpu_workers)
-        gpu_logger.info(f"With GPU: Using {num_cpu_workers} CPU workers (reduced for GPU priority), {reserved_cores} cores reserved for {device_info['gpu_workers']} GPUs")
+        # With GPU: Use fewer CPU workers (GPU is much faster, will get most work naturally)
+        max_cpu_workers = max(1, optimal_cpu_workers // 2)
+        num_cpu_workers = min(M, max_cpu_workers)
+        gpu_logger.info(f"With GPU: Using {num_cpu_workers} CPU workers (reduced for GPU priority)")
 
     # Log configuration
     matrix_info = f"matrix={matrix_size}x{matrix_size}, " if matrix_size else ""
     gpu_logger.info(f"Worker config: {matrix_info}M={M} energies, {num_cpu_workers} CPU workers")
-    gpu_logger.info(f"Thread allocation: {threads_to_use} total threads available for CPU workers")
+    gpu_logger.info(f"BLAS threading: 8 threads set at process level")
     if device_info['gpu_workers'] > 0:
         gpu_logger.info(f"GPU config: {device_info['gpu_workers']} GPU workers (natural priority through speed)")
     if num_cpu_workers > M and M > 1:
         gpu_logger.warning(f"Note: {num_cpu_workers} workers for {M} energy points - some workers will be idle")
 
-    return num_cpu_workers, original_env_vars, threads_to_use
+    return num_cpu_workers, original_env_vars
 
 
 def cleanup_environment_variables(original_env_vars):
@@ -574,7 +555,7 @@ def GrInt(F, S, g, Elist, weights):
 
     # Detect available devices and configure workers for parallel approach
     device_info = detect_devices()
-    num_cpu_workers, original_env_vars, threads_to_use = configure_workers_for_system(device_info, M, N)
+    num_cpu_workers, original_env_vars = configure_workers_for_system(device_info, M, N)
     total_workers = num_cpu_workers + device_info['gpu_workers']
 
     # Log calculation start
@@ -599,31 +580,16 @@ def GrInt(F, S, g, Elist, weights):
         for gpu_id in range(device_info['gpu_workers']):
             gpu_thread = threading.Thread(
                 target=worker_gr,
-                args=(work_queue, result_lock, shared_result, F, S, g, gpu_id, f"GPU-{gpu_id}", 1)
+                args=(work_queue, result_lock, shared_result, F, S, g, gpu_id, f"GPU-{gpu_id}")
             )
             threads.append(gpu_thread)
             gpu_thread.start()
 
-        # Calculate per-worker thread allocation to avoid oversubscription
-        if num_cpu_workers > 0:
-            base_threads_per_worker = threads_to_use // num_cpu_workers
-            remainder_threads = threads_to_use % num_cpu_workers
-            base_threads_per_worker = max(1, base_threads_per_worker)
-            gpu_logger.debug(f"Thread distribution: {num_cpu_workers} workers, base {base_threads_per_worker} threads each")
-            if remainder_threads > 0:
-                gpu_logger.debug(f"Distributing {remainder_threads} extra threads to first {remainder_threads} workers")
-        else:
-            base_threads_per_worker = 1
-            remainder_threads = 0
-
-        # Start CPU workers with proper thread distribution
+        # Start CPU workers (BLAS threading set at process level)
         for cpu_id in range(num_cpu_workers):
-            # Give extra threads to first workers if there's a remainder
-            worker_threads = base_threads_per_worker + (1 if cpu_id < remainder_threads else 0)
-
             cpu_thread = threading.Thread(
                 target=worker_gr,
-                args=(work_queue, result_lock, shared_result, F, S, g, None, f"CPU-{cpu_id}", worker_threads)
+                args=(work_queue, result_lock, shared_result, F, S, g, None, f"CPU-{cpu_id}")
             )
             threads.append(cpu_thread)
             cpu_thread.start()
@@ -767,7 +733,7 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
 
     # Detect available devices and configure workers for parallel approach
     device_info = detect_devices()
-    num_cpu_workers, original_env_vars, threads_to_use = configure_workers_for_system(device_info, M, N)
+    num_cpu_workers, original_env_vars = configure_workers_for_system(device_info, M, N)
     total_workers = num_cpu_workers + device_info['gpu_workers']
 
     # Log calculation start
@@ -792,31 +758,16 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
         for gpu_id in range(device_info['gpu_workers']):
             gpu_thread = threading.Thread(
                 target=worker_grless,
-                args=(work_queue, result_lock, shared_result, F, S, g, ind, gpu_id, f"GPU-{gpu_id}", 1)
+                args=(work_queue, result_lock, shared_result, F, S, g, ind, gpu_id, f"GPU-{gpu_id}")
             )
             threads.append(gpu_thread)
             gpu_thread.start()
 
-        # Calculate per-worker thread allocation to avoid oversubscription
-        if num_cpu_workers > 0:
-            base_threads_per_worker = threads_to_use // num_cpu_workers
-            remainder_threads = threads_to_use % num_cpu_workers
-            base_threads_per_worker = max(1, base_threads_per_worker)
-            gpu_logger.debug(f"Thread distribution: {num_cpu_workers} workers, base {base_threads_per_worker} threads each")
-            if remainder_threads > 0:
-                gpu_logger.debug(f"Distributing {remainder_threads} extra threads to first {remainder_threads} workers")
-        else:
-            base_threads_per_worker = 1
-            remainder_threads = 0
-
-        # Start CPU workers with proper thread distribution
+        # Start CPU workers (BLAS threading set at process level)
         for cpu_id in range(num_cpu_workers):
-            # Give extra threads to first workers if there's a remainder
-            worker_threads = base_threads_per_worker + (1 if cpu_id < remainder_threads else 0)
-
             cpu_thread = threading.Thread(
                 target=worker_grless,
-                args=(work_queue, result_lock, shared_result, F, S, g, ind, None, f"CPU-{cpu_id}", worker_threads)
+                args=(work_queue, result_lock, shared_result, F, S, g, ind, None, f"CPU-{cpu_id}")
             )
             threads.append(cpu_thread)
             cpu_thread.start()
