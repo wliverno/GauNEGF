@@ -1,15 +1,14 @@
 import numpy as np
-import numpy.linalg as LA
-from gauNEGF.linalg import matrix_power
-from scipy import io
-import matplotlib.pyplot as plt
+import jax
+import jax.numpy as jnp
 
-from gauopen import QCOpMat as qco
-from gauopen import QCBinAr as qcb
-from gauopen import QCUtil as qcu
+# Enable double precision for accurate comparisons with NumPy
+jax.config.update("jax_enable_x64", True)
+
+# Use JAX functions directly
+from scipy import io
 
 from gauNEGF.matTools import *
-from gauNEGF.scf import NEGF
 from gauNEGF.scfE import NEGFE
 from gauNEGF.surfG1D import surfG
 from gauNEGF.density import *
@@ -27,7 +26,7 @@ bar.update(model='b3lyp', basis='lanl2dz', toutput='out.log',dofock="scf")
 S = np.array(bar.matlist['OVERLAP'].expand())
 P = np.array(bar.matlist['ALPHA SCF DENSITY MATRIX'].expand())
 F = np.array(bar.matlist['ALPHA FOCK MATRIX'].expand())*har_to_eV
-X = np.array(matrix_power(S, -0.5))
+X = jnp.linalg.matrix_power(S, -0.5)
 H = np.real(X@F@X)
 
 # Cut out middle 2 Si atoms to use for generation of infinite chain

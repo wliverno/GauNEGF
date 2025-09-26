@@ -1,181 +1,178 @@
 #!/usr/bin/env python3
 """
-CPU Linear Algebra Benchmark for NEGF-related Operations (eig, inv, solve)
-
-Tests eig(), inv(), and solve() with different thread counts using subprocess approach.
+CPU benchmark comparing SciPy BLAS operations with proper threading.
+Tests SciPy's NO_AFFINITY OpenBLAS for SLURM compatibility.
 """
 
 import os
 import sys
 import time
 import subprocess
-import tempfile
-import argparse
-import numpy as np
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
+
+# Force spawn method for true process isolation
+if __name__ == "__main__":
+    multiprocessing.set_start_method('spawn', force=True)
 
 
-def create_benchmark_script() -> str:
-    """Create the benchmark code that runs in subprocess."""
-    return '''
-import os
-import time
-import numpy as np
+def worker_eig(args):
+    """Worker for eigenvalue computation."""
+    size, blas_threads = args
 
-def create_test_matrices(size: int):
-    """Create matrices for NEGF-like problems."""
+    # Clear inherited threading restrictions
+    for key in ['OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS',
+                'BLIS_NUM_THREADS', 'VECLIB_MAXIMUM_THREADS']:
+        if key in os.environ:
+            del os.environ[key]
+
+    # Set threading before numpy import
+    os.environ['OMP_NUM_THREADS'] = str(blas_threads)
+    os.environ['MKL_NUM_THREADS'] = str(blas_threads)
+    os.environ['OPENBLAS_NUM_THREADS'] = str(blas_threads)
+    os.environ['BLIS_NUM_THREADS'] = str(blas_threads)
+
+    import numpy as np
+    import scipy.linalg as LA
     np.random.seed(42)
 
-    # Hamiltonian-like matrix (Hermitian)
-    H = np.random.random((size, size)) + 1j * np.random.random((size, size))
-    H = (H + H.conj().T) / 2
-    H += np.eye(size) * 0.1
+    A = np.random.random((size, size)).astype(np.float64)
+    A = A @ A.T + np.eye(size) * 0.01  # Symmetric positive definite
 
-    # Overlap-like matrix (Hermitian positive definite)
-    S_real = np.random.random((size, size)) * 0.1
-    S = (S_real + S_real.T) / 2
-    S += np.eye(size) * 1.0
-
-    return H.astype(np.complex128), S.astype(np.complex128)
-
-def time_operation(func, iterations: int) -> float:
-    """Time an operation over multiple iterations."""
-    times = []
-    for _ in range(iterations):
-        start = time.perf_counter()
-        func()
-        end = time.perf_counter()
-        times.append(end - start)
-    return np.mean(times), np.std(times)
-
-def benchmark_operations(size: int, iterations: int):
-    """Benchmark eig, inv, solve operations."""
-    H, S = create_test_matrices(size)
-    I = np.eye(size, dtype=np.complex128)
-    z = 1.0 + 0.0001j
-    A = z * S - H  # Typical NEGF linear system
-
-    # Warmup
-    _ = np.linalg.eigvals(H)
-    _ = np.linalg.inv(A)
-    _ = np.linalg.solve(A, I)
-
-    # Benchmark operations
-    eig_time, eig_std = time_operation(lambda: np.linalg.eigvals(H), iterations)
-    inv_time, inv_std = time_operation(lambda: np.linalg.inv(A), iterations)
-    solve_time, solve_std = time_operation(lambda: np.linalg.solve(A, I), iterations)
-
-    return eig_time, eig_std, inv_time, inv_std, solve_time, solve_std
-
-if __name__ == "__main__":
-    import sys
-    size = int(sys.argv[1])
-    iterations = int(sys.argv[2])
-
-    threads = os.environ.get("OMP_NUM_THREADS", "unknown")
-    print(f"THREADS:{threads}")
-
-    eig_t, eig_std, inv_t, inv_std, solve_t, solve_std = benchmark_operations(size, iterations)
-    print(f"RESULTS:{eig_t:.3e}+/-{eig_std:.3e},{inv_t:.3e}+/-{inv_std:.3e},{solve_t:.3e}+/-{solve_std:.3e}")
-'''
+    start = time.perf_counter()
+    eigenvals = LA.eigvals(A)  # Use SciPy BLAS (NO_AFFINITY)
+    return time.perf_counter() - start
 
 
-def run_benchmark_subprocess(threads: int, size: int, iterations: int):
-    """Run benchmark in subprocess with specific thread count."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-        f.write(create_benchmark_script())
-        script_path = f.name
+def worker_inv(args):
+    """Worker for matrix inversion using SciPy BLAS."""
+    size, blas_threads = args
 
-    try:
-        env = os.environ.copy()
-        env.update({
-            "OMP_NUM_THREADS": str(threads),
-            "MKL_NUM_THREADS": str(threads),
-            "OPENBLAS_NUM_THREADS": str(threads),
-            "BLIS_NUM_THREADS": str(threads),
-            "NUMEXPR_NUM_THREADS": str(threads),
-            "MKL_DYNAMIC": "FALSE",
-            "OMP_DYNAMIC": "FALSE",
-        })
+    # Clear inherited threading restrictions
+    for key in ['OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS',
+                'BLIS_NUM_THREADS', 'VECLIB_MAXIMUM_THREADS']:
+        if key in os.environ:
+            del os.environ[key]
 
-        # Try to remove CPU affinity restrictions for better threading
-        try:
-            # Get available cores and set affinity to allow using more cores
-            available_cores = 0#len(os.sched_getaffinity(0))
-            max_cores = min(threads, available_cores)
-            core_list = list(range(max_cores))
+    # Set threading before numpy import
+    os.environ['OMP_NUM_THREADS'] = str(blas_threads)
+    os.environ['MKL_NUM_THREADS'] = str(blas_threads)
+    os.environ['OPENBLAS_NUM_THREADS'] = str(blas_threads)
+    os.environ['BLIS_NUM_THREADS'] = str(blas_threads)
 
-            # Use taskset if available (more reliable on HPC systems)
-            result = subprocess.run(
-                ["taskset", "-c", ",".join(map(str, core_list)),
-                 sys.executable, script_path, str(size), str(iterations)],
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=300
-            )
-        except (FileNotFoundError, OSError):
-            # Fallback to normal subprocess if taskset not available
-            result = subprocess.run(
-                [sys.executable, script_path, str(size), str(iterations)],
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=300
-            )
+    import numpy as np
+    import scipy.linalg as LA
+    np.random.seed(42)
 
-        if result.returncode != 0:
-            print(f"Error: {result.stderr}")
-            return None, None, None
+    A = np.random.random((size, size)).astype(np.float64)
+    A = A @ A.T + np.eye(size) * 0.01  # Symmetric positive definite
 
-        # Parse results
-        lines = result.stdout.strip().split('\n')
-        for line in lines:
-            if line.startswith("RESULTS:"):
-                times = line.split(":")[1].split(",")
-                return float(times[0].split("+/-")[0]), float(times[0].split("+/-")[1]), float(times[1].split("+/-")[0]), float(times[1].split("+/-")[1]), float(times[2].split("+/-")[0]), float(times[2].split("+/-")[1])
+    start = time.perf_counter()
+    A_inv = LA.inv(A)  # Use SciPy BLAS (NO_AFFINITY)
+    return time.perf_counter() - start
 
-        return None, None, None
 
-    finally:
-        try:
-            os.unlink(script_path)
-        except:
-            pass
+def worker_solve(args):
+    """Worker for linear system solving using SciPy BLAS."""
+    size, blas_threads = args
+
+    # Clear inherited threading restrictions
+    for key in ['OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS',
+                'BLIS_NUM_THREADS', 'VECLIB_MAXIMUM_THREADS']:
+        if key in os.environ:
+            del os.environ[key]
+
+    # Set threading before numpy import
+    os.environ['OMP_NUM_THREADS'] = str(blas_threads)
+    os.environ['MKL_NUM_THREADS'] = str(blas_threads)
+    os.environ['OPENBLAS_NUM_THREADS'] = str(blas_threads)
+    os.environ['BLIS_NUM_THREADS'] = str(blas_threads)
+
+    import numpy as np
+    import scipy.linalg as LA
+    np.random.seed(42)
+
+    A = np.random.random((size, size)).astype(np.float64)
+    A = A @ A.T + np.eye(size) * 0.01  # Symmetric positive definite
+    b = np.random.random(size).astype(np.float64)
+
+    start = time.perf_counter()
+    x = LA.solve(A, b)  # Use SciPy BLAS (NO_AFFINITY)
+    return time.perf_counter() - start
+
+
+def test_operation(operation, size, num_processes, blas_threads):
+    """Test a specific operation configuration."""
+    worker_func = {
+        'eig': worker_eig,
+        'inv': worker_inv,
+        'solve': worker_solve
+    }[operation]
+
+    work_args = [(size, blas_threads) for _ in range(num_processes)]
+
+    start = time.perf_counter()
+
+    if num_processes == 1:
+        results = [worker_func(work_args[0])]
+    else:
+        with ProcessPoolExecutor(max_workers=num_processes) as executor:
+            results = list(executor.map(worker_func, work_args))
+
+    total_time = time.perf_counter() - start
+    return total_time
 
 
 def main():
-    parser = argparse.ArgumentParser(description="CPU benchmark for eig, inv, solve")
-    parser.add_argument("--sizes", type=int, nargs="+", default=[500, 3000],
-                       help="Matrix sizes to test")
-    parser.add_argument("--threads", type=int, nargs="+", default=[1, 2, 4, 8, 16, 32],
-                       help="Thread counts to test")
-    parser.add_argument("--iters", type=int, default=3,
-                       help="Iterations per test")
+    size = 1000
+    operations = ['eig', 'inv', 'solve']
 
-    args = parser.parse_args()
-
-    print("=" * 60)
-    print("CPU LINEAR ALGEBRA BENCHMARK")
-    print("=" * 60)
-    print(f"Python: {sys.version.split()[0]}")
-    print(f"NumPy: {np.__version__}")
+    print("=" * 80)
+    print("SCIPY BLAS OPERATIONS COMPARISON (NO_AFFINITY)")
+    print("=" * 80)
+    print(f"Matrix size: {size}x{size}")
+    print(f"Parent OMP_NUM_THREADS: {os.environ.get('OMP_NUM_THREADS', 'unset')}")
     print()
 
-    for size in args.sizes:
-        print(f"MATRIX SIZE: {size} x {size}")
-        print("-" * 70)
-        print(f"{'Threads':<8} {'eig (std)':<20} {'inv (std)':<20} {'solve (std)':<20}")
-        print("-" * 70)
+    # Test configurations: (processes, blas_threads_per_process)
+    configs = [
+        (1, 1),   # Single-threaded baseline
+        (1, 4),   # Single process, 4 BLAS threads
+        (1, 8),   # Single process, 8 BLAS threads
+        (2, 4),   # 2 processes, 4 BLAS threads each
+        (4, 2),   # 4 processes, 2 BLAS threads each
+    ]
 
-        for threads in args.threads:
-            eig_time, eig_std, inv_time, inv_std, solve_time, solve_std = run_benchmark_subprocess(threads, size, args.iters)
+    for operation in operations:
+        print(f"\n{operation.upper()} OPERATION:")
+        print(f"{'Config':<12} {'Time (s)':<12} {'Speedup':<10}")
+        print("-" * 40)
 
-            if eig_time is not None:
-                print(f"{threads:<8} {eig_time:<10.3e}({eig_std:<8.2e}) {inv_time:<10.3e}({inv_std:<8.2e}) {solve_time:<10.3e}({solve_std:<8.2e})")
-            else:
-                print(f"{threads:<8} {'FAILED':<10} {'FAILED':<10} {'FAILED':<10}")
+        baseline = None
+        results = []
 
-        print()
+        for num_processes, blas_threads in configs:
+            config_name = f"{num_processes}p x {blas_threads}t"
+
+            try:
+                total_time = test_operation(operation, size, num_processes, blas_threads)
+
+                if baseline is None:
+                    baseline = total_time
+                    speedup = 1.0
+                else:
+                    speedup = baseline / total_time
+
+                results.append((config_name, total_time, speedup))
+                print(f"{config_name:<12} {total_time:<12.3f} {speedup:<10.2f}x")
+
+            except Exception as e:
+                print(f"{config_name:<12} FAILED: {e}")
+
+        # Find best config for this operation
+        if results:
+            best = min(results, key=lambda x: x[1])
+            print(f"BEST: {best[0]} ({best[1]:.3f}s, {best[2]:.2f}x speedup)")
 
 
 if __name__ == "__main__":

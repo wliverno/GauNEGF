@@ -18,10 +18,13 @@ References
 """
 
 import numpy as np
-from numpy import linalg as LA
+import jax
+import jax.numpy as jnp
+from jax import jit
 import scipy.io as io
-from gauNEGF.matTools import *
-from gauNEGF import linalg
+
+# Enable double precision for accurate comparisons with NumPy
+jax.config.update("jax_enable_x64", True)
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
@@ -139,6 +142,46 @@ class SigmaCalculator:
         return 1j * (sigma - np.conj(sigma).T)
 
 
+# JIT-compiled computational kernels for performance
+@jit
+def _transmission_kernel_restricted(E, F, S, sigma_total, gamma1, gamma2):
+    """JIT-compiled kernel for restricted transmission calculation."""
+    mat = E * S - F - sigma_total
+    Gr = jnp.linalg.inv(mat)
+    Ga = jnp.conj(Gr).T
+    temp = gamma1 @ Gr @ gamma2
+    return jnp.real(jnp.trace(temp @ Ga))
+
+@jit
+def _transmission_kernel_spin_block(E, F, S, sigma_total, gamma1, gamma2, N):
+    """JIT-compiled kernel for spin-resolved block transmission calculation."""
+    mat = E * S - F - sigma_total
+    Gr = jnp.linalg.inv(mat)
+    Ga = jnp.conj(Gr).T
+
+    # Extract spin blocks efficiently
+    Gr_blocks = jnp.array([Gr[:N, :N], Gr[:N, N:], Gr[N:, :N], Gr[N:, N:]])
+    Ga_blocks = jnp.array([Ga[:N, :N], Ga[:N, N:], Ga[N:, :N], Ga[N:, N:]])
+    gamma1_blocks = jnp.array([gamma1[:N, :N], gamma1[:N, :N], gamma1[N:, N:], gamma1[N:, N:]])
+    gamma2_blocks = jnp.array([gamma2[:N, :N], gamma2[N:, N:], gamma2[:N, :N], gamma2[N:, N:]])
+
+    def compute_transmission_component(i):
+        temp = gamma1_blocks[i] @ Gr_blocks[i] @ gamma2_blocks[i]
+        return jnp.real(jnp.trace(temp @ Ga_blocks[i]))
+
+    # Vectorized computation over spin components
+    T_spin = jax.vmap(compute_transmission_component)(jnp.arange(4))
+    return jnp.sum(T_spin), T_spin
+
+@jit
+def _dos_kernel(E, F, S, sigma_total):
+    """JIT-compiled kernel for density of states calculation."""
+    mat = E * S - F - sigma_total
+    Gr = jnp.linalg.inv(mat)
+    dos_per_site = -jnp.imag(jnp.diag(Gr)) / jnp.pi
+    total_dos = jnp.sum(dos_per_site)
+    return total_dos, dos_per_site
+
 
 def transmission_single_energy(E, F, S, sigma_calc, spin=None):
     """
@@ -186,64 +229,51 @@ def transmission_single_energy(E, F, S, sigma_calc, spin=None):
     gamma1 = sigma_calc.get_gamma(E, 0, spin, matrix_size)  # Left contact
     gamma2 = sigma_calc.get_gamma(E, -1, spin, matrix_size)  # Right contact
 
-    # Calculate Green's function using linalg.inv
-    mat = E * S - F - sigma_total
-    Gr = linalg.inv(mat)
+    # Convert to JAX arrays for JIT compilation
+    F_jax = jnp.array(F)
+    S_jax = jnp.array(S)
+    sigma_total_jax = jnp.array(sigma_total)
+    gamma1_jax = jnp.array(gamma1)
+    gamma2_jax = jnp.array(gamma2)
 
     if spin == 'r':
-        # Simple transmission: T = Tr(Gamma1 @ Gr @ Gamma2 @ Ga)
-        Ga = np.conj(Gr).T
-        # Use two separate multiplications since linalg.times supports max 3 matrices
-        temp = linalg.times(gamma1, Gr, gamma2)
-        transmission = np.real(np.trace(linalg.times(temp, Ga)))
-        return transmission
+        # Use JIT-compiled restricted transmission kernel
+        transmission = _transmission_kernel_restricted(E, F_jax, S_jax, sigma_total_jax, gamma1_jax, gamma2_jax)
+        return float(transmission)
 
     elif spin in ['u', 'ro']:
-        # Block-diagonal spin structure (treat 'u' and 'ro' identically)
-        Ga = np.conj(Gr).T
-
-        # Extract spin blocks
-        Gr_blocks = [Gr[:N, :N], Gr[:N, N:], Gr[N:, :N], Gr[N:, N:]]
-        Ga_blocks = [Ga[:N, :N], Ga[:N, N:], Ga[N:, :N], Ga[N:, N:]]
-        gamma1_blocks = [gamma1[:N, :N], gamma1[:N, :N], gamma1[N:, N:], gamma1[N:, N:]]
-        gamma2_blocks = [gamma2[:N, :N], gamma2[N:, N:], gamma2[:N, :N], gamma2[N:, N:]]
-
-        # Calculate spin-resolved transmissions [T_up_up, T_up_down, T_down_up, T_down_down]
-        T_spin = []
-        for i in range(4):
-            # Use two separate multiplications since linalg.times supports max 3 matrices
-            temp = linalg.times(gamma1_blocks[i], Gr_blocks[i], gamma2_blocks[i])
-            T_ij = np.real(np.trace(linalg.times(temp, Ga_blocks[i])))
-            T_spin.append(T_ij)
-
-        total_transmission = sum(T_spin)
-        return total_transmission, T_spin
+        # Use JIT-compiled spin block transmission kernel
+        total_transmission, T_spin = _transmission_kernel_spin_block(
+            E, F_jax, S_jax, sigma_total_jax, gamma1_jax, gamma2_jax, N)
+        return float(total_transmission), T_spin.tolist()
 
     elif spin == 'g':
-        # Generalized spin basis with 2x2 spinor structure
-        Ga = np.conj(Gr).T
+        # Add JIT kernel for generalized case - implement later if needed
+        # For now, fall back to original implementation
+        mat = E * S_jax - F_jax - sigma_total_jax
+        Gr = jnp.linalg.inv(mat)
+        Ga = jnp.conj(Gr).T
 
         # Extract spinor indices
-        a_indices = np.arange(0, 2*N, 2)  # Alpha spin indices
-        b_indices = np.arange(1, 2*N, 2)  # Beta spin indices
+        a_indices = jnp.arange(0, 2*N, 2)  # Alpha spin indices
+        b_indices = jnp.arange(1, 2*N, 2)  # Beta spin indices
 
-        Gr_blocks = [Gr[np.ix_(a_indices, a_indices)], Gr[np.ix_(a_indices, b_indices)],
-                    Gr[np.ix_(b_indices, a_indices)], Gr[np.ix_(b_indices, b_indices)]]
-        Ga_blocks = [Ga[np.ix_(a_indices, a_indices)], Ga[np.ix_(a_indices, b_indices)],
-                    Ga[np.ix_(b_indices, a_indices)], Ga[np.ix_(b_indices, b_indices)]]
+        Gr_blocks = [Gr[jnp.ix_(a_indices, a_indices)], Gr[jnp.ix_(a_indices, b_indices)],
+                    Gr[jnp.ix_(b_indices, a_indices)], Gr[jnp.ix_(b_indices, b_indices)]]
+        Ga_blocks = [Ga[jnp.ix_(a_indices, a_indices)], Ga[jnp.ix_(a_indices, b_indices)],
+                    Ga[jnp.ix_(b_indices, a_indices)], Ga[jnp.ix_(b_indices, b_indices)]]
 
         # Use diagonal gamma blocks for generalized case
-        gamma1_blocks = [gamma1[np.ix_(a_indices, a_indices)], gamma1[np.ix_(a_indices, a_indices)],
-                        gamma1[np.ix_(b_indices, b_indices)], gamma1[np.ix_(b_indices, b_indices)]]
-        gamma2_blocks = [gamma2[np.ix_(a_indices, a_indices)], gamma2[np.ix_(b_indices, b_indices)],
-                        gamma2[np.ix_(a_indices, a_indices)], gamma2[np.ix_(b_indices, b_indices)]]
+        gamma1_blocks = [gamma1_jax[jnp.ix_(a_indices, a_indices)], gamma1_jax[jnp.ix_(a_indices, a_indices)],
+                        gamma1_jax[jnp.ix_(b_indices, b_indices)], gamma1_jax[jnp.ix_(b_indices, b_indices)]]
+        gamma2_blocks = [gamma2_jax[jnp.ix_(a_indices, a_indices)], gamma2_jax[jnp.ix_(b_indices, b_indices)],
+                        gamma2_jax[jnp.ix_(a_indices, a_indices)], gamma2_jax[jnp.ix_(b_indices, b_indices)]]
 
         T_spin = []
         for i in range(4):
-            # Use two separate multiplications since linalg.times supports max 3 matrices
-            temp = linalg.times(gamma1_blocks[i], Gr_blocks[i], gamma2_blocks[i])
-            T_ij = np.real(np.trace(linalg.times(temp, Ga_blocks[i])))
-            T_spin.append(T_ij)
+            temp = gamma1_blocks[i] @ Gr_blocks[i] @ gamma2_blocks[i]
+            T_ij = jnp.real(jnp.trace(temp @ Ga_blocks[i]))
+            T_spin.append(float(T_ij))
 
         total_transmission = sum(T_spin)
         return total_transmission, T_spin
@@ -287,15 +317,15 @@ def dos_single_energy(E, F, S, sigma_calc, spin=None):
     matrix_size = F.shape[0]
     sigma_total = sigma_calc.get_sigma_total(E, spin, matrix_size)
 
-    # Calculate Green's function using linalg.inv
-    mat = E * S - F - sigma_total
-    Gr = linalg.inv(mat)
+    # Convert to JAX arrays for JIT compilation
+    F_jax = jnp.array(F)
+    S_jax = jnp.array(S)
+    sigma_total_jax = jnp.array(sigma_total)
 
     if spin == 'r':
-        # Restricted case - simple DOS calculation
-        dos_per_site = -np.imag(np.diag(Gr)) / np.pi
-        total_dos = np.sum(dos_per_site)
-        return total_dos, dos_per_site
+        # Use JIT-compiled DOS kernel
+        total_dos, dos_per_site = _dos_kernel(E, F_jax, S_jax, sigma_total_jax)
+        return float(total_dos), np.array(dos_per_site)
 
     elif spin in ['u', 'ro']:
         # Unrestricted/restricted open - split into spin up and down blocks

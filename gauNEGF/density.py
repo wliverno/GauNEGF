@@ -19,7 +19,12 @@ Temperature effects are included through Fermi-Dirac statistics.
 
 # Numerical Packages
 import numpy as np
-from numpy import linalg as LA
+import jax
+import jax.numpy as jnp
+from jax import jit
+
+# Enable double precision for accurate comparisons with NumPy
+jax.config.update("jax_enable_x64", True)
 
 # Configuration
 from gauNEGF.config import (TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, 
@@ -38,7 +43,35 @@ import os
 from gauNEGF.fermiSearch import DOSFermiSearch
 from gauNEGF.surfG1D import surfG
 from gauNEGF.integrate import GrInt, GrLessInt
-from gauNEGF.linalg import Gr, DOSg, eig, inv
+# Use JAX functions directly - no wrappers needed
+
+# JIT-compiled density matrix kernels
+@jit
+def _compute_dos_at_energy(E, F, S, sigma_total):
+    """JIT-compiled kernel for DOS calculation at single energy."""
+    mat = E * S - F - sigma_total
+    Gr = jnp.linalg.inv(mat)
+    dos_per_site = -jnp.imag(jnp.diag(Gr)) / jnp.pi
+    total_dos = jnp.sum(dos_per_site)
+    return total_dos, dos_per_site
+
+@jit
+def _compute_green_function(E, F, S, sigma_total):
+    """JIT-compiled kernel for Green's function calculation."""
+    mat = E * S - F - sigma_total
+    return jnp.linalg.inv(mat)
+
+@jit
+def _fermi_vectorized(E_array, mu, kT):
+    """JIT-compiled vectorized Fermi-Dirac distribution."""
+    # Handle zero temperature case
+    def finite_temp():
+        return 1.0 / (jnp.exp((E_array - mu) / kT) + 1.0)
+
+    def zero_temp():
+        return (E_array <= mu).astype(jnp.float32)
+
+    return jax.lax.cond(kT == 0.0, zero_temp, finite_temp)
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
@@ -572,7 +605,8 @@ def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=TEMPERATURE):
     for i in range(1,N):
         E = (Egrid[i] + Egrid[i-1])/2
         dE = Egrid[i] - Egrid[i-1]
-        GrE = Gr(F, S, g, E)
+        mat = E * S - F - jnp.array(g.sigmaTot(E))
+        GrE = jnp.linalg.inv(mat)
         GaE = GrE.conj().T
         if ind == None:
             sig = g.sigmaTot(E)
@@ -802,13 +836,17 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
 ## INTEGRATION LIMIT FUNCTIONS
 # Calculate Emin using DOS
 def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES):
-    D,_ = eig(inv(S)@F)
+    D,_ = jnp.linalg.eig(jnp.linalg.inv(S)@F)
     Emin = min(D.real.flatten())-5
     counter = 0
-    dP = DOSg(F,S,g,Emin)
+    mat = Emin * S - F - jnp.array(g.sigmaTot(Emin))
+    gr = jnp.linalg.inv(mat)
+    dP = -jnp.imag(jnp.trace(gr)) / jnp.pi
     while dP>tol and counter<maxN:
         Emin -= 1
-        dP = abs(DOSg(F,S,g,Emin))
+        mat = Emin * S - F - jnp.array(g.sigmaTot(Emin))
+        gr = jnp.linalg.inv(mat)
+        dP = abs(-jnp.imag(jnp.trace(gr)) / jnp.pi)
         #print(Emin, dP)
         counter += 1
     if counter == maxN:
@@ -977,7 +1015,7 @@ def getFermiContact(g, ne, tol=FERMI_CALCULATION_TOL, Eminf=ENERGY_MIN, maxcycle
     # Set up infinite system from contact
     S = g.S
     F = g.F
-    orbs, _ = eig(inv(S)@F)
+    orbs, _ = jnp.linalg.eig(jnp.linalg.inv(S)@F)
     orbs = np.sort(np.real(orbs))
     fermi = (orbs[int(ne)-1] + orbs[int(ne)])/2
     Emin, N1, N2 = integralFit(F, S, g, fermi, Eminf, tol, T, maxN=maxcycles)
@@ -1028,7 +1066,7 @@ def getFermi1DContact(gSys, ne, ind=0, tol=FERMI_CALCULATION_TOL, Eminf=ENERGY_M
     Forbs = np.block([[F, tau], [tau.conj().T, F]])
     Sorbs = np.block([[S, stau], [stau.T, S]])
     gorbs = surfG(Forbs, Sorbs, [inds], [tau], [stau], eta=1e-6)
-    orbs, _ = eig(inv(Sorbs)@Forbs)
+    orbs, _ = jnp.linalg.eig(jnp.linalg.inv(Sorbs)@Forbs)
     orbs = np.sort(np.real(orbs))
     fermi = (orbs[2*int(ne)-1] + orbs[2*int(ne)])/2
     Emin, N1, N2 = integralFit(Forbs, Sorbs, gorbs, fermi, Eminf, tol, T, maxN=maxcycles)
@@ -1075,7 +1113,10 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=ENERGY_MIN, 
         - N2: Number of real axis points
     """
     # Fermi Energy search using full contact
-    print(f'Eminf DOS = {DOSg(g.F,g.S,g,Eminf)}')
+    mat = Eminf * g.S - g.F - jnp.array(g.sigmaTot(Eminf))
+    gr = jnp.linalg.inv(mat)
+    dos_eminf = -jnp.imag(jnp.trace(gr)) / jnp.pi
+    print(f'Eminf DOS = {dos_eminf}')
     fermi = fermiGuess
     if N2 is None:
         pLow = densityReal(g.F, g.S, g, Eminf, Emin, tol, T, showText=False)
@@ -1154,7 +1195,10 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONV
             Ef = lBound
             E += dE
         #print(uBound, lBound, E, dE)
-        dE = max(2*abs(Ncurr-ne)/DOSg(g.F, g.S, g, E), dE)
+        mat = E * g.S - g.F - jnp.array(g.sigmaTot(E))
+        gr = jnp.linalg.inv(mat)
+        dos = -jnp.imag(jnp.trace(gr)) / jnp.pi
+        dE = max(2*abs(Ncurr-ne)/dos, dE)
         counter += 1
     counter = 0
     while abs(ne - Ncurr) > conv and counter < maxcycles:

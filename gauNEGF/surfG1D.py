@@ -24,7 +24,14 @@ specification and automatic extraction from DFT calculations.
 
 # Python packages
 import numpy as np
-from gauNEGF.linalg import matrix_power, inv, times
+import jax
+import jax.numpy as jnp
+from jax import jit
+
+# Enable double precision for accurate comparisons with NumPy
+jax.config.update("jax_enable_x64", True)
+
+# Use JAX functions directly
 
 # Configuration
 from gauNEGF.config import (ETA, SURFACE_GREEN_CONVERGENCE, SURFACE_RELAXATION_FACTOR)
@@ -147,7 +154,7 @@ class surfG:
         # Set up system
         self.F = np.array(Fock)
         self.S = np.array(Overlap)
-        self.X = np.array(matrix_power(Overlap, -0.5))
+        self.X = np.array(jnp.linalg.matrix_power(Overlap, -0.5))
         self.indsList = indsList
         self.poleList = len(indsList)*[np.array([], dtype=complex)]
         self.Egrid = len(indsList)*[np.array([], dtype=complex)]
@@ -263,22 +270,40 @@ class surfG:
         Salpha = self.aSList[i]
         beta = self.bList[i]
         Sbeta = self.bSList[i]
-        A = (E+1j*self.eta)*Salpha - alpha
-        B = (E+1j*self.eta)*Sbeta - beta
-        g = self.gPrev[i].copy()
+
+        # Prepare matrices using JAX
+        A = jnp.array((E+1j*self.eta)*Salpha - alpha)
+        B = jnp.array((E+1j*self.eta)*Sbeta - beta)
+        g = jnp.array(self.gPrev[i].copy())
+        B_dag = B.conj().T
+
+        # Iterative solution using JAX operations
+        MAX_ITER = 2000
         count = 0
-        maxIter = int(1/(conv*relFactor))*10
-        diff = conv+1
-        while diff>conv and count<maxIter:
-            g_ = g.copy()
-            g = inv(A - times(B, g, B.conj().T))
-            dg = abs(g - g_)/np.maximum(abs(g), 1e-12)
-            g = g*relFactor + g_*(1-relFactor)
-            diff = dg.max()
-            count = count+1
-        if diff>conv:
+        diff = conv + 1
+
+        while diff > conv and count < MAX_ITER:
+            g_prev = g
+
+            # Compute new Green's function using JAX operations
+            g_new = jnp.linalg.inv(A - B @ g @ B_dag)
+
+            # Compute convergence metric
+            dg = jnp.abs(g_new - g) / jnp.maximum(jnp.abs(g_new), 1e-12)
+            diff = float(jnp.max(dg))
+
+            # Apply relaxation mixing
+            g = g_new * relFactor + g * (1 - relFactor)
+            count += 1
+
+        # Check convergence and warn if needed
+        if diff > conv:
             print(f'Warning: exceeded max iterations! E: {E}, Conv: {diff}')
-        #print(f'g generated in {count} iterations with convergence {diff}')
+
+        # Convert back to numpy for compatibility
+        g = np.array(g)
+
+        # Store result for next iteration initial guess
         self.gPrev[i] = g
         return g
    
@@ -352,7 +377,7 @@ class surfG:
         stau = self.stauList[i]
         tau = self.tauList[i]
         t = E*stau - tau
-        sig = times(t, self.g(E, i, conv), t.conj().T)
+        sig = t @ self.g(E, i, conv) @ t.conj().T
         sigma[np.ix_(inds, inds)] += sig
         return sigma
     
@@ -381,7 +406,7 @@ class surfG:
             stau = self.stauList[i]
             tau = self.tauList[i]
             t = E*stau - tau
-            sig = times(t, self.g(E, i, conv), t.conj().T)
+            sig = t @ self.g(E, i, conv) @ t.conj().T
             sigma[np.ix_(inds, inds)] += sig
         return sigma
     
