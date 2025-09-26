@@ -12,11 +12,16 @@ References
 
 # Python Packages
 import numpy as np
+import jax
+import jax.numpy as jnp
 
-# Developed Packages 
+# Enable double precision for accurate comparisons with NumPy
+jax.config.update("jax_enable_x64", True)
+
+# Developed Packages
 from gauNEGF.matTools import *
 from gauNEGF.density import *
-from gauNEGF.linalg import eig, inv, times
+# Use JAX functions directly
 from gauNEGF.config import (ETA, TEMPERATURE)
 from gauNEGF.scf import NEGF
 from gauNEGF.surfG1D import surfG

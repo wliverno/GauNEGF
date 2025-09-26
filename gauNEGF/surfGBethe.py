@@ -25,11 +25,16 @@ References
 
 # Python packages
 import numpy as np
-from numpy import linalg as LA
+import jax
+import jax.numpy as jnp
+
+# Enable double precision for accurate comparisons with NumPy
+jax.config.update("jax_enable_x64", True)
 
 # Developed packages
 from gauNEGF.density import getFermiContact
-from gauNEGF.linalg import times, matrix_power
+
+# Use JAX functions directly
 from gauNEGF.config import (ETA, TEMPERATURE, SURFACE_GREEN_CONVERGENCE, 
                             FERMI_CALCULATION_TOL, ENERGY_MIN)
 
@@ -107,7 +112,7 @@ class surfGB:
         self.indsLists = []
         self.dirLists = []
         self.nIndLists = []
-        self.Xi = matrix_power(S, 0.5)
+        self.Xi = jnp.linalg.matrix_power(S, 0.5)
         if spin != 'r':
             self.Xi = self.Xi[::2, ::2]
         
@@ -500,7 +505,7 @@ class surfGB:
             sig[np.ix_(Finds, Finds)] = sigAtom
         # Apply de-orthonormalization technique from ANT.Gaussian if orthonormal
         if self.Sdict['sss'] == 0:
-            sig = times(self.Xi, sig, self.Xi)
+            sig = self.Xi @ sig @ self.Xi
         if self.spin == 'u' or self.spin == 'ro':
             sig = np.kron(np.eye(2), sig)
         elif self.spin =='g':
