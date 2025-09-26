@@ -35,6 +35,7 @@ jax.config.update("jax_enable_x64", True)
 
 # Configuration
 from gauNEGF.config import (ETA, SURFACE_GREEN_CONVERGENCE, SURFACE_RELAXATION_FACTOR)
+from gauNEGF.utils import fractional_matrix_power
 
 #Constants
 kB = 8.617e-5           # eV/Kelvin
@@ -154,7 +155,7 @@ class surfG:
         # Set up system
         self.F = np.array(Fock)
         self.S = np.array(Overlap)
-        self.X = np.array(jnp.linalg.matrix_power(Overlap, -0.5))
+        self.X = np.array(fractional_matrix_power(Overlap, -0.5))
         self.indsList = indsList
         self.poleList = len(indsList)*[np.array([], dtype=complex)]
         self.Egrid = len(indsList)*[np.array([], dtype=complex)]

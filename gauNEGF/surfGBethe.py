@@ -35,8 +35,9 @@ jax.config.update("jax_enable_x64", True)
 from gauNEGF.density import getFermiContact
 
 # Use JAX functions directly
-from gauNEGF.config import (ETA, TEMPERATURE, SURFACE_GREEN_CONVERGENCE, 
+from gauNEGF.config import (ETA, TEMPERATURE, SURFACE_GREEN_CONVERGENCE,
                             FERMI_CALCULATION_TOL, ENERGY_MIN)
+from gauNEGF.utils import fractional_matrix_power
 
 #Constants
 kB = 8.617e-5           # eV/Kelvin
@@ -112,7 +113,7 @@ class surfGB:
         self.indsLists = []
         self.dirLists = []
         self.nIndLists = []
-        self.Xi = jnp.linalg.matrix_power(S, 0.5)
+        self.Xi = fractional_matrix_power(S, 0.5)
         if spin != 'r':
             self.Xi = self.Xi[::2, ::2]
         
