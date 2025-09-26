@@ -16,7 +16,7 @@ This approach uses a long chain (12 Si atoms) to approximate an infinite chain:
     from gauNEGF.scf import NEGF
     from gauNEGF.scfE import NEGFE
     from scipy import io
-    from scipy.linalg import fractional_matrix_power
+    from gauNEGF.utils import fractional_matrix_power
     import matplotlib.pyplot as plt
     from gauopen import QCOpMat as qco
     from gauopen import QCBinAr as qcb

@@ -5,7 +5,7 @@ from numpy import linalg as LA
 # Developed packages
 from gauNEGF.density import *
 from gauNEGF.config import (ETA, TEMPERATURE, ENERGY_MIN)
-from gauNEGF.linalg import times, matrix_power
+from gauNEGF.utils import fractional_matrix_power
 
 #Constants
 kB = 8.617e-5           # eV/Kelvin
@@ -55,7 +55,7 @@ class surfG3:
         self.indsLists = []
         self.dirLists = []
         self.nIndLists = []
-        self.Xi = matrix_power(S, 0.5)
+        self.Xi = fractional_matrix_power(S, 0.5)
         if spin != 'r':
             self.Xi = self.Xi[::2, ::2]
         

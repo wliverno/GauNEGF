@@ -13,6 +13,7 @@ from gauNEGF.scfE import NEGFE
 from gauNEGF.surfG1D import surfG
 from gauNEGF.density import *
 from gauNEGF.transport import *
+from gauNEGF.utils import fractional_matrix_power
 
 har_to_eV = 27.211386
 
@@ -26,7 +27,7 @@ bar.update(model='b3lyp', basis='lanl2dz', toutput='out.log',dofock="scf")
 S = np.array(bar.matlist['OVERLAP'].expand())
 P = np.array(bar.matlist['ALPHA SCF DENSITY MATRIX'].expand())
 F = np.array(bar.matlist['ALPHA FOCK MATRIX'].expand())*har_to_eV
-X = jnp.linalg.matrix_power(S, -0.5)
+X = fractional_matrix_power(S, -0.5)
 H = np.real(X@F@X)
 
 # Cut out middle 2 Si atoms to use for generation of infinite chain

@@ -54,8 +54,9 @@ from gauNEGF.matTools import *
 from gauNEGF.density import *
 
 # Use JAX functions directly
-from gauNEGF.config import (SCF_CONVERGENCE_TOL, SCF_DAMPING, SCF_MAX_CYCLES, 
-                            PULAY_MIXING_SIZE, ENERGY_MIN) 
+from gauNEGF.config import (SCF_CONVERGENCE_TOL, SCF_DAMPING, SCF_MAX_CYCLES,
+                            PULAY_MIXING_SIZE, ENERGY_MIN)
+from gauNEGF.utils import fractional_matrix_power 
 
 
 # CONSTANTS:
@@ -176,7 +177,7 @@ class NEGF(object):
             self.S = np.block([[Omat, np.zeros(Omat.shape)],[np.zeros(Omat.shape),Omat]])
         else:
             self.S = Omat
-        self.X = np.array(jnp.linalg.matrix_power(self.S, -0.5))
+        self.X = np.array(fractional_matrix_power(self.S, -0.5))
         
         # Set Emin/Emax from orbitals
         orbs, _ = jnp.linalg.eig(self.X @ self.F @ self.X)
