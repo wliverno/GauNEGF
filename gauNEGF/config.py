@@ -32,7 +32,7 @@ SURFACE_RELAXATION_FACTOR = 0.1 # Relaxation factor for surface calculations
 
 # GPU/CPU Integration Logging Configuration
 LOG_LEVEL = 'DEBUG'              # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
-LOG_PERFORMANCE = False          # Enable GPU performance logging
+LOG_PERFORMANCE = True           # Enable GPU performance logging
 
 # Precision Configuration
 USE_FLOAT32 = True               # WARNING: 32-bit precision requires adaptive integration tolerance of 1e-3

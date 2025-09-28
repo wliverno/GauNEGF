@@ -28,8 +28,6 @@ jax.config.update("jax_enable_x64", True)
 # =============================================================================
 
 # Performance thresholds (based on JAX benchmarking)
-SMALL_MATRIX_THRESHOLD = 500          # Use vmap for matrices smaller than this
-MAX_VMAP_MEMORY_GB = 4.0              # Use vmap if estimated memory < this (GB)
 MAX_EFFICIENT_CPU_CORES = 8           # Performance drops after this many cores (from testing)
 
 # Worker configuration
@@ -40,9 +38,6 @@ MAX_WORKERS_SMALL_WORKLOAD = 4        # Cap workers for small workloads
 WORKER_TIMEOUT_SECONDS = 1.0          # Queue timeout for workers
 PROGRESS_UPDATE_INTERVAL = 1.0        # Progress monitoring interval
 
-# Memory optimization (from integrate.py)
-MEMORY_PER_MATRIX_FACTOR = 16         # Bytes per complex128 element
-BYTES_TO_GB = 1e9                     # Conversion factor
 
 # =============================================================================
 
@@ -303,36 +298,7 @@ def parallelize_energy_calculation(energy_list, user_function, matrix_size=None,
     # Detect hardware and configure workers
     hardware_info = detect_hardware()
 
-    # Memory-based vmap decision: use JAX vmap if estimated memory usage is reasonable
-    use_vmap = False
-    if matrix_size is not None:
-        # Estimate memory: M energy points × matrix_size² × 16 bytes (complex128)
-        estimated_memory_gb = (M * matrix_size * matrix_size * MEMORY_PER_MATRIX_FACTOR) / BYTES_TO_GB
-        use_vmap = (matrix_size < SMALL_MATRIX_THRESHOLD and estimated_memory_gb < MAX_VMAP_MEMORY_GB)
-
-    if use_vmap:
-        parallel_logger.info(f"Memory-based vmap optimization: {matrix_size}x{matrix_size} × {M} energies = {estimated_memory_gb:.1f}GB - using JAX vmap")
-
-        # Vectorized approach using JAX vmap
-        @jit
-        def vectorized_calculation(energies):
-            return jax.vmap(lambda E: user_function(E, **function_kwargs))(energies)
-
-        results_array = vectorized_calculation(energy_array)
-
-        # Convert to same format as worker results
-        results_dict = {}
-        for i, (E, result) in enumerate(zip(energy_array, results_array)):
-            results_dict[i] = {
-                'energy': E,
-                'result': np.array(result)
-            }
-
-        total_time = time.perf_counter() - start_time
-        parallel_logger.info(f"Completed (vectorized): {total_time:.3f}s total")
-        return results_dict
-
-    # Large problem: use worker queue system
+    # Use worker queue system for all cases
     num_workers = configure_workers(hardware_info, M, matrix_size)
 
     parallel_logger.info(f"Starting parallel calculation: {M} energies, {num_workers} workers")

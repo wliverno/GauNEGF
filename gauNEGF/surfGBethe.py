@@ -25,6 +25,7 @@ References
 
 # Python packages
 import numpy as np
+import numpy.linalg as LA #For small matrix operations only
 import jax
 import jax.numpy as jnp
 

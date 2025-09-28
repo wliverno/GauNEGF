@@ -307,7 +307,7 @@ class NEGFE(NEGF):
         Returns
         -------
         tuple
-            (energies, occupations) - Sorted eigenvalues and occupations
+            (energies, occupations) - Sorted jnp.linalg.eigenvalues and occupations
         """
         print('Calculating lower density matrix:')
         if self.N2 is None:
@@ -330,14 +330,14 @@ class NEGFE(NEGF):
             conv= min(self.convLevel, 1e-3)
             if self.fermiMethod.lower() =='predict' or self.fermiMethod.lower() == 'default':
                 # Generate inputs for energy-independent density calculation
-                X = np.array(self.X)
+                X = jnp.array(self.X)
                 sig1, sig2 = self.getSigma(self.fermi)
-                Fbar = times(X, (self.F*har_to_eV + sig1 + sig2), X)
+                Fbar = X @ (self.F*har_to_eV + sig1 + sig2)@ X
                 Gam1 = (sig1 - sig1.conj().T)*1j
                 Gam2 = (sig2 - sig2.conj().T)*1j
-                GamBar = times(X, Gam1, X) + times(X, Gam2, X)
-                D, V = eig(Fbar)
-                Vc = inv(V.conj().T)
+                GamBar = X@(Gam1 + Gam2)@X
+                D, V = jnp.linalg.eig(Fbar)
+                Vc = jnp.linalg.inv(V.conj().T)
 
                 # Number of electrons calculated assuming energy independent
                 Ncurr = np.trace(density(V,Vc,D,GamBar,self.Eminf, self.fermi)).real
@@ -430,9 +430,9 @@ class NEGFE(NEGF):
             #P2 = self.g.densityComplex(self.Emin, self.mu2, 1)
        
         # Calculate Level Occupation, Lowdin TF,  Return
-        D,V = eig(times(self.X, (self.F*har_to_eV), self.X))
-        self.Xi = inv(self.X)
-        pshift = times(V.conj().T, times(self.Xi, P, self.Xi), V)
+        D,V = jnp.linalg.eig(self.X@(self.F*har_to_eV)@self.X)
+        self.Xi = jnp.linalg.inv(self.X)
+        pshift = V.conj().T@(self.Xi@P@self.Xi)@ V
         self.P = P.copy()
         occList = np.diag(np.real(pshift)) 
         EList = np.array(np.real(D)).flatten()
@@ -460,15 +460,6 @@ class NEGFE(NEGF):
         dE = super().PToFock()
         self.F, self.locs = getFock(self.bar, self.spin)
         self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
-       
-        #DEBUG:
-        #D,V = eig(times(self.X, (Fock_old*har_to_eV), self.X)) 
-        #EListBefore = np.sort(np.array(np.real(D)).flatten())
-        #D,V = eig(times(self.X, (self.F*har_to_eV), self.X)) 
-        #EList = np.sort(np.array(np.real(D)).flatten())
-        #for pair in zip(EListBefore, EList):                       
-        #    print("Energy Before =", str(pair[0]), ", Energy After =", str(pair[1]))
-       
         return dE
     
     
