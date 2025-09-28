@@ -36,6 +36,7 @@ References
 
 # Python packages
 import numpy as np
+import numpy.linalg as LA
 import jax
 import jax.numpy as jnp
 from scipy import io
