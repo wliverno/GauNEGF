@@ -26,16 +26,9 @@ References
 # Python packages
 import numpy as np
 import numpy.linalg as LA #For small matrix operations only
-import jax
-import jax.numpy as jnp
-
-# Enable double precision for accurate comparisons with NumPy
-jax.config.update("jax_enable_x64", True)
 
 # Developed packages
 from gauNEGF.density import getFermiContact
-
-# Use JAX functions directly
 from gauNEGF.config import (ETA, TEMPERATURE, SURFACE_GREEN_CONVERGENCE,
                             FERMI_CALCULATION_TOL, ENERGY_MIN)
 from gauNEGF.utils import fractional_matrix_power

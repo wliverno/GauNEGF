@@ -24,14 +24,6 @@ specification and automatic extraction from DFT calculations.
 
 # Python packages
 import numpy as np
-import jax
-import jax.numpy as jnp
-from jax import jit
-
-# Enable double precision for accurate comparisons with NumPy
-jax.config.update("jax_enable_x64", True)
-
-# Use JAX functions directly
 
 # Configuration
 from gauNEGF.config import (ETA, SURFACE_GREEN_CONVERGENCE, SURFACE_RELAXATION_FACTOR)
@@ -184,7 +176,7 @@ class surfG:
 
         # Set up broadening for retarded/advanced Green's function, initialize g
         self.eta = eta
-        self.gPrev = [np.zeros(np.shape(alpha)) for alpha in self.aList]
+        self.gPrev = [np.zeros(np.array(alpha).shape, dtype=complex) for alpha in self.aList]
     
     def setContacts(self, alphas=None, aOverlaps=None, betas=None, bOverlaps=None):
         """
@@ -272,13 +264,13 @@ class surfG:
         beta = self.bList[i]
         Sbeta = self.bSList[i]
 
-        # Prepare matrices using JAX
-        A = jnp.array((E+1j*self.eta)*Salpha - alpha)
-        B = jnp.array((E+1j*self.eta)*Sbeta - beta)
-        g = jnp.array(self.gPrev[i].copy())
+        # Prepare matrices using NumPy
+        A = (E+1j*self.eta)*np.array(Salpha) - np.array(alpha)
+        B = (E+1j*self.eta)*np.array(Sbeta) - np.array(beta)
+        g = np.array(self.gPrev[i])
         B_dag = B.conj().T
 
-        # Iterative solution using JAX operations
+        # Iterative solution using NumPy operations
         MAX_ITER = 2000
         count = 0
         diff = conv + 1
@@ -286,12 +278,12 @@ class surfG:
         while diff > conv and count < MAX_ITER:
             g_prev = g
 
-            # Compute new Green's function using JAX operations
-            g_new = jnp.linalg.inv(A - B @ g @ B_dag)
+            # Compute new Green's function using NumPy operations
+            g_new = np.linalg.inv(A - B @ g @ B_dag)
 
             # Compute convergence metric
-            dg = jnp.abs(g_new - g) / jnp.maximum(jnp.abs(g_new), 1e-12)
-            diff = float(jnp.max(dg))
+            dg = np.abs(g_new - g) / np.maximum(np.abs(g_new), 1e-12)
+            diff = np.max(dg)
 
             # Apply relaxation mixing
             g = g_new * relFactor + g * (1 - relFactor)
@@ -300,9 +292,6 @@ class surfG:
         # Check convergence and warn if needed
         if diff > conv:
             print(f'Warning: exceeded max iterations! E: {E}, Conv: {diff}')
-
-        # Convert back to numpy for compatibility
-        g = np.array(g)
 
         # Store result for next iteration initial guess
         self.gPrev[i] = g
@@ -373,10 +362,10 @@ class surfG:
         ndarray
             Self-energy matrix for contact i
         """
-        sigma = np.array(np.zeros(np.shape(self.F)), dtype=complex)
-        inds = self.indsList[i]
-        stau = self.stauList[i]
-        tau = self.tauList[i]
+        sigma = np.zeros(self.F.shape, dtype=complex)
+        inds = np.array(self.indsList[i])
+        stau = np.array(self.stauList[i])
+        tau = np.array(self.tauList[i])
         t = E*stau - tau
         sig = t @ self.g(E, i, conv) @ t.conj().T
         sigma[np.ix_(inds, inds)] += sig
@@ -402,13 +391,14 @@ class surfG:
         ndarray
             Total self-energy matrix from all contacts
         """
-        sigma = np.array(np.zeros(np.shape(self.F)), dtype=complex)
+        sigma = np.zeros(self.F.shape, dtype=complex)
         for i, inds in enumerate(self.indsList):
-            stau = self.stauList[i]
-            tau = self.tauList[i]
+            inds_np = np.array(inds)
+            stau = np.array(self.stauList[i])
+            tau = np.array(self.tauList[i])
             t = E*stau - tau
             sig = t @ self.g(E, i, conv) @ t.conj().T
-            sigma[np.ix_(inds, inds)] += sig
+            sigma[np.ix_(inds_np, inds_np)] += sig
         return sigma
     
 
