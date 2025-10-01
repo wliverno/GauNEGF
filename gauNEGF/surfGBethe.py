@@ -24,8 +24,11 @@ References
 """
 
 # Python packages
-import numpy as np
-import numpy.linalg as LA #For small matrix operations only
+import jax
+import jax.numpy as np
+import jax.numpy.linalg as LA 
+from jax import jit
+import jax.lax as lax
 
 # Developed packages
 from gauNEGF.density import getFermiContact
@@ -130,6 +133,7 @@ class surfGB:
                 indsList.append(inds)
             self.indsLists.append(indsList)
             # Calculate plane direction using SVD
+            cList = np.array(cList)  # Convert list to JAX array
             centeredCoords = cList-np.mean(cList, axis=0)
             _, _, Vt = LA.svd(centeredCoords)
             contDir = np.mean(cList, axis=0)-np.mean(coords, axis=0)
@@ -138,7 +142,7 @@ class surfGB:
                 contVec *= -1 
             self.cVecs.append(contVec)
             # Calculate one lattice direction for lining up atoms
-            vInd = np.argmin([LA.norm(v - cList[0]) for v in cList[1:]])+1
+            vInd = np.argmin(np.array([LA.norm(v - cList[0]) for v in cList[1:]]))+1
             latVec = cList[vInd]-cList[0]
             latDist = LA.norm(latVec)
             self.latVecs.append(latVec/latDist)
@@ -162,7 +166,7 @@ class surfGB:
                 nVecs = nVecs1.copy()
                 outOfPlane = [3,4,5,9,10,11]
                 for vec in nAtVecs:
-                    valList = [np.dot(vec, direction) for direction in nVecs2]
+                    valList = np.array([np.dot(vec, direction) for direction in nVecs2])
                     dirInd = np.argmax(valList)
                     if dirInd in outOfPlane and valList[dirInd]>0.9:
                         nVecs = nVecs2.copy()
@@ -171,7 +175,7 @@ class surfGB:
                 # Now that orientation is fixed, track all neighbors
                 nInds = []
                 for vec in nAtVecs:
-                    valList = [np.dot(vec, direction) for direction in nVecs]
+                    valList = np.array([np.dot(vec, direction) for direction in nVecs])
                     dirInd = np.argmax(valList)
                     if valList[dirInd]>0.9:
                         nInds.append(dirInd)
@@ -199,15 +203,22 @@ class surfGB:
             self.Vlists.append(Vlist)
         # Use surfGBAt() object to store the atomic Bethe lattice green's function for each contact
         self.gList = [surfGBAt(self.H0.copy(), Slist, Vlist, eta, T) for Slist, Vlist in zip(self.Slists, self.Vlists)]
-        
+       
+        # Calculate fermi level 
+        fermi = self.gList[0].calcFermi(self.ne/2)
         for g in self.gList:
-            g.calcFermi(self.ne/2)
+            g.fermi = fermi
 
         # Store variables
         self.cList = cList #first contact coords, used for testing
         self.F = F
         self.S = S
         self.eta = eta
+
+        # JIT compile sigma method with i as static argument (like in surfG1D.py)
+        # This compiles separate versions for each contact (i=0, i=1, etc.)
+        # The expensive iterative calculation gets fully optimized
+        self.sigma = jit(self.sigma, static_argnums=(1,2))  # i is argument 1 (after self)
 
     def genNeighbors(self, plane_normal, first_neighbor):
         """
@@ -232,7 +243,7 @@ class surfGB:
         
         # Project first_neighbor onto plane perpendicular to plane_normal
         proj = first_neighbor - np.dot(first_neighbor, plane_normal) * plane_normal
-        first_neighbor = proj / np.linalg.norm(proj)
+        first_neighbor = proj / LA.norm(proj)
         
         # Generate in-plane vectors using 60-degree rotations
         in_plane_vectors = []
@@ -250,7 +261,7 @@ class surfGB:
             
             R = np.eye(3) + sin_theta * K + (1 - cos_theta) * np.matmul(K, K)
             rotated_vector = np.dot(R, first_neighbor)
-            in_plane_vectors.append(rotated_vector / np.linalg.norm(rotated_vector))
+            in_plane_vectors.append(rotated_vector / LA.norm(rotated_vector))
         
         # Generate out-of-plane vectors
         out_of_plane_angle = np.arccos(1/np.sqrt(3)) # ~54.74
@@ -339,8 +350,9 @@ class surfGB:
         self.Sdict = {k[1:]:params[k] for k in params if k.startswith('S')}
         self.Vdict = {k:params[k]*har_to_eV for k in params if not k.startswith('e') and not k.startswith('S')}
         # Setup onsite H0 matrix before Fermi level shifting
-        self.H0 = np.diag([self.Edict['s']]+ [self.Edict['p']]*3 + \
-                     [self.Edict['dd']]+ [self.Edict['dt']]*2 + [self.Edict['dd'], self.Edict['dt']])
+        hdiag = [self.Edict['s']]+ [self.Edict['p']]*3 + [self.Edict['dd']]+ \
+                [self.Edict['dt']]*2 + [self.Edict['dd'], self.Edict['dt']]
+        self.H0 = np.diag(np.array(hdiag))
 
     def constructMat(self, Mdict, dirCosines):
         """
@@ -376,32 +388,36 @@ class surfGB:
         
         #Original matrix before rotation - assuming [0,0,1] bond direction
         # s-s coefficient
-        M[0,0] = Mdict['sss']
+        M = M.at[0,0].set(Mdict['sss'])
         
         # s-p block
-        M[0,3] = Mdict['sps'] #s-pz
-        M[3,0] = -Mdict['sps'] #pz-s
+        M = M.at[0,3].set(Mdict['sps']) #s-pz
+        M = M.at[3,0].set(-Mdict['sps']) #pz-s
 
         # p-p block
-        M[1,1] = M[2,2] = Mdict['ppp'] #px-px, py-py
-        M[3,3] = Mdict['pps'] #pz-pz
+        M = M.at[1,1].set(Mdict['ppp']) #px-px
+        M = M.at[2,2].set(Mdict['ppp']) #py-py
+        M = M.at[3,3].set(Mdict['pps']) #pz-pz
 
         # s-d block
-        M[0, 4] = M[4, 0] =  Mdict['sds'] #s - d3z²-r²
+        M = M.at[0, 4].set(Mdict['sds']) #s - d3z²-r²
+        M = M.at[4, 0].set(Mdict['sds'])
 
         # p-d block
-        M[1,5] = Mdict['pdp'] #px - dxz
-        M[2,6] = Mdict['pdp'] #py - dyz
-        M[3,4] = Mdict['pds'] #pz - d3z²-r²
+        M = M.at[1,5].set(Mdict['pdp']) #px - dxz
+        M = M.at[2,6].set(Mdict['pdp']) #py - dyz
+        M = M.at[3,4].set(Mdict['pds']) #pz - d3z²-r²
         
-        M[5,1] = -Mdict['pdp'] #dxz - px
-        M[6,2] = -Mdict['pdp'] #dyz - py
-        M[4,3] = -Mdict['pds'] #d3z²-r² - pz
+        M = M.at[5,1].set(-Mdict['pdp']) #dxz - px
+        M = M.at[6,2].set(-Mdict['pdp']) #dyz - py
+        M = M.at[4,3].set(-Mdict['pds']) #d3z²-r² - pz
 
         # d-d block
-        M[4,4] = Mdict['dds'] #d3z²-r² - d3z²-r²
-        M[5,5] = M[6,6] = Mdict['ddp'] #dxz - dxz, dyz - dyz 
-        M[7,7] = M[8,8] = Mdict['ddd'] #dx²-y² - dx²-y², dxy - dxy 
+        M = M.at[4,4].set(Mdict['dds']) #d3z²-r² - d3z²-r²
+        M = M.at[5,5].set(Mdict['ddp']) #dxz - dxz
+        M = M.at[6,6].set(Mdict['ddp']) #dyz - dyz
+        M = M.at[7,7].set(Mdict['ddd']) #dx²-y² - dx²-y²
+        M = M.at[8,8].set(Mdict['ddd']) #dxy - dxy 
         
         # Initialize 9x9 transformation matrix and polar directions
         tr = np.zeros((9, 9))
@@ -410,50 +426,52 @@ class surfGB:
         phi = np.arctan2(y, x)  # azimuthal angle in x-y plane
         
         # s orbital (1x1) at position [0,0] - always 1 since spherically symmetric
-        tr[0,0] = 1.0
+        tr = tr.at[0,0].set(1.0)
         
         # p orbitals (3x3) at positions [1:4,1:4]
         # [px,py,pz] block - describes how p orbitals transform under rotation
-        tr[1:4,1:4] = np.array([
+        tr = tr.at[1:4,1:4].set(np.array([
             [np.cos(theta) * np.cos(phi), -np.sin(phi)  , np.sin(theta)*np.cos(phi)],
             [np.cos(theta) * np.sin(phi),  np.cos(phi)  , np.sin(theta)*np.sin(phi)], 
             [-np.sin(theta)             ,  0            , np.cos(theta)]
-        ])
+        ]))
         
         # d orbitals (5x5) at positions [4:9,4:9]
         # [d3z2-r2, dxz, dyz, dx2-y2, dxy] block - transforms the five d orbitals
         d_block = np.zeros((5,5))
         
         # Copying formula from ANT.Gaussian directly
-        d_block[0,0] = (3 * z**2 - 1) / 2
-        d_block[0,1] = -np.sqrt(3) * np.sin(2*theta) / 2
-        d_block[0,3] = np.sqrt(3) * np.sin(theta)**2 / 2
+        d_block = d_block.at[0,0].set((3 * z**2 - 1) / 2)
+        d_block = d_block.at[0,1].set(-np.sqrt(3) * np.sin(2*theta) / 2)
+        d_block = d_block.at[0,3].set(np.sqrt(3) * np.sin(theta)**2 / 2)
         
-        d_block[1,0] = np.sqrt(3) * np.sin(2*theta) * np.cos(phi) / 2
-        d_block[1,1] = np.cos(2*theta) * np.cos(phi)
-        d_block[1,2] = -np.cos(theta) * np.sin(phi)
-        d_block[1,3] = -d_block[1,0] / np.sqrt(3)
-        d_block[1,4] = np.sin(theta) * np.sin(phi)
+        d_10 = np.sqrt(3) * np.sin(2*theta) * np.cos(phi) / 2
+        d_block = d_block.at[1,0].set(d_10)
+        d_block = d_block.at[1,1].set(np.cos(2*theta) * np.cos(phi))
+        d_block = d_block.at[1,2].set(-np.cos(theta) * np.sin(phi))
+        d_block = d_block.at[1,3].set(-d_10 / np.sqrt(3))
+        d_block = d_block.at[1,4].set(np.sin(theta) * np.sin(phi))
         
-        d_block[2,0] = np.sqrt(3) * np.sin(2*theta) * np.sin(phi) / 2
-        d_block[2,1] = np.cos(2*theta) * np.sin(phi)
-        d_block[2,2] = np.cos(theta) * np.cos(phi)
-        d_block[2,3] = -d_block[2,0] / np.sqrt(3)
-        d_block[2,4] = -np.sin(theta) * np.cos(phi)
+        d_20 = np.sqrt(3) * np.sin(2*theta) * np.sin(phi) / 2
+        d_block = d_block.at[2,0].set(d_20)
+        d_block = d_block.at[2,1].set(np.cos(2*theta) * np.sin(phi))
+        d_block = d_block.at[2,2].set(np.cos(theta) * np.cos(phi))
+        d_block = d_block.at[2,3].set(-d_20 / np.sqrt(3))
+        d_block = d_block.at[2,4].set(-np.sin(theta) * np.cos(phi))
         
-        d_block[3,0] = np.sqrt(3) * np.sin(theta)**2 * np.cos(2*phi) / 2
-        d_block[3,1] = np.sin(2*theta) * np.cos(2*phi) / 2
-        d_block[3,2] = -np.sin(theta) * np.sin(2*phi)
-        d_block[3,3] = (1 + np.cos(theta)**2) * np.cos(2*phi) / 2
-        d_block[3,4] = -np.cos(theta) * np.sin(2*phi)
+        d_block = d_block.at[3,0].set(np.sqrt(3) * np.sin(theta)**2 * np.cos(2*phi) / 2)
+        d_block = d_block.at[3,1].set(np.sin(2*theta) * np.cos(2*phi) / 2)
+        d_block = d_block.at[3,2].set(-np.sin(theta) * np.sin(2*phi))
+        d_block = d_block.at[3,3].set((1 + np.cos(theta)**2) * np.cos(2*phi) / 2)
+        d_block = d_block.at[3,4].set(-np.cos(theta) * np.sin(2*phi))
         
-        d_block[4,0] = np.sqrt(3) * np.sin(theta)**2 * np.sin(2*phi) / 2
-        d_block[4,1] = np.sin(2*theta) * np.sin(2*phi) / 2
-        d_block[4,2] = np.sin(theta) * np.cos(2*phi)
-        d_block[4,3] = (1 + np.cos(theta)**2) * np.sin(2*phi) / 2
-        d_block[4,4] = np.cos(theta) * np.cos(2*phi)
+        d_block = d_block.at[4,0].set(np.sqrt(3) * np.sin(theta)**2 * np.sin(2*phi) / 2)
+        d_block = d_block.at[4,1].set(np.sin(2*theta) * np.sin(2*phi) / 2)
+        d_block = d_block.at[4,2].set(np.sin(theta) * np.cos(2*phi))
+        d_block = d_block.at[4,3].set((1 + np.cos(theta)**2) * np.sin(2*phi) / 2)
+        d_block = d_block.at[4,4].set(np.cos(theta) * np.cos(2*phi))
         
-        tr[4:9,4:9] = d_block
+        tr = tr.at[4:9,4:9].set(d_block)
         
         # Apply transformation 
         return tr @ M @ tr.T
@@ -486,26 +504,42 @@ class surfGB:
 
         References
         ----------
-        [1] Jacob, D., & Palacios, J. J. (2011). Critical comparison of electrode models 
+        [1] Jacob, D., & Palacios, J. J. (2011). Critical comparison of electrode models
             in density functional theory based quantum transport calculations.
             The Journal of Chemical Physics, 134(4), 044118.
-            DOI: 10.1063/1.3526044  
+            DOI: 10.1063/1.3526044
         """
         sig = np.zeros((self.N, self.N), dtype=complex)
-        sigSurf = self.gList[i].sigma(E, None, conv)
+        sigSurf = self.gList[i].sigma(E, conv)
+
+        # Get contact-specific data for this static contact index
+        nIndLists_i = self.nIndLists[i]
+        indsLists_i = self.indsLists[i]
+
         # Apply self energies in first 9 directions that aren't attached to atom
-        for nInds, Finds in zip(self.nIndLists[i], self.indsLists[i]):
-            sigInds = list(set(range(9)) - set(nInds))
-            sigAtom = sum([sigSurf[j] for j in sigInds])
-            sig[np.ix_(Finds, Finds)] = sigAtom
+        for nInds, Finds in zip(nIndLists_i, indsLists_i):
+            # Sum contributions from all 9 directions, then subtract connected ones
+            sigAtom = np.sum(sigSurf[:9], axis=0)
+            for neighbor_idx in nInds:
+                sigAtom = sigAtom - sigSurf[neighbor_idx]# Compute indices not connected to device (JAX-compatible)
+
+            # Update sigma matrix
+            sig = sig.at[np.ix_(Finds, Finds)].set(sigAtom)
+
         # Apply de-orthonormalization technique from ANT.Gaussian if orthonormal
-        if self.Sdict['sss'] == 0:
-            sig = self.Xi @ sig @ self.Xi
+        sig = lax.cond(self.Sdict['sss'] == 0,
+                      lambda s: self.Xi @ s @ self.Xi,
+                      lambda s: s,
+                      sig)
+
+        # Handle spin - use if/else since spin is static
         if self.spin == 'u' or self.spin == 'ro':
             sig = np.kron(np.eye(2), sig)
-        elif self.spin =='g':
+        elif self.spin == 'g':
             sig = np.kron(sig, np.eye(2))
-        return sig
+        # else: spin == 'r', keep sig as-is
+
+        return sig 
     
     def sigmaTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
         """
@@ -530,12 +564,14 @@ class surfGB:
 
         References
         ----------
-        [1] Jacob, D., & Palacios, J. J. (2011). Critical comparison of electrode models 
+        [1] Jacob, D., & Palacios, J. J. (2011). Critical comparison of electrode models
             in density functional theory based quantum transport calculations.
             The Journal of Chemical Physics, 134(4), 044118.
             DOI: 10.1063/1.3526044
         """
-        sigs = [self.sigma(E, i, conv) for i in range(len(self.indsLists))]
+        # Use JAX operations for better performance
+        num_contacts = len(self.indsLists)
+        sigs = [self.sigma(E, i, conv) for i in range(num_contacts)]
         return sum(sigs)
 
     def getSigma(self, Elist=[None, None], conv=SURFACE_GREEN_CONVERGENCE):
@@ -871,6 +907,10 @@ class surfGBAt:
 
         self.updateH()
 
+        # JIT compile methods with self as static argument
+        self.sigmaK = jit(self.sigmaK, static_argnums=(1,2))
+        self.sigma = jit(self.sigma, static_argnums=(1,2))
+
     def updateH(self, fermi=None):
         """
         Update Hamiltonian and extended matrices.
@@ -897,23 +937,23 @@ class surfGBAt:
             fermiPrev = self.fermi
             dFermi =  fermi - fermiPrev
             # Onsite energies
-            self.H += dFermi*np.eye(dim)
+            self.H = self.H + dFermi*np.eye(dim)
             # And hopping overlaps
             for j,S in enumerate(self.Slist):
-                self.Vlist[j] += dFermi*S
+                self.Vlist[j] = self.Vlist[j] + dFermi*S
             #print(np.diag(self.H))
             self.fermi = fermi
 
         H0x = np.kron(np.eye(self.NN+1), self.H)
         S0x = np.eye(dim*(self.NN+1))
         for i in range(self.NN):
-            S0x[-dim:, i*dim:(i+1)*dim] = self.Slist[i]
-            S0x[i*dim:(i+1)*dim, -dim:] = self.Slist[i].T
-            H0x[-dim:, i*dim:(i+1)*dim] = self.Vlist[i]
-            H0x[i*dim:(i+1)*dim, -dim:] = self.Vlist[i].conj().T
+            S0x = S0x.at[-dim:, i*dim:(i+1)*dim].set(self.Slist[i])
+            S0x = S0x.at[i*dim:(i+1)*dim, -dim:].set(self.Slist[i].T)
+            H0x = H0x.at[-dim:, i*dim:(i+1)*dim].set(self.Vlist[i])
+            H0x = H0x.at[i*dim:(i+1)*dim, -dim:].set(self.Vlist[i].conj().T)
         self.F = H0x
         self.S = S0x
-    
+
     # Calculate sigmaK for the bulk
     def sigmaK(self, E, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5):
         """
@@ -948,16 +988,21 @@ class surfGBAt:
         previous calculation to improve convergence.
         """
         #Initialize sigmaK and A matrices for Dyson equation
-        if self.sigmaKprev is not None and self.Eprev != Eminf and abs(self.Eprev - E) <1:
-            sigmaK = self.sigmaKprev.copy()
-        else:
-            sigmaK = np.array([np.eye(dim)*-1j for k in range(self.NN)], dtype=complex)
+        #if self.sigmaKprev is not None and self.Eprev != Eminf and abs(self.Eprev - E) <1:
+        #    sigmaK = self.sigmaKprev.copy()
+        #else:
+        sigmaK = np.array([np.eye(dim)*-1j for k in range(self.NN)], dtype=complex)
         A = (E - self.eta*1j)*np.eye(dim) - self.H
-        #Self-consistency loop 
-        count = 0
+        
+        #Self-consistency loop using jax.lax.while_loop
         maxIter = 1000
-        diff = np.inf
-        while diff > conv and count < maxIter:
+        
+        def cond_fun(state):
+            count, diff, sigmaK, sigmaK_ = state
+            return (diff > conv) & (count < maxIter)
+        
+        def body_fun(state):
+            count, diff, sigmaK, sigmaK_ = state
             sigmaK_ = sigmaK.copy()
             sigTot = np.sum(sigmaK, axis=0)
            
@@ -965,21 +1010,26 @@ class surfGBAt:
                 pair_k = (k + 6)%12 # Opposite direction vector
                 gK = LA.inv(A - sigTot + sigmaK[pair_k]) # subtracted from sigTot
                 B = (E - self.eta*1j)*self.Slist[k] - self.Vlist[k]
-                sigmaK[k] = mix*(B@gK@B.conj().T) + (1-mix)*sigmaK_[k]
+                sigmaK = sigmaK.at[k].set(mix*(B@gK@B.conj().T) + (1-mix)*sigmaK_[k])
             
             # Convergence Check
             diff = np.max(np.abs(sigmaK - sigmaK_))/np.max(np.abs(sigmaK_))
             count += 1
-
-        if diff>conv:
-            print(f'Warning: sigmaK() exceeded 1000 iterations! E: {E}, Conv: {diff}')
+            return (count, diff, sigmaK, sigmaK_)
+        
+        # Initial state: (count, diff, sigmaK, sigmaK_)
+        init_state = (0, np.inf, sigmaK, sigmaK.copy())
+        count, diff, sigmaK, sigmaK_ = lax.while_loop(cond_fun, body_fun, init_state)
+        
+        # Warning check (outside JIT if needed)
+        #print(f'Warning: sigmaK() exceeded {maxIter} iterations! E: {E}, Conv: {diff}')
         
         self.sigmaKprev = sigmaK
         self.Eprev= E
 
         return sigmaK
 
-    def sigma(self, E, inds=None, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5): 
+    def sigma(self, E, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5): 
         """
         Calculate surface self-energies for an FCC lattice.
 
@@ -997,8 +1047,6 @@ class surfGBAt:
         ----------
         E : float
             Energy point for Green's function calculation (in eV)
-        inds : list or int, optional
-            Indices of the sigma matrix to return. If None, returns full list (default: None)
         conv : float, optional
             Convergence criterion for Dyson equation (default: 1e-5)
         mix : float, optional
@@ -1007,8 +1055,7 @@ class surfGBAt:
         Returns
         -------
         list
-            List of self-energy matrices for the surface atom. If inds is specified,
-            returns only the requested matrices.
+            List of self-energy matrices for the surface atom.
 
         Notes
         -----
@@ -1025,32 +1072,40 @@ class surfGBAt:
             DOI: 10.1063/1.3526044
         """
         sigSurf = self.sigmaK(E, conv, mix)[:9]
-        #Self-consistency loop 
-        count = 0
+        
+        #Self-consistency loop using jax.lax.while_loop
         maxIter = 1000
-        diff = np.inf                             ## SET THIS TO 0 to BYPASS SECOND LOOP
         A = (E - self.eta*1j)*np.eye(dim) - self.H
         planeVec = [0,1,2,6,7,8] # Location of vectors in plane
-        while diff > conv and count < maxIter:
+        
+        def cond_fun(state):
+            count, diff, sigSurf, sigSurf_ = state
+            return (diff > conv) & (count < maxIter)
+        
+        def body_fun(state):
+            count, diff, sigSurf, sigSurf_ = state
             sigSurf_ = sigSurf.copy()
             sigTot = np.sum(sigSurf, axis=0)
             g = LA.inv(A - sigTot) # subtracted from sigTot
             for k in planeVec:
                 pair_k = (k + 6)%12 # Opposite direction vector
                 B = (E - self.eta*1j)*self.Slist[k] - self.Vlist[k]
-                sigSurf[k] = mix*(B@g@B.conj().T) + (1-mix)*sigSurf_[k]
+                sigSurf = sigSurf.at[k].set(mix*(B@g@B.conj().T) + (1-mix)*sigSurf_[k])
             
             # Convergence Check
             diff = np.max(np.abs(sigSurf - sigSurf_))/np.max(np.abs(sigSurf_))
             count += 1
-
-        if diff>conv:
-            print(f'Warning: sigma() exceeded 1000 iterations! E: {E}, Conv: {diff}')
+            return (count, diff, sigSurf, sigSurf_)
         
-        if inds is None:
-            return sigSurf
-        else:
-            return [sigSurf[i] for i in inds]
+        # Initial state: (count, diff, sigSurf, sigSurf_)
+        init_state = (0, np.inf, sigSurf, sigSurf.copy()) # set diff to 0 to bypass second loop
+        count, diff, sigSurf, sigSurf_ = lax.while_loop(cond_fun, body_fun, init_state)
+        
+        # Warning check (outside JIT if needed)
+        #if diff > conv:
+        #    print(f'Warning: sigma() exceeded {maxIter} iterations! E: {E}, Conv: {diff}')
+        
+        return sigSurf
     
     # Empty function for compatibility with density.py methods
     def setF(self, F, mu1, mu2):
@@ -1077,10 +1132,11 @@ class surfGBAt:
         sigTot = np.sum(sigK, axis=0)
         for k in range(self.NN):
             pair_k = (k + 6)%12 # Opposite direction vector
-            sig[k*dim:(k+1)*dim,k*dim:(k+1)*dim] = sigTot - sigK[pair_k]
+            sig = sig.at[k*dim:(k+1)*dim,k*dim:(k+1)*dim].set(sigTot - sigK[pair_k])
         return sig
-    
+
     # Get the bulk DOS of the Bethe lattice
+    @jit
     def DOS(self, E):
         """
         Calculate bulk density of states of the Bethe lattice.
@@ -1128,4 +1184,5 @@ class surfGBAt:
         """
         self.fermi = getFermiContact(self, ne, tol, ENERGY_MIN, 1000, T=self.T, nOrbs=dim)
         return self.fermi
+
 
