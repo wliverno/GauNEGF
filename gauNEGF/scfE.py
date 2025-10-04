@@ -205,6 +205,7 @@ class NEGFE(NEGF):
             self.Nnegf=50 # Default grid
         if self.updFermi:
             self.fermiMethod = fermiMethod
+        jax.clear_caches() # reset compiled functions
     
     def setIntegralLimits(self, N1=None, N2=None, Nnegf=None, tol=1e-4, Emin=None):
         """
@@ -364,6 +365,22 @@ class NEGFE(NEGF):
 
             # Full integration methods (progession: muller/secant --> bisect):
             methodFail = False
+            if self.fermiMethod.lower() =='poly':
+                ne = self.bar.ne
+                if self.spin =='r':
+                    ne /= 2
+                print('INVERSE POLYNOMIAL METHOD:')
+                self.fermi, dE, P2, dN = calcFermiInversePolynomial(self.g, ne-nLower, 
+                                    self.Emin, fermi_old, self.N1, tol=conv, T=self.T)
+                print('Setting equilibrium density matrix...') 
+                methodFail = (dN > conv)
+                if methodFail:
+                    print(f'Switching to BISECT method (Fermi error = {dE:.2E} eV)')
+                    fermi_old = self.fermi + 0.0
+                else:
+                    print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
+                    P = P+P2 if self.mu1 == self.mu2 else compContourP2(self.mu1)
+            
             if self.fermiMethod.lower() =='muller' or self.fermiMethod.lower() == 'default':
                 ne = self.bar.ne
                 if self.spin =='r':
@@ -407,7 +424,7 @@ class NEGFE(NEGF):
                 print('Setting equilibrium density matrix...') 
                 P = P+P2 if self.mu1 == self.mu2 else compContourP2(self.mu1)
             
-            if self.fermiMethod.lower() not in ['muller', 'secant', 'bisect', 'predict', 'default']:
+            if self.fermiMethod.lower() not in ['muller', 'secant', 'bisect', 'predict', 'default', 'poly']:
                 raise Exception('Error: invalid Fermi search method, needs to be \'muller\',' + \
                                                  '\'secant\', \'bisect\' or \'predict\' or \'default\'')
             # Shift Emin, mu1, and mu2 and update contact self-energies

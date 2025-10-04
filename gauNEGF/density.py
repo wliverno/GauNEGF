@@ -286,6 +286,7 @@ def integratePointsAdaptiveANT(computePoint, tol=ADAPTIVE_INTEGRATION_TOL, maxN=
         prev_x = x
         prev_sumW = float(np.sum(w))
         N *= 3
+    N/=3
     print(f'Adaptive integration reached full grid ({N} points), final error {maxDP:.3e}')
     return new_P
 
@@ -1164,7 +1165,8 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=ENERGY_MIN, 
     print(f'Finished after {counter} iterations, Ef = {fermi:.2f}')
     return fermi, Emin, N1, N2
 
-def calcFermiBisect(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONVERGENCE_TOL, maxcycles=MAX_CYCLES, T=TEMPERATURE):
+def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI_CALCULATION_TOL, 
+                    maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE, debug=True):
     """
     Calculate Fermi energy of system using bisection
     """
@@ -1194,7 +1196,8 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONV
             lBound = E + 0.0
             Ef = lBound
             E += dE
-        #print(uBound, lBound, E, dE)
+        if debug==True:
+            print(f"DEBUG: Ef={Ef:.2f}, dN={ne-Ncurr:.2E}, dE={dE:.2E}")
         mat = E * g.S - g.F - jnp.array(g.sigmaTot(E))
         gr = jnp.linalg.inv(mat)
         dos = -jnp.imag(jnp.trace(gr)) / jnp.pi
@@ -1212,13 +1215,16 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONV
             uBound = Ef + 0.0
         Ef = (uBound + lBound)/2
         dE = uBound - lBound
-        #print(uBound, lBound, dE, E)
+        if debug==True:
+            print(f"DEBUG: Ef={Ef:.2f}, dN={dN:.2E}, dE={dE:.2E}")
         counter += 1
     if counter == maxcycles:
         print(f'Warning: Max cycles reached, convergence = {abs(Ncurr-ne):.2E}')
     return Ef, dE, P
 
-def calcFermiSecant(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONVERGENCE_TOL, maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE):
+def calcFermiSecant(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, 
+                    conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, 
+                    T=TEMPERATURE, debug=True):
     """
     Calculate Fermi energy using Secant method, updating dE at each step
     """
@@ -1237,7 +1243,8 @@ def calcFermiSecant(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONV
         g.setF(g.F, Ef, Ef)
         P = pMu(Ef)
         nNext = np.trace(P@g.S).real
-        #print(Ef, dE, nCurr, nNext)
+        if debug==True:
+            print(f"DEBUG: Ef={Ef:.2f}, dN={nNext-ne:.2E}, dE={dE:.2E}")
         if abs(nNext - nCurr)<1e-10:
             print('Warning: change in ne low, reducing step size')
             dE *= 0.1
@@ -1246,14 +1253,15 @@ def calcFermiSecant(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONV
         dE = dE*((ne - nCurr)/(nNext-nCurr)) - dE
         nCurr = nNext + 0.0
         counter += 1
-        #print(Ef, dE)
     
     Ef += dE  
     if counter == maxcycles:
         print(f'Warning: Max cycles reached, convergence = {abs(nCurr-ne):.2E}')
     return Ef, dE, P, abs(nCurr-ne)
 
-def calcFermiMuller(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONVERGENCE_TOL, maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE):
+def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, 
+                    conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, 
+                    T=TEMPERATURE, debug=True):
     """
     Calculate Fermi energy using Muller's method, starting with 3 initial points
     """
@@ -1267,6 +1275,7 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONV
     # Initialize three points around initial guess
     E2 = Ef
     E1 = E2 - conv
+    E0 = E2 + conv
 
     # Get initial density matrices and electron counts
     g.setF(g.F, E2, E2)
@@ -1279,12 +1288,6 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONV
     n1 = np.trace(P@g.S).real - ne
     if abs(n1) < conv:
         return E1, conv, P, abs(n1)
-
-    # Calculate E0 as the energy where n=0 using linear extrapolation.
-    delta_n = n2 - n1
-    delta_n += np.sign(delta_n)*small
-    delta_E = E2 - E1 
-    E0 = E1 - (n1 * delta_E / delta_n)
     g.setF(g.F, E0, E0)
     P = pMu(E0)
     n0 = np.trace(P@g.S).real - ne
@@ -1322,8 +1325,8 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONV
             n0, n1 = n1, n0
 
         if abs(Enext - E2) < abs(Enext - E1):
-            E2, E1 = E1, E2
-            n2, n1 = n1, n2
+            E1 = E2
+            n1 = n2
 
         E2 = Enext
         g.setF(g.F, E2, E2)
@@ -1334,7 +1337,8 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONV
         if abs(n2) < conv:
             break
 
-        #print("E0 - ", E0, n0, "E1 - ", E1, n1, "E2 - ", E2, n2, " dE ", dE)
+        if debug==True:
+            print(f"DEBUG: Ef={E2:.2f}, dN={n2:.2E}, dE={dE:.2E}")
         counter += 1
 
     if counter == maxcycles:
@@ -1342,3 +1346,167 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=FERMI_CALCULATION_TOL, conv=SCF_CONV
 
     return E2, dE, P, abs(n2)
 
+def calcFermiInversePolynomial(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
+                    conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, 
+                    T=TEMPERATURE, debug=True):
+    """
+    Calculate Fermi energy using inverse polynomial interpolation with accumulating points.
+
+    Uses all accumulated points to fit a polynomial through (n, E) pairs
+    and find where n = ne (target electron count). This is a generalization of Muller's method
+    to arbitrary polynomial order.
+
+    Parameters
+    ----------
+    g : surfG object
+        Surface Green's function calculator
+    ne : float
+        Target number of electrons
+    Emin : float
+        Lower bound for complex contour in eV
+    Ef : float
+        Initial guess for Fermi energy in eV
+    N : int or None
+        Number of integration points (None for adaptive)
+    tol : float, optional
+        Tolerance for integration (default: 1e-5)
+    conv : float, optional
+        Convergence criterion for electron count (default: 1e-3)
+    maxcycles : int, optional
+        Maximum number of iterations (default: 20)
+    T : float, optional
+        Temperature in Kelvin (default: 300)
+
+    Returns
+    -------
+    tuple
+        (Ef, dE, P, error) - Calculated Fermi energy, last energy step, density matrix, and final error
+
+    Notes
+    -----
+    This method builds up a history of (n, E) points and uses Lagrange interpolation
+    to fit an inverse polynomial (E as a function of n) to find E at n = ne.
+    More robust than Muller for well-behaved functions as it uses more information.
+    """
+    assert ne < len(g.F), "Number of electrons cannot exceed number of basis functions!"
+
+    if N is None:
+        pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, tol, T)
+    else:
+        pMu = lambda E: densityComplexN(g.F, g.S, g, Emin, E, N, T)
+
+    # Lists to store history of points
+    E_pts = []
+    n_pts = []
+
+    # Initialize with first point
+    E = Ef
+    g.setF(g.F, E, E)
+    P = pMu(E)
+    n = np.trace(P@g.S).real - ne
+
+    if abs(n) < conv:
+        return E, 0, P, abs(n)
+
+    E_pts.append(E)
+    n_pts.append(n)
+
+    # Enforce monotonicity: Higher E -> Higher N-ne
+    step = conv*10
+    n_first = n
+    counter = 1
+    while counter < maxcycles:
+        E = Ef + step
+        g.setF(g.F, E, E)
+        P = pMu(E)
+        n = np.trace(P@g.S).real - ne
+
+        if abs(n) < conv:
+            return E, step, P, abs(n)
+
+        # Check if we have a meaningful difference from first point
+        if n - n_first > 0:
+            break
+
+        # Otherwise increase step size and try again
+        step *= 10
+        counter += 1
+        if debug==True:
+            print(f'Warning: Tried Ef = {E:2f} eV (too close to {Ef:2f} to get accurate dN {n-n_first:.2E})')
+
+    E_pts.append(E)
+    n_pts.append(n)
+
+    dE = step
+
+    while counter < maxcycles:
+        # Use Lagrange interpolation to find E where n = 0 (since we store n - ne)
+        # We're doing inverse interpolation: E = f(n) instead of n = f(E)
+
+        # Lagrange interpolation: E(n=0) = sum_i E_i * L_i(0)
+        # where L_i(n) = prod_{j!=i} (n - n_j) / (n_i - n_j)
+
+        E_next = 0.0
+        for i in range(len(n_pts)):
+            # Calculate Lagrange basis polynomial L_i(0)
+            L_i = 1.0
+            for j in range(len(n_pts)):
+                if i != j:
+                    # Check for duplicate points (would cause division by zero)
+                    if abs(n_pts[i] - n_pts[j]) < 1e-14:
+                        # Skip this interpolation, use last good estimate
+                        E_next = E_pts[-1] + dE * 0.5
+                        break
+                    L_i *= (0 - n_pts[j]) / (n_pts[i] - n_pts[j])
+            else:
+                E_next += E_pts[i] * L_i
+                continue
+            break
+    
+        # Enforce monotonicity: Higher E -> higher N 
+        # If N-nE > 0: need lower E, so E_next must be < E_pts[-1]
+        # If N-nE < 0: need higher E, so E_next must be > E_pts[-1]
+        if n_pts[-1] > 0 and E_next > E_pts[-1]:
+            # Polynomial violated monotonicity - discard it and step in correct direction
+            E_next = E_pts[-1] - abs(dE) * 10
+            # Remove the last point that led to bad interpolation
+            E_pts.pop()
+            n_pts.pop()
+            counter -= 1  # Don't count this as a valid iteration
+            if debug==True:
+                print('Warning: monotonicity exception corrected!')
+        elif n_pts[-1] < 0 and E_next < E_pts[-1]:
+            # Polynomial violated monotonicity - discard it and step in correct direction
+            E_next = E_pts[-1] + abs(dE) * 10
+            # Remove the last point that led to bad interpolation
+            E_pts.pop()
+            n_pts.pop()
+            counter -= 1  # Don't count this as a valid iteration
+            if debug==True:
+                print('Warning: monotonicity exception corrected!')
+
+        # Calculate new point
+        E = E_next
+        g.setF(g.F, E, E)
+        P = pMu(E)
+        n = np.trace(P@g.S).real - ne
+
+        # Update history
+        E_pts.append(E)
+        n_pts.append(n)
+
+        # Calculate step size for reporting
+        dE = E - E_pts[-2]
+
+        # Check convergence
+        if abs(n) < conv:
+            break
+
+        if debug==True:
+            print(f"Iter {counter}: E = {E:.6f}, n-ne = {n:.3e}, dE = {dE:.3e}, order = {counter+1}")
+        counter += 1
+
+    if counter >= maxcycles:
+        print(f'Warning: Max cycles reached, convergence = {abs(n):.2E}')
+
+    return E, dE, P, abs(n)
