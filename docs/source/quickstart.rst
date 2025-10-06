@@ -33,15 +33,10 @@ GauNEGF uses global configuration constants defined in ``gauNEGF.config`` for de
     from gauNEGF import config
     
     # View current defaults
-    print(f"Default temperature: {config.TEMPERATURE} K")
+    print(f"Default broadening: {config.ETA} eV")
     print(f"Default SCF tolerance: {config.SCF_CONVERGENCE_TOL}")
     
-    # Customize global defaults
-    config.TEMPERATURE = 77.0  # Liquid nitrogen temperature
-    config.SCF_CONVERGENCE_TOL = 1e-6  # Higher precision
-    config.SCF_DAMPING = 0.01  # More aggressive damping
-
-All configuration constants use ``ALL_CAPS`` naming following PEP 8. Key parameters include ``TEMPERATURE``, ``SCF_CONVERGENCE_TOL``, ``SCF_DAMPING``, ``ETA`` (broadening), and various integration tolerances. See the main documentation for the complete list.
+These variables are used as defaults for the various modules in gauNEGF based on performance with well-behaved systems. You can customize these to your needs.
 
 Basic Calculation
 --------------
@@ -111,7 +106,7 @@ Calculate current at different voltages:
     for v in V:
         negf.setVoltage(v)
         negf.SCF(1e-3, 0.02, 100)
-        I.append(quickCurrent(F_eV, negf.S, sig1, sig2, 
+        I.append(current(F_eV, negf.S, sig1, sig2, 
                               qV=v, fermi=negf.fermi))
     
     # Plot IV curve

@@ -369,10 +369,10 @@ class NEGFE(NEGF):
                 ne = self.bar.ne
                 if self.spin =='r':
                     ne /= 2
-                print('INVERSE POLYNOMIAL METHOD:')
-                self.fermi, dE, P2, dN = calcFermiInversePolynomial(self.g, ne-nLower, 
+                print('POLYNOMIAL REGRESSION METHOD:')
+                self.fermi, dE, P2, dN = calcFermiPolyFit(self.g, ne-nLower,
                                     self.Emin, fermi_old, self.N1, tol=conv, T=self.T)
-                print('Setting equilibrium density matrix...') 
+                print('Setting equilibrium density matrix...')
                 methodFail = (dN > conv)
                 if methodFail:
                     print(f'Switching to BISECT method (Fermi error = {dE:.2E} eV)')

@@ -100,13 +100,6 @@ Energy-Dependent Case (NEGFE):
     negf = NEGFE('molecule', basis='lanl2dz')
     negf.setContactBethe([1,2,3], [4,5,6], latFile='Au', T=300)  # Bethe lattice with temperature
     
-    # Set integration parameters
-    negf.setIntegralLimits(
-        N1=100,     # Complex contour points
-        N2=50,      # Real axis points
-        Emin=-50,   # Lower bound
-        T=300       # Temperature in K
-    )
 
 Convergence Acceleration
 ~~~~~~~~~~~~~~~~~~~~~
@@ -168,12 +161,7 @@ Common problems and solutions:
    * Increase Pulay vectors
    * Check contact parameters
 
-2. **Orbital Occupation Inaccurate**
-
-   * Verify integration limits
-   * Increase integration Grid
-
-3. **Slow convergence**
+2. **Slow convergence**
 
    * Add broadening (eta) to surfG
    * Change fermi solver
