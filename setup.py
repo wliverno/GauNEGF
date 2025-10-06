@@ -24,9 +24,10 @@ setup(
     ],
     python_requires=">=3.7",
     install_requires=[
-        "numpy>=1.18.0",
+        "numpy>=1.18.0,<=1.26",
         "scipy>=1.4.0",
         "matplotlib>=3.1.0",
+        "jax>=0.4.0",
     ],
     extras_require={
         "dev": [

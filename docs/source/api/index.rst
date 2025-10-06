@@ -75,3 +75,11 @@ Matrix Tools
    :members:
    :undoc-members:
    :show-inheritance: 
+
+Integration Tools
+-----------
+
+.. automodule:: gauNEGF.integrate
+   :members:
+   :undoc-members:
+   :show-inheritance: 

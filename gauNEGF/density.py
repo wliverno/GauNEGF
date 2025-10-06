@@ -1346,15 +1346,14 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
 
     return E2, dE, P, abs(n2)
 
-def calcFermiInversePolynomial(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
-                    conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, 
-                    T=TEMPERATURE, debug=True):
+def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
+                    conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES,
+                    T=TEMPERATURE, order=3, debug=True):
     """
-    Calculate Fermi energy using inverse polynomial interpolation with accumulating points.
+    Calculate Fermi energy using polynomial regression fit with accumulating points.
 
-    Uses all accumulated points to fit a polynomial through (n, E) pairs
-    and find where n = ne (target electron count). This is a generalization of Muller's method
-    to arbitrary polynomial order.
+    Uses all accumulated points to fit a polynomial of specified order through (n, E) pairs
+    using least squares regression (polyfit) and finds where n = ne (target electron count).
 
     Parameters
     ----------
@@ -1376,6 +1375,8 @@ def calcFermiInversePolynomial(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         Maximum number of iterations (default: 20)
     T : float, optional
         Temperature in Kelvin (default: 300)
+    order : int, optional
+        Order of polynomial fit (default: 3)
 
     Returns
     -------
@@ -1384,9 +1385,10 @@ def calcFermiInversePolynomial(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
 
     Notes
     -----
-    This method builds up a history of (n, E) points and uses Lagrange interpolation
+    This method builds up a history of (n, E) points and uses polynomial regression
     to fit an inverse polynomial (E as a function of n) to find E at n = ne.
-    More robust than Muller for well-behaved functions as it uses more information.
+    Uses numpy.polyfit for regression and numpy.roots to find the solution.
+    Polynomial order is min(counter, order) to avoid overfitting with few points.
     """
     assert ne < len(g.F), "Number of electrons cannot exceed number of basis functions!"
 
@@ -1440,28 +1442,24 @@ def calcFermiInversePolynomial(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
     dE = step
 
     while counter < maxcycles:
-        # Use Lagrange interpolation to find E where n = 0 (since we store n - ne)
-        # We're doing inverse interpolation: E = f(n) instead of n = f(E)
+        # Use polynomial regression to find E where n = 0 (since we store n - ne)
+        # Fit n(E) and solve for roots where n = 0
 
-        # Lagrange interpolation: E(n=0) = sum_i E_i * L_i(0)
-        # where L_i(n) = prod_{j!=i} (n - n_j) / (n_i - n_j)
+        # Determine polynomial order: use min(counter, order) to avoid overfitting
+        poly_order = min(len(n_pts) - 1, order)
 
-        E_next = 0.0
-        for i in range(len(n_pts)):
-            # Calculate Lagrange basis polynomial L_i(0)
-            L_i = 1.0
-            for j in range(len(n_pts)):
-                if i != j:
-                    # Check for duplicate points (would cause division by zero)
-                    if abs(n_pts[i] - n_pts[j]) < 1e-14:
-                        # Skip this interpolation, use last good estimate
-                        E_next = E_pts[-1] + dE * 0.5
-                        break
-                    L_i *= (0 - n_pts[j]) / (n_pts[i] - n_pts[j])
-            else:
-                E_next += E_pts[i] * L_i
-                continue
-            break
+        # Fit polynomial n(E) using least squares regression
+        # We want to find E where n(E) = 0
+        coeffs = np.polyfit(E_pts, n_pts, poly_order)
+
+        # Find roots of n(E) = 0
+        roots = np.roots(coeffs)
+
+        # Find root nearest to last E value (most physically reasonable)
+        # Handle complex roots by taking real part
+        root_distances = np.abs(roots - E_pts[-1])
+        nearest_idx = np.argmin(root_distances)
+        E_next = roots[nearest_idx].real
     
         # Enforce monotonicity: Higher E -> higher N 
         # If N-nE > 0: need lower E, so E_next must be < E_pts[-1]

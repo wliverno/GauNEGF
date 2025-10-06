@@ -26,7 +26,7 @@ Note: This package requires a licensed copy of Gaussian quantum chemistry softwa
 - Surface Green's function calculations using Bethe lattice approach
 - Transport calculations for molecular junctions
 - Support for spin-polarized calculations
-- Parallel processing capabilities
+- JAX framework integration for parallelization and GPU acceleration
 
 ## Requirements
 
@@ -34,17 +34,31 @@ Note: This package requires a licensed copy of Gaussian quantum chemistry softwa
 - gauopen 3.0.0 Python interface for Gaussian
 
 ### Python Dependencies
-- numpy
+- numpy<=1.26 (required for gauopen-3.0.0 compatibility)
 - scipy
 - matplotlib
-- cupy>=14.0.0a (optional, for GPU acceleration)
+- jax (for parallelization and GPU support)
 
-### GPU Support (Optional)
-- **CUDA Toolkit** (recommended: CUDA 11.2 or later)
-- **CuPy**: For GPU-accelerated linear algebra operations
-  - Provides significant speedup for large matrix operations (>500x500)
-  - Automatic fallback to CPU when GPU unavailable
-  - **Note**: CuPy's general eigenvalue solver (`cupy.linalg.eig`) is not yet available; the package uses `cupy.linalg.eigh` for symmetric matrices and falls back to CPU for general eigenvalue problems
+### JAX Installation
+JAX can be installed with or without CUDA support:
+
+**CPU-only installation:**
+```bash
+pip install jax
+```
+
+**NVIDIA GPU installation (with CUDA):**
+```bash
+pip install jax[cuda12]  # For CUDA 12
+# or
+pip install jax[cuda11]  # For CUDA 11
+```
+
+JAX provides:
+- Automatic parallelization with `vmap` and `pmap`
+- JIT compilation for optimized performance
+- GPU acceleration for large matrix operations
+- Automatic differentiation capabilities
 
 ## Installation
 
@@ -56,8 +70,11 @@ cd GauNEGF
 # Install using pip
 pip install -e .
 
-# Optional: Install CuPy for GPU acceleration
-pip install cupy==14.0.0a1
+# Install JAX (CPU-only)
+pip install jax
+
+# Or install JAX with CUDA support for GPU acceleration
+pip install jax[cuda12]  # For CUDA 12
 ```
 
 ## Quick Start
