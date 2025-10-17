@@ -1,15 +1,15 @@
 """
-Utility functions for gauNEGF.
+Utility functions compiled with JIT for gauNEGF.
 
 Contains commonly used pure mathematical functions that are reused
 across multiple modules in the gauNEGF package.
 """
 
-import jax
 import jax.numpy as jnp
+from jax import jit
 
 
-@jax.jit
+@jit
 def fractional_matrix_power(S, power):
     """
     Calculate matrix power S^p using eigendecomposition.
@@ -36,7 +36,7 @@ def fractional_matrix_power(S, power):
     powers including negative values.
     """
     # Use eigh for Hermitian matrices (more stable and faster than eig)
-    eigenvalues, eigenvectors = jnp.linalg.eigh(S)
+    eigenvalues, eigenvectors = eigh(S)
 
     # Handle numerical precision for near-zero eigenvalues
     eigenvalues = jnp.maximum(eigenvalues, 1e-16)
@@ -47,4 +47,17 @@ def fractional_matrix_power(S, power):
 
     return result
 
+# Simple numpy operations
+
+@jit
+def inv(A):
+    return jnp.linalg.solve(A, jnp.eye(A.shape[0]))
+
+@jit
+def eig(A):
+    return jnp.linalg.eig(A)
+
+@jit
+def eigh(A):
+    return jnp.linalg.eigh(A)
 

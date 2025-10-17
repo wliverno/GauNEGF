@@ -1,40 +1,14 @@
-"""
-Surface Green's function implementation for 1D chain contacts.
-
-This module provides a 1D chain implementation for modeling semi-infinite
-contacts in quantum transport calculations. It supports three usage patterns:
-
-a) Fully automatic extraction from Fock matrix:
-   surfG1D(F, S, [[contact1], [contact2]], [[contact1connection], [contact2connection]])
-   - All parameters extracted from F/S using contact and connection indices
-
-b) Fock matrix with custom coupling:
-   surfG1D(F, S, [[contact1], [contact2]], [tau1, tau2], [stau1, stau2])
-   - Contact parameters from F/S, but with custom coupling matrices
-
-c) Fully specified contacts:
-   surfG1D(F, S, [[contact1], [contact2]], [tau1, tau2], [stau1, stau2],
-          [alpha1, alpha2], [salpha1, salpha2], [beta1, beta2], [sbeta1, sbeta2])
-   - All contact parameters specified manually
-
-The implementation uses an iterative scheme to calculate surface Green's
-functions for 1D chain contacts, with support for both manual parameter
-specification and automatic extraction from DFT calculations.
-"""
-
 # Python packages
 import jax
 import jax.numpy as np
-import jax.numpy.linalg as LA
 import jax.lax as lax
 from jax import jit
 
 # Configuration
 from gauNEGF.config import (ETA, SURFACE_GREEN_CONVERGENCE, SURFACE_RELAXATION_FACTOR)
-from gauNEGF.utils import fractional_matrix_power
+from gauNEGF.utils import fractional_matrix_power, inv
 
 #Constants
-kB = 8.617e-5           # eV/Kelvin
 
 class surfG:
     """
@@ -154,7 +128,7 @@ class surfG:
         self.X = np.array(fractional_matrix_power(Overlap, -0.5))
         # Keep indsList as Python list - loop unrolls with concrete indices
         self.indsList = [np.array(inds) for inds in indsList]
-        
+
         # Set Contact Coupling
         if taus is None:
             taus = [self.indsList[-1], self.indsList[0]]
@@ -168,7 +142,7 @@ class surfG:
            self.tauFromFock = False
            self.tauList = [np.array(tau) for tau in taus]
            self.stauList = [np.array(stau) for stau in staus]
-        
+
         # Set up contact information
         if alphas is None:
             self.contactFromFock = True
@@ -180,9 +154,6 @@ class surfG:
 
         # Set up broadening for retarded/advanced Green's function, initialize g
         self.eta = eta
-        # gPrev needs to be stacked JAX array for traced indexing
-        # aList is now shape (num_contacts, N, N), so gPrev should match
-        self.gPrev = [np.zeros_like(a, dtype=complex) for a in self.aList]
 
         # Store number of contacts for loop bounds
         self.num_contacts = len(indsList)
@@ -190,9 +161,9 @@ class surfG:
         # JIT compile g and sigma methods with static contact index
         # This compiles separate versions for each contact (i=0, i=1, etc.)
         # The expensive iterative calculation gets fully optimized
-        self.g = jit(self.g, static_argnums=(1,))  # i is argument 1 (after self)
-        self.sigma = jit(self.sigma, static_argnums=(1,))  # i is argument 1
-    
+        self.g = jit(self.g, static_argnums=(1,2,3))
+        self.sigma = jit(self.sigma, static_argnums=(1,2))
+
     def setContacts(self, alphas=None, aOverlaps=None, betas=None, bOverlaps=None):
         """
         Update contact parameters for the 1D chain.
@@ -248,7 +219,7 @@ class surfG:
         else:
             self.bList = [np.array(beta) for beta in betas]
             self.bSList = [np.array(bOverlap) for bOverlap in bOverlaps]
-    
+
     def g(self, E, i, conv=SURFACE_GREEN_CONVERGENCE, relFactor=SURFACE_RELAXATION_FACTOR):
         """
         Calculate surface Green's function for a contact.
@@ -288,21 +259,20 @@ class surfG:
         # Prepare matrices using JAX
         A = (E+1j*self.eta)*Salpha - alpha
         B = (E+1j*self.eta)*Sbeta - beta
-        g = self.gPrev[i]
         B_dag = B.conj().T
 
         # Iterative solution using jax.lax.while_loop
         MAX_ITER = 2000
 
         def cond_fun(state):
-            count, diff, g, g_prev = state
+            count, diff, g = state
             return (diff > conv) & (count < MAX_ITER)
 
         def body_fun(state):
-            count, diff, g, g_prev = state
+            count, diff, g = state
 
             # Compute new Green's function using JAX operations
-            g_new = LA.inv(A - B @ g @ B_dag)
+            g_new = inv(A - B @ g @ B_dag)
 
             # Compute convergence metric
             dg = np.abs(g_new - g) / np.maximum(np.abs(g_new), 1e-12)
@@ -311,19 +281,17 @@ class surfG:
             # Apply relaxation mixing
             g = g_new * relFactor + g * (1 - relFactor)
             count += 1
-            return (count, diff, g, g_prev)
+            return (count, diff, g)
 
         # Initial state: (count, diff, g, g_prev)
-        init_state = (0, np.inf, g, self.gPrev[i])
-        count, diff, g, g_prev = lax.while_loop(cond_fun, body_fun, init_state)
+        init_state = (0, np.inf, inv(A))
+        count, diff, g = lax.while_loop(cond_fun, body_fun, init_state)
 
         # Check convergence and warn if needed
-        if diff>conv:
-            jax.debug.print('Warning: exceeded max iterations! E: {E}, Conv: {diff}',
-                             E=E, diff=diff, ordered=True)
+        #if diff>conv:
+        #    jax.debug.print('Warning: exceeded max iterations! E: {E}, Conv: {diff}',
+        #                     E=E, diff=diff, ordered=True)
 
-        # Store result for next iteration initial guess
-        self.gPrev[i] = g
         return g
 
     def setF(self, F, mu1=None, mu2=None):
@@ -348,7 +316,7 @@ class surfG:
         If chemical potentials are provided, the corresponding contact
         parameters are shifted to align with the new potentials.
         """
-        self.F = F
+        self.F = np.array(F)
         if self.tauFromFock:
             taus = self.tauInds
             indsList = self.indsList  # Python list
@@ -372,7 +340,7 @@ class surfG:
                         self.aList = self.aList.at[i].set(self.aList[i] + dFermi*np.eye(len(self.aList[i])))
                         self.bList = self.bList.at[i].set(self.bList[i] + dFermi*self.bSList[i])
                         self.fermiList[i] = mu
-    
+
     def sigma(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
         """
         Calculate self-energy matrix for a contact.
@@ -429,7 +397,5 @@ class surfG:
         for i in range(self.num_contacts):
             sigma = sigma + self.sigma(E, i, conv)
         return sigma
-    
 
-    
 
