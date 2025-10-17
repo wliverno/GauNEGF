@@ -45,7 +45,6 @@ if not parallel_logger.handlers:
     parallel_logger.addHandler(handler)
 
 parallel_logger.info("JAX integration framework initialized")
-parallel_logger.debug(f"CUDA available: {jax.config.get('jax_cuda_enabled')}")
 parallel_logger.debug(f"Number of devices: {len(jax.devices())}")
 parallel_logger.debug(f"Device List: {jax.devices()}")
 
@@ -54,7 +53,7 @@ parallel_logger.debug(f"Device List: {jax.devices()}")
 # =============================================================================
 
 MAX_VMAP_MEMORY_GB = 4.0              # Use vmap if estimated memory < this (GB)
-FORCE_SYNCHRONOUS = True              # Force synchronous operation (for accurate timing)
+FORCE_SYNCHRONOUS = False             # Force synchronous operation (for accurate timing)
 
 # Memory calculation constants
 MEMORY_PER_MATRIX_FACTOR = 16         # Bytes per complex128 element

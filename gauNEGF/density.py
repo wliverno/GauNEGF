@@ -43,35 +43,17 @@ import os
 from gauNEGF.fermiSearch import DOSFermiSearch
 from gauNEGF.surfG1D import surfG
 from gauNEGF.integrate import GrInt, GrLessInt
-# Use JAX functions directly - no wrappers needed
 
-# JIT-compiled density matrix kernels
+# JIT-compiled functions
+from gauNEGF.utils import inv, eig, eigh
+
 @jit
 def _compute_dos_at_energy(E, F, S, sigma_total):
     """JIT-compiled kernel for DOS calculation at single energy."""
     mat = E * S - F - sigma_total
-    Gr = jnp.linalg.inv(mat)
-    dos_per_site = -jnp.imag(jnp.diag(Gr)) / jnp.pi
-    total_dos = jnp.sum(dos_per_site)
-    return total_dos, dos_per_site
+    Gr = inv(mat)
+    return -jnp.imag(jnp.trace(Gr)) / jnp.pi
 
-@jit
-def _compute_green_function(E, F, S, sigma_total):
-    """JIT-compiled kernel for Green's function calculation."""
-    mat = E * S - F - sigma_total
-    return jnp.linalg.inv(mat)
-
-@jit
-def _fermi_vectorized(E_array, mu, kT):
-    """JIT-compiled vectorized Fermi-Dirac distribution."""
-    # Handle zero temperature case
-    def finite_temp():
-        return 1.0 / (jnp.exp((E_array - mu) / kT) + 1.0)
-
-    def zero_temp():
-        return (E_array <= mu).astype(jnp.float32)
-
-    return jax.lax.cond(kT == 0.0, zero_temp, finite_temp)
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
@@ -837,17 +819,13 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
 ## INTEGRATION LIMIT FUNCTIONS
 # Calculate Emin using DOS
 def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES):
-    D,_ = jnp.linalg.eig(jnp.linalg.inv(S)@F)
+    D,_ = eigh(inv(S)@F)
     Emin = min(D.real.flatten())-5
     counter = 0
-    mat = Emin * S - F - jnp.array(g.sigmaTot(Emin))
-    gr = jnp.linalg.inv(mat)
-    dP = -jnp.imag(jnp.trace(gr)) / jnp.pi
+    dP = _compute_dos_at_energy(Emin, F, S, g.sigmaTot(Emin))
     while dP>tol and counter<maxN:
         Emin -= 1
-        mat = Emin * S - F - jnp.array(g.sigmaTot(Emin))
-        gr = jnp.linalg.inv(mat)
-        dP = abs(-jnp.imag(jnp.trace(gr)) / jnp.pi)
+        dP = _compute_dos_at_energy(Emin, F, S, g.sigmaTot(Emin))
         #print(Emin, dP)
         counter += 1
     if counter == maxN:
@@ -1016,7 +994,7 @@ def getFermiContact(g, ne, tol=FERMI_CALCULATION_TOL, Eminf=ENERGY_MIN, maxcycle
     # Set up infinite system from contact
     S = g.S
     F = g.F
-    orbs, _ = jnp.linalg.eig(jnp.linalg.inv(S)@F)
+    orbs, _ = eig(inv(S)@F)
     orbs = np.sort(np.real(orbs))
     fermi = (orbs[int(ne)-1] + orbs[int(ne)])/2
     Emin, N1, N2 = integralFit(F, S, g, fermi, Eminf, tol, T, maxN=maxcycles)
@@ -1067,7 +1045,7 @@ def getFermi1DContact(gSys, ne, ind=0, tol=FERMI_CALCULATION_TOL, Eminf=ENERGY_M
     Forbs = np.block([[F, tau], [tau.conj().T, F]])
     Sorbs = np.block([[S, stau], [stau.T, S]])
     gorbs = surfG(Forbs, Sorbs, [inds], [tau], [stau], eta=1e-6)
-    orbs, _ = jnp.linalg.eig(jnp.linalg.inv(Sorbs)@Forbs)
+    orbs, _ = jnp.linalg.eigh(jnp.linalg.inv(Sorbs)@Forbs)
     orbs = np.sort(np.real(orbs))
     fermi = (orbs[2*int(ne)-1] + orbs[2*int(ne)])/2
     Emin, N1, N2 = integralFit(Forbs, Sorbs, gorbs, fermi, Eminf, tol, T, maxN=maxcycles)
@@ -1114,9 +1092,7 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=ENERGY_MIN, 
         - N2: Number of real axis points
     """
     # Fermi Energy search using full contact
-    mat = Eminf * g.S - g.F - jnp.array(g.sigmaTot(Eminf))
-    gr = jnp.linalg.inv(mat)
-    dos_eminf = -jnp.imag(jnp.trace(gr)) / jnp.pi
+    dos_eminf = _compute_dos_at_energy(Eminf, g.F, g.S, g.sigmaTot(Eminf))
     print(f'Eminf DOS = {dos_eminf}')
     fermi = fermiGuess
     if N2 is None:
@@ -1157,7 +1133,8 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=ENERGY_MIN, 
             lBound = fermi
         elif dN < 0 and fermi < uBound:
             uBound = fermi
-        fermi = (uBound + lBound)/2
+        if abs(ne-Ncurr)>tol:
+            fermi = (uBound + lBound)/2
         print("DN:",dN, "Fermi:", fermi, "Bounds:", lBound, uBound)
         counter += 1
     if abs(ne - Ncurr) > tol and counter > maxcycles:
@@ -1182,7 +1159,7 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
     Ncurr = ne+0
     dE = tol
     counter = 0
-    while None in [uBound, lBound]:
+    while None in [uBound, lBound] and counter<maxcycles:
         g.setF(g.F, E, E)
         P = pMu(E)
         Ncurr = np.trace(P@g.S).real
@@ -1198,12 +1175,9 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
             E += dE
         if debug==True:
             print(f"DEBUG: Ef={Ef:.2f}, dN={ne-Ncurr:.2E}, dE={dE:.2E}")
-        mat = E * g.S - g.F - jnp.array(g.sigmaTot(E))
-        gr = jnp.linalg.inv(mat)
-        dos = -jnp.imag(jnp.trace(gr)) / jnp.pi
+        dos = _compute_dos_at_energy(E, g.S, g.F, g.sigmaTot(E))
         dE = max(2*abs(Ncurr-ne)/dos, dE)
         counter += 1
-    counter = 0
     while abs(ne - Ncurr) > conv and counter < maxcycles:
         g.setF(g.F, Ef, Ef)
         P = pMu(Ef)
@@ -1292,7 +1266,7 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
     P = pMu(E0)
     n0 = np.trace(P@g.S).real - ne
     if abs(n0) < conv:
-        return E0, delta_E, P, abs(n0)
+        return E0, conv, P, abs(n0)
 
     counter = 3
     while counter < maxcycles:
@@ -1441,6 +1415,9 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
 
     dE = step
 
+    from scipy.optimize import least_squares, minimize
+    from scipy.interpolate import PchipInterpolator
+
     while counter < maxcycles:
         # Use polynomial regression to find E where n = 0 (since we store n - ne)
         # Fit n(E) and solve for roots where n = 0
@@ -1448,12 +1425,20 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         # Determine polynomial order: use min(counter, order) to avoid overfitting
         poly_order = min(len(n_pts) - 1, order)
 
-        # Fit polynomial n(E) using least squares regression
-        # We want to find E where n(E) = 0
-        coeffs = np.polyfit(E_pts, n_pts, poly_order)
+        # PCHIP preserves monotonicity (scipy's shape-preserving cubic interpolator)
+        # It won't add spurious oscillations and respects monotonic data
+        Esort, nsort = list(zip(*sorted(zip(E_pts,n_pts))))
+        pchip = PchipInterpolator(Esort, nsort)
+        n_pts_smooth = pchip(E_pts)  # Smooth version at same x points
+    
+        # Robust polynomial fit with Huber loss
+        p0 = np.polyfit(E_pts, n_pts, poly_order) # Initial guess using np.polyfit
+        def residuals(coeffs):
+            return np.polyval(coeffs, E_pts) - n_pts_smooth
+        result = least_squares(residuals, p0, loss='huber', f_scale=ADAPTIVE_INTEGRATION_TOL)
 
         # Find roots of n(E) = 0
-        roots = np.roots(coeffs)
+        roots = np.roots(result.x)
 
         # Find root nearest to last E value (most physically reasonable)
         # Handle complex roots by taking real part
@@ -1501,7 +1486,7 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
             break
 
         if debug==True:
-            print(f"Iter {counter}: E = {E:.6f}, n-ne = {n:.3e}, dE = {dE:.3e}, order = {counter+1}")
+            print(f"Iter {counter}: E = {E:.6f}, n-ne = {n:.3e}, dE = {dE:.3e}, order = {poly_order}")
         counter += 1
 
     if counter >= maxcycles:

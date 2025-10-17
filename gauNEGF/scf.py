@@ -56,8 +56,8 @@ from gauNEGF.density import *
 
 # Use JAX functions directly
 from gauNEGF.config import (SCF_CONVERGENCE_TOL, SCF_DAMPING, SCF_MAX_CYCLES,
-                            PULAY_MIXING_SIZE, ENERGY_MIN)
-from gauNEGF.utils import fractional_matrix_power 
+                            FERMI_CALCULATION_TOL, PULAY_MIXING_SIZE, ENERGY_MIN)
+from gauNEGF.utils import fractional_matrix_power, inv, eig
 
 
 # CONSTANTS:
@@ -181,7 +181,7 @@ class NEGF(object):
         self.X = np.array(fractional_matrix_power(self.S, -0.5))
         
         # Set Emin/Emax from orbitals
-        orbs, _ = jnp.linalg.eig(self.X @ self.F @ self.X)
+        orbs, _ = eig(self.X @ self.F @ self.X)
         self.Emin = min(orbs.real)*har_to_eV - 5
         self.Emax = max(orbs.real)*har_to_eV
         self.convLevel = 9999
@@ -307,7 +307,7 @@ class NEGF(object):
         ndarray
             Array of [HOMO, LUMO] energies in eV
         """
-        orbs, _ = jnp.linalg.eig(self.X @ self.F @ self.X)
+        orbs, _ = eig(self.X @ self.F @ self.X)
         orbs = np.sort(orbs)*har_to_eV
         if self.spin=='r':
             homo_lumo = orbs[self.nae-1:self.nae+1].real
@@ -566,7 +566,7 @@ class NEGF(object):
         #Update Fermi Energy (if not constant)
         if self.updFermi:
             Nexp = self.bar.ne
-            conv = min(self.convLevel, 1e-3)
+            conv = min(self.convLevel, FERMI_CALCULATION_TOL)
             if self.spin=='r':
                 Nexp/=2
             self.fermi = bisectFermi(V,Vc,D,GamBar1+GamBar2,Nexp,conv, self.Eminf)
@@ -744,8 +744,12 @@ class NEGF(object):
         checkpoint_file = self.ifile[:-4]+"_P.mat"
         final_file = self.ifile[:-4]+"_Final.mat"
         if os.path.exists(checkpoint_file) and checkpoint:
-            print(f"Found checkpoint file {checkpoint_file}, loading...")
-            self.setDen(io.loadmat(checkpoint_file)['den'])
+            try:
+                print(f"Found checkpoint file {checkpoint_file}, loading...")
+                self.setDen(io.loadmat(checkpoint_file)['den'])
+            except Exception as e:
+                print(f"Warning: checkpoint loaded - Error: {e}")
+            
 
         #Main SCF Loop
         Loop = True
