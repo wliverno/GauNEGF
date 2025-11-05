@@ -19,13 +19,21 @@ Temperature effects are included through Fermi-Dirac statistics.
 
 # Numerical Packages
 import numpy as np
-from numpy import linalg as LA
-from scipy.linalg import fractional_matrix_power
+import jax
+import jax.numpy as jnp
+from jax import jit
+
+# Enable double precision for accurate comparisons with NumPy
+jax.config.update("jax_enable_x64", True)
+
+# Configuration
+from gauNEGF.config import (TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, 
+                            FERMI_SEARCH_CYCLES, SCF_CONVERGENCE_TOL, N_KT, ENERGY_MIN, 
+                            MAX_CYCLES, MAX_GRID_POINTS)
 from scipy.special import roots_legendre
 from scipy.special import roots_chebyu
 import matplotlib.pyplot as plt
 import warnings
-#import cupy as cp
 
 # Parallelization packages
 from multiprocessing import Pool
@@ -34,35 +42,26 @@ import os
 # Developed Packages:
 from gauNEGF.fermiSearch import DOSFermiSearch
 from gauNEGF.surfG1D import surfG
+from gauNEGF.integrate import GrInt, GrLessInt
+
+# JIT-compiled functions
+from gauNEGF.utils import inv, eig, eigh
+
+@jit
+def _compute_dos_at_energy(E, F, S, sigma_total):
+    """JIT-compiled kernel for DOS calculation at single energy."""
+    mat = E * S - F - sigma_total
+    Gr = inv(mat)
+    return -jnp.imag(jnp.trace(Gr)) / jnp.pi
+
+# Debugging for fermi search functions
+FERMI_DEBUG=False
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
 kB = 8.617e-5           # eV/Kelvin
 
-
 ## HELPER FUNCTIONS
-def Gr(F, S, g, E):
-    """
-    Calculate retarded Green's function at given energy.
-
-    Parameters
-    ----------
-    F : ndarray
-        Fock matrix
-    S : ndarray
-        Overlap matrix
-    g : surfG object
-        Surface Green's function calculator
-    E : float
-        Energy in eV
-
-    Returns
-    -------
-    ndarrayh
-        Retarded Green's function G(E) = [ES - F - Σ(E)]^(-1)
-    """
-    return LA.inv(E*S - F - g.sigmaTot(E))
-
 def fermi(E, mu, T):
     """
     Calculate Fermi-Dirac distribution.
@@ -86,28 +85,6 @@ def fermi(E, mu, T):
         return (E<=mu)*1
     else:
         return 1/(np.exp((E - mu)/kT)+1)
-
-def DOSg(F, S, g, E):
-    """
-    Calculate density of states at given energy.
-
-    Parameters
-    ----------
-    F : ndarray
-        Fock matrix
-    S : ndarray
-        Overlap matrix
-    g : surfG object
-        Surface Green's function calculator
-    E : float
-        Energy in eV
-
-    Returns
-    -------
-    float
-        Density of states at energy E
-    """
-    return -np.trace(np.imag(Gr(F,S, g, E)))/np.pi
 
 def getANTPoints(N):
     """
@@ -232,15 +209,14 @@ def integratePoints(computePointFunc, numPoints, parallel=False, numWorkers=None
         except (AttributeError, TypeError):
             # Fallback to sequential processing if parallel fails
             return sum(process_chunk(chunk) for chunk in chunks)
-
-def integratePointsAdaptiveANT(computePoint, tol=1e-3, maxN=1458, debug=False):
+def integratePointsAdaptiveANT(computePoint, tol=ADAPTIVE_INTEGRATION_TOL, maxN=MAX_GRID_POINTS, debug=False):
     """
     Adaptive integration using ANT-modified Gauss-Chebyshev quadrature (IntCompPlane subroutine from ANT.Gaussian package)
 
     Parameters
     ----------
     computePoint : callable
-        Function that computes a single integration point. Should take a weight and point and return a matrix/array.
+        Function that computes integral over a list of weights and points. Should return a matrix/array.
     tol : float, optional
         Tolerance for the adaptive integration.
     maxN : int, optional
@@ -258,12 +234,12 @@ def integratePointsAdaptiveANT(computePoint, tol=1e-3, maxN=1458, debug=False):
     P = None
     N = 2
     maxDP = 1e10
-    while N<maxN:
+    while N<=maxN:
         x, w = getANTPoints(N)
 
         if prev_x is None:
             # first level: no reuse
-            P = computePoint(x[0], w[0]) + computePoint(x[1], w[1])
+            P = computePoint(x[0:2], w[0:2])
         else:
             # mark old nodes robustly by value
             old_mask = np.isin(np.round(x, 14), np.round(prev_x, 14))
@@ -276,13 +252,10 @@ def integratePointsAdaptiveANT(computePoint, tol=1e-3, maxN=1458, debug=False):
             # scale previous integral + add only new-node contributions
             new_mask = ~old_mask
             new_P = P*ratio
-            for xi, wi in zip(x[new_mask], w[new_mask]):
-                new_P += computePoint(xi, wi)
+            new_P += computePoint(x[new_mask], w[new_mask])
             maxDP = np.max(np.abs(new_P-P))
             if debug:
-                P_debug = np.zeros_like(P)
-                for i in range(N):
-                    P_debug += computePoint(x[i], w[i])
+                P_debug = computePoint(x, w)
                 maxDP_debug = np.max(np.abs(P_debug-P))
                 maxDiff = np.max(np.abs(P_debug-new_P))
                 print(f"N={N}, nested-weight ratio ~ {ratio:.3f}, maxDP={maxDP:.3e}")
@@ -296,6 +269,7 @@ def integratePointsAdaptiveANT(computePoint, tol=1e-3, maxN=1458, debug=False):
         prev_x = x
         prev_sumW = float(np.sum(w))
         N *= 3
+    N/=3
     print(f'Adaptive integration reached full grid ({N} points), final error {maxDP:.3e}')
     return new_P
 
@@ -355,7 +329,7 @@ def density(V, Vc, D, Gam, Emin, mu):
     den = V@ prefactor @ V.conj().T
     return den
 
-def bisectFermi(V, Vc, D, Gam, Nexp, conv=1e-3, Eminf=-1e6):
+def bisectFermi(V, Vc, D, Gam, Nexp, conv=SCF_CONVERGENCE_TOL, Eminf=ENERGY_MIN):
     """
     Find Fermi energy using bisection method.
 
@@ -409,8 +383,7 @@ def bisectFermi(V, Vc, D, Gam, Nexp, conv=1e-3, Eminf=-1e6):
     return fermi
 
 ## ENERGY DEPENDENT DENSITY FUNCTIONS
-def densityRealN(F, S, g, Emin, mu, N=100, T=300, parallel=False,
-                numWorkers=None, showText=True):
+def densityRealN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True):
     """
     Calculate equilibrium density matrix using real-axis integration on a specified grid.
 
@@ -434,10 +407,6 @@ def densityRealN(F, S, g, Emin, mu, N=100, T=300, parallel=False,
         Number of integration points (default: 100)
     T : float, optional
         Temperature in Kelvin (default: 300)
-    parallel : bool, optional
-        Whether to use parallel processing (default: False)
-    numWorkers : int, optional
-        Number of worker processes for parallel mode
     showText : bool, optional
         Whether to print progress messages (default: True)
 
@@ -446,7 +415,7 @@ def densityRealN(F, S, g, Emin, mu, N=100, T=300, parallel=False,
     ndarray
         Density matrix
     """
-    nKT= 10
+    nKT = N_KT
     kT = kB*T
     Emax = mu + nKT*kT
     mid = (Emax-Emin)/2
@@ -454,21 +423,20 @@ def densityRealN(F, S, g, Emin, mu, N=100, T=300, parallel=False,
     x,w = roots_legendre(N)
     x = np.real(x)
     
-    def computePoint(i):
-        E = mid*(x[i] + 1) + Emin
-        return mid*w[i]*Gr(F, S, g, E)*fermi(E, mu, T)
+    Elist = mid*(x + 1) + Emin
+    weights = mid*w*fermi(Elist, mu, T)
     
     if showText:
-        print(f'Real integration over {N} points...')
+        print(f'Integrating {N} points along real axis...')
 
-    defInt = integratePoints(computePoint, int(N), parallel, numWorkers)
+    defInt = GrInt(F, S, g, Elist, weights)
 
     if showText:
         print('Integration done!')
     
     return (-1+0j)*np.imag(defInt)/(np.pi)
 
-def densityReal(F, S, g, Emin, mu, tol=1e-3, T=0, maxN=1000, debug=False):
+def densityReal(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, maxN=MAX_CYCLES, debug=False):
     """
     Calculate equilibrium density matrix using adaptive real-axis integration.
 
@@ -517,13 +485,12 @@ def densityReal(F, S, g, Emin, mu, tol=1e-3, T=0, maxN=1000, debug=False):
     return P
    
 
-def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=300, parallel=False,
-                numWorkers=None, showText=True):
+def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=TEMPERATURE, showText=True):
     """
     Calculate non-equilibrium density matrix using real-axis integration.
 
     Performs numerical integration for the non-equilibrium part of the density
-    matrix when a bias voltage is applied. Uses Gauss-Legendre quadrature.
+    matrix when a bias voltage is applied. Uses vectorized integration for efficiency.
 
     Parameters
     ----------
@@ -543,10 +510,6 @@ def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=300, parallel=False,
         Number of integration points (default: 100)
     T : float, optional
         Temperature in Kelvin (default: 300)
-    parallel : bool, optional
-        Whether to use parallel processing (default: False)
-    numWorkers : int, optional
-        Number of worker processes for parallel mode
     showText : bool, optional
         Whether to print progress messages (default: True)
 
@@ -555,11 +518,11 @@ def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=300, parallel=False,
     ndarray
         Non-equilibrium contribution to density matrix
     """
-    nKT= 10
+    nKT = N_KT
     kT = kB*T
     muLo = min(mu1, mu2)
     muHi = max(mu1, mu2)
-    dInt = np.sign(mu2 - mu1)
+    dInt = np.sign(mu2 - mu1) # Sign of bias voltage
     Emax = muHi + nKT*kT
     Emin = muLo - nKT*kT
     mid = (Emax-Emin)/2
@@ -567,22 +530,14 @@ def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=300, parallel=False,
     x,w = roots_legendre(N)
     x = np.real(x)
     
-    def computePoint(i):
-        E = mid*(x[i] + 1) + Emin
-        GrE = Gr(F, S, g, E)
-        GaE = GrE.conj().T
-        if ind == None:
-            sig = g.sigmaTot(E)
-        else:
-            sig = g.sigma(E, ind)
-        Gamma = 1j*(sig - sig.conj().T)
-        dFermi = fermi(E, muHi, T) - fermi(E, muLo, T)
-        return mid*w[i]*(GrE@Gamma@GaE)*dFermi*dInt
-     
+    energies = mid*(x + 1) + Emin
+    dfermi = fermi(energies, muHi, T) - fermi(energies, muLo, T)
+    weights = mid*w*dfermi*dInt
+
     if showText:
         print(f'Real integration over {N} points...')
     
-    den = integratePoints(computePoint, int(N), parallel, numWorkers)
+    den = GrLessInt(F, S, g, energies, weights, ind)
 
     if showText:
         print('Integration done!')
@@ -590,12 +545,42 @@ def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=300, parallel=False,
     return den/(2*np.pi)
 
 # Get non-equilibrium density at a single contact (ind) using a real energy grid
-def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=300):
-    nKT= 10
+def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=TEMPERATURE):
+    """
+    Calculate non-equilibrium density matrix using trapezoidal integration on a real energy grid.
+
+    Alternative implementation to densityGridN() using trapezoidal rule instead of 
+    Gauss-Legendre quadrature. Provides direct loop-based integration for comparison.
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix
+    S : ndarray
+        Overlap matrix
+    g : surfG object
+        Surface Green's function calculator
+    mu1 : float
+        Left contact chemical potential in eV
+    mu2 : float
+        Right contact chemical potential in eV
+    ind : int or None, optional
+        Contact index (None for total) (default: None)
+    N : int, optional
+        Number of integration points (default: 100)
+    T : float, optional
+        Temperature in Kelvin (default: 300)
+
+    Returns
+    -------
+    ndarray
+        Non-equilibrium contribution to density matrix
+    """
+    nKT = N_KT
     kT = kB*T
     muLo = min(mu1, mu2)
     muHi = max(mu1, mu2)
-    dInt = np.sign(mu2 - mu1)
+    dInt = np.sign(mu2 - mu1) # Sign of bias voltage
     Emax = muHi + nKT*kT
     Emin = muLo - nKT*kT
     Egrid = np.linspace(Emin, Emax, N)
@@ -604,7 +589,8 @@ def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=300):
     for i in range(1,N):
         E = (Egrid[i] + Egrid[i-1])/2
         dE = Egrid[i] - Egrid[i-1]
-        GrE = Gr(F, S, g, E)
+        mat = E * S - F - jnp.array(g.sigmaTot(E))
+        GrE = jnp.linalg.inv(mat)
         GaE = GrE.conj().T
         if ind == None:
             sig = g.sigmaTot(E)
@@ -612,17 +598,17 @@ def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=300):
             sig = g.sigma(E, ind)
         Gamma = 1j*(sig - sig.conj().T)
         dFermi = fermi(E, muHi, T) - fermi(E, muLo, T)
-        den += (GrE@Gamma@GaE)*dFermi*dE
+        den += (GrE@Gamma@GaE)*dFermi*dE*dInt
     print('Integration done!')
     
     return den/(2*np.pi)
 
-def densityGrid(F, S, g, mu1, mu2, ind=None, tol=1e-3, T=300, debug=False):
+def densityGrid(F, S, g, mu1, mu2, ind=None, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, debug=False):
     """
     Calculate non-equilibrium density matrix using real-axis integration.
 
     Performs numerical integration for the non-equilibrium part of the density
-    matrix when a bias voltage is applied. Uses ANT modified Gauss-Chebyshev quadrature.
+    matrix when a bias voltage is applied. Uses ANT-modified Gauss-Chebyshev quadrature.
 
     Parameters
     ----------
@@ -638,56 +624,47 @@ def densityGrid(F, S, g, mu1, mu2, ind=None, tol=1e-3, T=300, debug=False):
         Right contact chemical potential in eV
     ind : int or None, optional
         Contact index (None for total) (default: None)
-    N : int, optional
-        Number of integration points (default: 100)
+    tol : float, optional
+        Convergence tolerance (default: 1e-3)
     T : float, optional
         Temperature in Kelvin (default: 300)
-    parallel : bool, optional
-        Whether to use parallel processing (default: False)
-    numWorkers : int, optional
-        Number of worker processes for parallel mode
-    showText : bool, optional
-        Whether to print progress messages (default: True)
+    debug : bool, optional
+        Whether to print debug information (default: False)
 
     Returns
     -------
     ndarray
         Non-equilibrium contribution to density matrix
     """
-    nKT= 10
+    nKT = N_KT
     kT = kB*T
     muLo = min(mu1, mu2)
     muHi = max(mu1, mu2)
-    dInt = np.sign(mu2 - mu1)
+    dInt = np.sign(mu2 - mu1) # Sign of bias voltage
     Emax = muHi + nKT*kT
     Emin = muLo - nKT*kT
     mid = (Emax-Emin)/2
     den = np.array(np.zeros(np.shape(F)), dtype=complex)
     
-    def computePoint(xi, wi):
-        E = mid*(xi + 1) + Emin
-        GrE = Gr(F, S, g, E)
-        GaE = GrE.conj().T
-        if ind == None:
-            sig = g.sigmaTot(E)
-        else:
-            sig = g.sigma(E, ind)
-        Gamma = 1j*(sig - sig.conj().T)
+    def computePoint(x, w):
+        E = mid*(x + 1) + Emin
         dFermi = fermi(E, muHi, T) - fermi(E, muLo, T)
-        return mid*wi*(GrE@Gamma@GaE)*dFermi*dInt
+        weights = mid*w*dFermi*dInt
+        return GrLessInt(F, S, g, E, weights, ind)
      
     den = integratePointsAdaptiveANT(computePoint, tol=tol, debug=debug)
+    if debug:
+        print('Integration done!')
 
     return den/(2*np.pi)
 
-def densityComplexN(F, S, g, Emin, mu, N=100, T=300, parallel=False, 
-                    numWorkers=None, showText=True, method='ant'):
+def densityComplexN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True, method='ant'):
     """
     Calculate equilibrium density matrix using complex contour integration.
 
     Performs numerical integration along a complex contour that encloses the
     poles of the Fermi function. More efficient than real-axis integration
-    for equilibrium calculations.
+    for equilibrium calculations. Uses vectorized integration for efficiency.
 
     Parameters
     ----------
@@ -705,19 +682,10 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=300, parallel=False,
         Number of integration points (default: 100)
     T : float, optional
         Temperature in Kelvin (default: 300)
-    parallel : bool, optional
-        Whether to use parallel processing (default: False)
-    numWorkers : int, optional
-        Number of worker processes for parallel mode
     showText : bool, optional
         Whether to print progress messages (default: True)
     method : {'ant', 'legendre', 'chebyshev'}, optional
         Integration method to use (default: 'ant')
-    use_adaptive : bool, optional
-        If True, use dyadic adaptive integration on the contour integral. Requires
-        len(w) = 2^n + 1. Defaults to False.
-    adaptive_tol : float, optional
-        Convergence tolerance for adaptive integration (default: 1e-3)
 
     Returns
     -------
@@ -749,15 +717,15 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=300, parallel=False,
         w = 2*np.ones(N)/N
     
     #Integrate along contour
-    def computePoint(i):
-        theta = np.pi/2 * (x[i] + 1)
-        z = center + r*np.exp(1j*theta)
-        dz = 1j * r * np.exp(1j*theta)
-        return (np.pi/2)*w[i]*Gr(F, S, g, z)*fermi(z, mu, T)*dz
+    theta = np.pi/2 * (x + 1)
+    Elist = center + r*np.exp(1j*theta)
+    dz = 1j * r * np.exp(1j*theta)
+    weights = (np.pi/2)*w*fermi(Elist, mu, T)*dz
 
     if showText:
         print(f'Complex Integration over {N} points...')
-    lineInt = integratePoints(computePoint, N, parallel, numWorkers)
+
+    lineInt = GrInt(F, S, g, Elist, weights)
     
     #Add integration points for Fermi Broadening
     if T>0:
@@ -770,11 +738,9 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=300, parallel=False,
         else: # Trapezoidal rule
             x_fermi = np.linspace(-1, 1, Nbroad)
             w_fermi = 2*np.ones(Nbroad)/Nbroad
-        def computePointBroadening(i):
-            E = broadening * (x_fermi[i]) + mu
-            return broadening*w_fermi[i]*Gr(F, S, g, E)*fermi(E, mu, T)
-    
-        lineInt += integratePoints(computePointBroadening, Nbroad, parallel, numWorkers)
+        Elist = broadening * (x_fermi) + mu
+        weights = broadening*w_fermi*fermi(Elist, mu, T)
+        lineInt += GrInt(F, S, g, Elist, weights)
 
     if showText:
         print('Integration done!')
@@ -782,13 +748,13 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=300, parallel=False,
     #Return -Im(Integral)/pi, Equation 19 in 10.1103/PhysRevB.63.245407
     return (1+0j)*np.imag(lineInt)/np.pi
 
-def densityComplex(F, S, g, Emin, mu, tol=1e-3, T=300, debug=False):
+def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, debug=False):
     """
     Calculate equilibrium density matrix using complex contour integration.
 
     Performs numerical integration along a complex contour that encloses the
     poles of the Fermi function. More efficient than real-axis integration
-    for equilibrium calculations.
+    for equilibrium calculations. Uses adaptive integration.
 
     Parameters
     ----------
@@ -802,23 +768,12 @@ def densityComplex(F, S, g, Emin, mu, tol=1e-3, T=300, debug=False):
         Lower bound for integration in eV
     mu : float
         Chemical potential in eV
-    N : int, optional
-        Number of integration points (default: 100)
+    tol : float, optional
+        Convergence tolerance (default: 1e-3)
     T : float, optional
         Temperature in Kelvin (default: 300)
-    parallel : bool, optional
-        Whether to use parallel processing (default: False)
-    numWorkers : int, optional
-        Number of worker processes for parallel mode
-    showText : bool, optional
-        Whether to print progress messages (default: True)
-    method : {'ant', 'legendre', 'chebyshev'}, optional
-        Integration method to use (default: 'ant')
-    use_adaptive : bool, optional
-        If True, use dyadic adaptive integration on the contour integral. Requires
-        len(w) = 2^n + 1. Defaults to False.
-    adaptive_tol : float, optional
-        Convergence tolerance for adaptive integration (default: 1e-3)
+    debug : bool, optional
+        Whether to print debug information (default: False)
 
     Returns
     -------
@@ -838,11 +793,12 @@ def densityComplex(F, S, g, Emin, mu, tol=1e-3, T=300, debug=False):
     r = (Emax-Emin)/2
 
     # For ANT adaptive integration, compute from point-weight pairs
-    def computePoint(xi, wi):
-        theta = np.pi/2 * (xi + 1)
+    def computePoint(x, w):
+        theta = np.pi/2 * (x + 1)
         z = center + r*np.exp(1j*theta)
         dz = 1j * r * np.exp(1j*theta)
-        return (np.pi/2)*wi*Gr(F, S, g, z)*fermi(z, mu, T)*dz
+        weights = (np.pi/2)*w*dz*fermi(z, mu, T)
+        return GrInt(F, S, g, z, weights)
     
     print('Complex Contour Integration:')
     lineInt = integratePointsAdaptiveANT(computePoint, tol=tol, debug=debug)
@@ -850,9 +806,10 @@ def densityComplex(F, S, g, Emin, mu, tol=1e-3, T=300, debug=False):
     #Add integration points for Fermi Broadening
     if T>0:
         print('Integrating Fermi Broadening:')
-        def computePointBroadening(xi, wi):
-            E = broadening * (xi) + mu
-            return broadening*wi*Gr(F, S, g, E)*fermi(E, mu, T)
+        def computePointBroadening(x, w):
+            E = broadening * (x) + mu
+            weights = broadening*w*fermi(E, mu, T)
+            return GrInt(F, S, g, E, weights)
     
         lineInt += integratePointsAdaptiveANT(computePointBroadening, tol=tol, debug=debug)
 
@@ -862,14 +819,14 @@ def densityComplex(F, S, g, Emin, mu, tol=1e-3, T=300, debug=False):
 
 ## INTEGRATION LIMIT FUNCTIONS
 # Calculate Emin using DOS
-def calcEmin(F, S, g, tol=1e-5, maxN=1000):
-    D,_ = LA.eig(LA.inv(S)@F)
+def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES):
+    D,_ = eigh(inv(S)@F)
     Emin = min(D.real.flatten())-5
     counter = 0
-    dP = DOSg(F,S,g,Emin)
+    dP = _compute_dos_at_energy(Emin, F, S, g.sigmaTot(Emin))
     while dP>tol and counter<maxN:
         Emin -= 1
-        dP = abs(DOSg(F,S,g,Emin))
+        dP = _compute_dos_at_energy(Emin, F, S, g.sigmaTot(Emin))
         #print(Emin, dP)
         counter += 1
     if counter == maxN:
@@ -877,7 +834,7 @@ def calcEmin(F, S, g, tol=1e-5, maxN=1000):
     print(f'Calculated Emin: {Emin} eV, DOS = {dP:.2E}')
     return Emin
 
-def integralFit(F, S, g, mu, Eminf=-1e6, tol=1e-5, T=0, maxN=1000):
+def integralFit(F, S, g, mu, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_TOL, T=TEMPERATURE, maxN=MAX_CYCLES):
     """
     Optimize integration parameters for density calculations.
 
@@ -957,9 +914,9 @@ def integralFit(F, S, g, mu, Eminf=-1e6, tol=1e-5, T=0, maxN=1000):
 
     return Emin, Ncomplex, Nreal
 
-def integralFitNEGF(F, S, g, fermi, qV, Eminf=-1e6, tol=1e-5, T=0, maxGrid=1000):
+def integralFitNEGF(F, S, g, fermi, qV, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_TOL, T=TEMPERATURE, maxGrid=MAX_GRID_POINTS):
     """
-    Determines number of  for non-equilibrium density calculations.
+    Determines number of grid points for non-equilibrium density calculations.
 
     Same procedure as `integralFit()` but applied to `densityGrid()`
 
@@ -971,10 +928,10 @@ def integralFitNEGF(F, S, g, fermi, qV, Eminf=-1e6, tol=1e-5, T=0, maxGrid=1000)
         Overlap matrix
     g : surfG object
         Surface Green's function calculator
-    mu1 : float
-        Left contact Fermi energy in eV
-    mu2 : float
-        Right contact Fermi energy in eV
+    fermi : float
+        Equilibrium Fermi energy in eV
+    qV : float
+        Applied bias voltage in eV
     Eminf : float
         Lower bound for integration in eV (default: -1e6)
     tol : float, optional
@@ -1008,7 +965,7 @@ def integralFitNEGF(F, S, g, fermi, qV, Eminf=-1e6, tol=1e-5, T=0, maxGrid=1000)
     return N
 
 
-def getFermiContact(g, ne, tol=1e-4, Eminf=-1e6, maxcycles=1000, T=0, nOrbs=0):
+def getFermiContact(g, ne, tol=FERMI_CALCULATION_TOL, Eminf=ENERGY_MIN, maxcycles=MAX_CYCLES, T=TEMPERATURE, nOrbs=0):
     """
     Calculate Fermi energy for a contact.
 
@@ -1038,7 +995,7 @@ def getFermiContact(g, ne, tol=1e-4, Eminf=-1e6, maxcycles=1000, T=0, nOrbs=0):
     # Set up infinite system from contact
     S = g.S
     F = g.F
-    orbs, _ = LA.eig(LA.inv(S)@F)
+    orbs, _ = eig(inv(S)@F)
     orbs = np.sort(np.real(orbs))
     fermi = (orbs[int(ne)-1] + orbs[int(ne)])/2
     Emin, N1, N2 = integralFit(F, S, g, fermi, Eminf, tol, T, maxN=maxcycles)
@@ -1046,7 +1003,7 @@ def getFermiContact(g, ne, tol=1e-4, Eminf=-1e6, maxcycles=1000, T=0, nOrbs=0):
     return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, 
                         Eminf, T, tol, maxcycles, nOrbs)[0]
 
-def getFermi1DContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, T=0, maxcycles=1000):
+def getFermi1DContact(gSys, ne, ind=0, tol=FERMI_CALCULATION_TOL, Eminf=ENERGY_MIN, T=TEMPERATURE, maxcycles=MAX_CYCLES):
     """
     Calculate Fermi energy for a 1D chain contact.
 
@@ -1070,8 +1027,12 @@ def getFermi1DContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, T=0, maxcycles=1000
 
     Returns
     -------
-    float
-        Fermi energy in eV
+    tuple
+        (fermi, Emin, N1, N2) - Optimized parameters:
+        - fermi: Calculated Fermi energy in eV
+        - Emin: Lower bound for complex contour
+        - N1: Number of complex contour points
+        - N2: Number of real axis points
     """
     # Set up infinite system from contact
     F = gSys.aList[ind]
@@ -1085,7 +1046,7 @@ def getFermi1DContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, T=0, maxcycles=1000
     Forbs = np.block([[F, tau], [tau.conj().T, F]])
     Sorbs = np.block([[S, stau], [stau.T, S]])
     gorbs = surfG(Forbs, Sorbs, [inds], [tau], [stau], eta=1e-6)
-    orbs, _ = LA.eig(LA.inv(Sorbs)@Forbs)
+    orbs, _ = jnp.linalg.eigh(jnp.linalg.inv(Sorbs)@Forbs)
     orbs = np.sort(np.real(orbs))
     fermi = (orbs[2*int(ne)-1] + orbs[2*int(ne)])/2
     Emin, N1, N2 = integralFit(Forbs, Sorbs, gorbs, fermi, Eminf, tol, T, maxN=maxcycles)
@@ -1093,7 +1054,7 @@ def getFermi1DContact(gSys, ne, ind=0, tol=1e-4, Eminf=-1e6, T=0, maxcycles=1000
     return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, Eminf, T, tol, maxcycles)
 
 # Calculate the fermi energy of the surface Green's Function object
-def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, T=0, tol=1e-4, maxcycles=20, nOrbs=0):
+def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=ENERGY_MIN, T=TEMPERATURE, tol=FERMI_CALCULATION_TOL, maxcycles=MAX_CYCLES, nOrbs=0):
     """
     Calculate Fermi energy using bisection method.
 
@@ -1132,7 +1093,8 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, T=0, t
         - N2: Number of real axis points
     """
     # Fermi Energy search using full contact
-    print(f'Eminf DOS = {DOSg(g.F,g.S,g,Eminf)}')
+    dos_eminf = _compute_dos_at_energy(Eminf, g.F, g.S, g.sigmaTot(Eminf))
+    print(f'Eminf DOS = {dos_eminf}')
     fermi = fermiGuess
     if N2 is None:
         pLow = densityReal(g.F, g.S, g, Eminf, Emin, tol, T, showText=False)
@@ -1172,7 +1134,8 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, T=0, t
             lBound = fermi
         elif dN < 0 and fermi < uBound:
             uBound = fermi
-        fermi = (uBound + lBound)/2
+        if abs(ne-Ncurr)>tol:
+            fermi = (uBound + lBound)/2
         print("DN:",dN, "Fermi:", fermi, "Bounds:", lBound, uBound)
         counter += 1
     if abs(ne - Ncurr) > tol and counter > maxcycles:
@@ -1180,7 +1143,8 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=-1e6, T=0, t
     print(f'Finished after {counter} iterations, Ef = {fermi:.2f}')
     return fermi, Emin, N1, N2
 
-def calcFermiBisect(g, ne, Emin, Ef, N, tol=1e-4, conv=1e-3, maxcycles=10, T=0):
+def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI_CALCULATION_TOL, 
+                    maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE, uBound=None, lBound=None):
     """
     Calculate Fermi energy of system using bisection
     """
@@ -1190,16 +1154,14 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=1e-4, conv=1e-3, maxcycles=10, T=0):
     else:   
         pMu = lambda E: densityComplexN(g.F, g.S, g, Emin, E, N, T)
     E = Ef + 0.0
-    uBound = None
-    lBound = None
     P = None
     Ncurr = ne+0
     dE = tol
     counter = 0
-    while None in [uBound, lBound]:
-        g.setF(g.F, E, E)
-        P = pMu(E)
-        Ncurr = np.trace(P@g.S).real
+    g.setF(g.F, E, E)
+    P = pMu(E)
+    Ncurr = np.trace(P@g.S).real
+    while None in [uBound, lBound] and counter<maxcycles:
         if counter==maxcycles:
             dE = 1e3
         if Ncurr> ne:
@@ -1210,14 +1172,15 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=1e-4, conv=1e-3, maxcycles=10, T=0):
             lBound = E + 0.0
             Ef = lBound
             E += dE
-        #print(uBound, lBound, E, dE)
-        dE = max(2*abs(Ncurr-ne)/DOSg(g.F, g.S, g, E), dE)
+        if FERMI_DEBUG:
+            print(f"DEBUG: Ef={Ef:.2f}, dN={ne-Ncurr:.2E}, dE={dE:.2E}")
+        dos = _compute_dos_at_energy(E, g.S, g.F, g.sigmaTot(E))
+        dE = max(2*abs(Ncurr-ne)/dos, dE)
         counter += 1
-    counter = 0
-    while abs(ne - Ncurr) > conv and dE > conv and counter < maxcycles:
-        g.setF(g.F, Ef, Ef)
-        P = pMu(Ef)
-        Ncurr = np.trace(pMu(Ef)@g.S)
+        g.setF(g.F, E, E)
+        P = pMu(E)
+        Ncurr = np.trace(P@g.S).real
+    while abs(ne - Ncurr) > conv and counter < maxcycles:
         dN = ne-Ncurr
         if dN > 0 and Ef > lBound:
             lBound = Ef + 0.0
@@ -1225,13 +1188,20 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=1e-4, conv=1e-3, maxcycles=10, T=0):
             uBound = Ef + 0.0
         Ef = (uBound + lBound)/2
         dE = uBound - lBound
-        #print(uBound, lBound, dE, E)
+        if FERMI_DEBUG:
+            print(f"DEBUG: Ef={Ef:.2f}, dN={dN:.2E}, dE={dE:.2E}")
         counter += 1
+        if abs(dN) > conv:
+            g.setF(g.F, Ef, Ef)
+            P = pMu(Ef)
+            Ncurr = np.trace(P@g.S)
     if counter == maxcycles:
         print(f'Warning: Max cycles reached, convergence = {abs(Ncurr-ne):.2E}')
     return Ef, dE, P
 
-def calcFermiSecant(g, ne, Emin, Ef, N, tol=1e-4, conv=1e-3, maxcycles=10, T=0):
+def calcFermiSecant(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, 
+                    conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, 
+                    T=TEMPERATURE):
     """
     Calculate Fermi energy using Secant method, updating dE at each step
     """
@@ -1245,12 +1215,13 @@ def calcFermiSecant(g, ne, Emin, Ef, N, tol=1e-4, conv=1e-3, maxcycles=10, T=0):
     nCurr = np.trace(P@g.S).real
     dE = conv
     counter = 0
-    while abs(nCurr-ne) > conv and abs(dE) > conv and counter < maxcycles:
+    while abs(nCurr-ne) > conv and counter < maxcycles:
         Ef += dE
         g.setF(g.F, Ef, Ef)
         P = pMu(Ef)
         nNext = np.trace(P@g.S).real
-        #print(Ef, dE, nCurr, nNext)
+        if FERMI_DEBUG:
+            print(f"DEBUG: Ef={Ef:.2f}, dN={nNext-ne:.2E}, dE={dE:.2E}")
         if abs(nNext - nCurr)<1e-10:
             print('Warning: change in ne low, reducing step size')
             dE *= 0.1
@@ -1259,14 +1230,15 @@ def calcFermiSecant(g, ne, Emin, Ef, N, tol=1e-4, conv=1e-3, maxcycles=10, T=0):
         dE = dE*((ne - nCurr)/(nNext-nCurr)) - dE
         nCurr = nNext + 0.0
         counter += 1
-        #print(Ef, dE)
     
     Ef += dE  
     if counter == maxcycles:
         print(f'Warning: Max cycles reached, convergence = {abs(nCurr-ne):.2E}')
-    return Ef, dE, P
+    return Ef, dE, P, abs(nCurr-ne)
 
-def calcFermiMuller(g, ne, Emin, Ef, N, tol=1e-4, conv=1e-3, maxcycles=10, T=0):
+def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, 
+                    conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, 
+                    T=TEMPERATURE):
     """
     Calculate Fermi energy using Muller's method, starting with 3 initial points
     """
@@ -1280,17 +1252,27 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=1e-4, conv=1e-3, maxcycles=10, T=0):
     # Initialize three points around initial guess
     E2 = Ef
     E1 = E2 - conv
-    E0 = E1 - conv
+    E0 = E2 + conv
+
+    uBound = None
+    lBound = None
 
     # Get initial density matrices and electron counts
-    g.setF(g.F, E2, E2)
-    n2 = np.trace(pMu(E2)@g.S).real - ne
-    g.setF(g.F, E1, E1)
-    n1 = np.trace(pMu(E1)@g.S).real - ne
-    g.setF(g.F, E0, E0)
-    n0 = np.trace(pMu(E0)@g.S).real - ne
+    nList = []
+    for E in [E2, E1, E0]:
+        g.setF(g.F, E, E)
+        P = pMu(E)
+        n = np.trace(P@g.S).real - ne
+        if n > 0:
+            uBound = min(uBound, E) if uBound is not None else E
+        elif n < 0:
+            lBound = max(lBound, E) if lBound is not None else E
+        if abs(n) < conv:
+            return E, 0, P, abs(n), uBound, lBound
+        nList.append(n)
+    n2, n1, n0 = nList
 
-    counter = 0
+    counter = 3
     while counter < maxcycles:
         # Calculate differences between points
         h0 = E0 - E2
@@ -1321,23 +1303,213 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=1e-4, conv=1e-3, maxcycles=10, T=0):
             n0, n1 = n1, n0
 
         if abs(Enext - E2) < abs(Enext - E1):
-            E2, E1 = E1, E2
-            n2, n1 = n1, n2
+            E1 = E2
+            n1 = n2
 
         E2 = Enext
         g.setF(g.F, E2, E2)
         P = pMu(E2)
         n2 = np.trace(P@g.S).real - ne
 
-        # Check both relative error and absolute convergence
-        if abs(n2) < conv or abs(dE) < conv:
+        if n2 > 0:
+            uBound = min(uBound, E2) if uBound is not None else E2
+        elif n2 < 0:
+            lBound = max(lBound, E2) if lBound is not None else E2
+
+        # Check convergence
+        if abs(n2) < conv:
             break
 
-        #print("E0 - ", E0, n0, "E1 - ", E1, n1, "E2 - ", E2, n2, " dE ", dE)
+        if FERMI_DEBUG:
+            print(f"DEBUG: Ef={E2:.2f}, dN={n2:.2E}, dE={dE:.2E}")
         counter += 1
 
     if counter == maxcycles:
         print(f'Warning: Max cycles reached, convergence = {abs(n2):.2E}')
 
-    return E2, dE, P
+    return E2, dE, P, abs(n2), uBound, lBound
+
+def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
+                    conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES,
+                    T=TEMPERATURE, order=3):
+    """
+    Calculate Fermi energy using polynomial regression fit with accumulating points.
+
+    Uses all accumulated points to fit a polynomial of specified order through (n, E) pairs
+    using least squares regression (polyfit) and finds where n = ne (target electron count).
+
+    Parameters
+    ----------
+    g : surfG object
+        Surface Green's function calculator
+    ne : float
+        Target number of electrons
+    Emin : float
+        Lower bound for complex contour in eV
+    Ef : float
+        Initial guess for Fermi energy in eV
+    N : int or None
+        Number of integration points (None for adaptive)
+    tol : float, optional
+        Tolerance for integration (default: 1e-5)
+    conv : float, optional
+        Convergence criterion for electron count (default: 1e-3)
+    maxcycles : int, optional
+        Maximum number of iterations (default: 20)
+    T : float, optional
+        Temperature in Kelvin (default: 300)
+    order : int, optional
+        Order of polynomial fit (default: 3)
+
+    Returns
+    -------
+    tuple
+        (Ef, dE, P, error) - Calculated Fermi energy, last energy step, density matrix, and final error
+
+    Notes
+    -----
+    This method builds up a history of (n, E) points and uses polynomial regression
+    to fit an inverse polynomial (E as a function of n) to find E at n = ne.
+    Uses numpy.polyfit for regression and numpy.roots to find the solution.
+    Polynomial order is min(counter, order) to avoid overfitting with few points.
+    """
+    assert ne < len(g.F), "Number of electrons cannot exceed number of basis functions!"
+
+    if N is None:
+        pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, tol, T)
+    else:
+        pMu = lambda E: densityComplexN(g.F, g.S, g, Emin, E, N, T)
+
+    # Lists to store history of points
+    E_pts = []
+    n_pts = []
+    
+    uBound = None
+    lBound = None
+
+    # Initialize with first point
+    E = Ef
+    g.setF(g.F, E, E)
+    P = pMu(E)
+    n = np.trace(P@g.S).real - ne
+
+    if abs(n) < conv:
+        return E, 0, P, abs(n)
+
+    E_pts.append(E)
+    n_pts.append(n)
+
+    # Enforce monotonicity: Higher E -> Higher N-ne
+    step = conv*10
+    n_first = n
+    counter = 1
+    while counter < maxcycles:
+        E = Ef + step
+        g.setF(g.F, E, E)
+        P = pMu(E)
+        n = np.trace(P@g.S).real - ne
+        if n > 0:
+            uBound = min(uBound, E) if uBound is not None else E
+        elif n < 0:
+            lBound = max(lBound, E) if lBound is not None else E
+        if abs(n) < conv:
+            return E, step, P, abs(n), uBound, lBound
+
+        # Check if we have a meaningful difference from first point
+        if n - n_first > 0:
+            break
+
+        # Otherwise increase step size and try again
+        step *= 10
+        counter += 1
+        if FERMI_DEBUG:
+            print(f'Warning: Tried Ef = {E:2f} eV (too close to {Ef:2f} to get accurate dN {n-n_first:.2E})')
+
+    E_pts.append(E)
+    n_pts.append(n)
+
+    dE = step
+
+    from scipy.optimize import least_squares, minimize
+    from scipy.interpolate import PchipInterpolator
+
+    while counter < maxcycles:
+        # Use polynomial regression to find E where n = 0 (since we store n - ne)
+        # Fit n(E) and solve for roots where n = 0
+
+        # Determine polynomial order: use min(counter, order) to avoid overfitting
+        poly_order = min(len(n_pts) - 1, order)
+
+        # PCHIP preserves monotonicity (scipy's shape-preserving cubic interpolator)
+        # It won't add spurious oscillations and respects monotonic data
+        Esort, nsort = list(zip(*sorted(zip(E_pts,n_pts))))
+        pchip = PchipInterpolator(Esort, nsort)
+        n_pts_smooth = pchip(E_pts)  # Smooth version at same x points
+    
+        # Robust polynomial fit with Huber loss
+        p0 = np.polyfit(E_pts, n_pts, poly_order) # Initial guess using np.polyfit
+        def residuals(coeffs):
+            return np.polyval(coeffs, E_pts) - n_pts_smooth
+        result = least_squares(residuals, p0, loss='huber', f_scale=ADAPTIVE_INTEGRATION_TOL)
+
+        # Find roots of n(E) = 0
+        roots = np.roots(result.x)
+
+        # Find root nearest to last E value (most physically reasonable)
+        # Handle complex roots by taking real part
+        root_distances = np.abs(roots - E_pts[-1])
+        nearest_idx = np.argmin(root_distances)
+        E_next = roots[nearest_idx].real
+    
+        # Enforce monotonicity: Higher E -> higher N 
+        # If N-nE > 0: need lower E, so E_next must be < E_pts[-1]
+        # If N-nE < 0: need higher E, so E_next must be > E_pts[-1]
+        if n_pts[-1] > 0 and E_next > E_pts[-1]:
+            # Polynomial violated monotonicity - discard it and step in correct direction
+            E_next = E_pts[-1] - abs(dE) * 10
+            # Remove the last point that led to bad interpolation
+            E_pts.pop()
+            n_pts.pop()
+            counter -= 1  # Don't count this as a valid iteration
+            if FERMI_DEBUG:
+                print('Warning: monotonicity exception corrected!')
+        elif n_pts[-1] < 0 and E_next < E_pts[-1]:
+            # Polynomial violated monotonicity - discard it and step in correct direction
+            E_next = E_pts[-1] + abs(dE) * 10
+            # Remove the last point that led to bad interpolation
+            E_pts.pop()
+            n_pts.pop()
+            counter -= 1  # Don't count this as a valid iteration
+            if FERMI_DEBUG:
+                print('Warning: monotonicity exception corrected!')
+
+        # Calculate new point
+        E = E_next
+        g.setF(g.F, E, E)
+        P = pMu(E)
+        n = np.trace(P@g.S).real - ne
+        if n > 0:
+            uBound = min(uBound, E) if uBound is not None else E
+        elif n < 0:
+            lBound = max(lBound, E) if lBound is not None else E
+
+        # Update history
+        E_pts.append(E)
+        n_pts.append(n)
+
+        # Calculate step size for reporting
+        dE = E - E_pts[-2]
+
+        # Check convergence
+        if abs(n) < conv:
+            break
+
+        if FERMI_DEBUG:
+            print(f"Iter {counter}: E = {E:.6f}, n-ne = {n:.3e}, dE = {dE:.3e}, order = {poly_order}")
+        counter += 1
+
+    if counter >= maxcycles:
+        print(f'Warning: Max cycles reached, convergence = {abs(n):.2E}')
+
+    return E, dE, P, abs(n), uBound, lBound
 

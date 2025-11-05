@@ -1,19 +1,19 @@
 import numpy as np
-import numpy.linalg as LA
-from scipy.linalg import fractional_matrix_power
-from scipy import io
-import matplotlib.pyplot as plt
+import jax
+import jax.numpy as jnp
 
-from gauopen import QCOpMat as qco
-from gauopen import QCBinAr as qcb
-from gauopen import QCUtil as qcu
+# Enable double precision for accurate comparisons with NumPy
+jax.config.update("jax_enable_x64", True)
+
+# Use JAX functions directly
+from scipy import io
 
 from gauNEGF.matTools import *
-from gauNEGF.scf import NEGF
 from gauNEGF.scfE import NEGFE
 from gauNEGF.surfG1D import surfG
 from gauNEGF.density import *
 from gauNEGF.transport import *
+from gauNEGF.utils import fractional_matrix_power
 
 har_to_eV = 27.211386
 
@@ -27,7 +27,7 @@ bar.update(model='b3lyp', basis='lanl2dz', toutput='out.log',dofock="scf")
 S = np.array(bar.matlist['OVERLAP'].expand())
 P = np.array(bar.matlist['ALPHA SCF DENSITY MATRIX'].expand())
 F = np.array(bar.matlist['ALPHA FOCK MATRIX'].expand())*har_to_eV
-X = np.array(fractional_matrix_power(S, -0.5))
+X = fractional_matrix_power(S, -0.5)
 H = np.real(X@F@X)
 
 # Cut out middle 2 Si atoms to use for generation of infinite chain
@@ -44,14 +44,14 @@ print('Coherent transport for non-orth case')
 g = surfG(F, S, [contactInds, onsiteInds], eta=1e-4) #Added broadening to speed up convergence
 fermi = getFermiContact(g, ne)
 Elist = np.linspace(-5, 5, 1000)
-T = cohTransE(Elist+fermi, F, S, g)
+T = calculate_transmission(F, S, SigmaCalculator(g), Elist+fermi)
 
 # Transport calculations for non-orthogonal case
 print('Coherent transport for orth case')
 g = surfG(H, np.eye(len(H)), [contactInds, onsiteInds])
 fermi = getFermiContact(g, ne)
 Elist = np.linspace(-5, 5, 1000)
-Torth = cohTransE(Elist+fermi, H, np.eye(len(H)), g)
+Torth = calculate_transmission(H, np.eye(len(H)), SigmaCalculator(g), Elist+fermi)
 
 io.savemat('SiNanowire_TnoSCF.mat', {'Elist':Elist, 'fermi':fermi, 'T':T, 'Torth':Torth})
 
@@ -60,13 +60,12 @@ io.savemat('SiNanowire_TnoSCF.mat', {'Elist':Elist, 'fermi':fermi, 'T':T, 'Torth
 print(' ====== PART 2 ====== ')
 negf = NEGFE(fn='Si2', func='b3lyp', basis='lanl2dz')
 inds = negf.setContact1D([[1],[2]], eta=1e-4) #Again, some broadening to speed up convergence
-negf.setVoltage(0, fermiMethod='bisect')
+negf.setVoltage(0)
 # This type of contact is unstable, setting a low damping value
-negf.setIntegralLimits(512, 128, Emin=-24)
 negf.SCF(1e-2, 0.005, 200)
 negf.saveMAT('SiNanowire_ESCF.mat')
 
-Torth = cohTransE(Elist+negf.fermi, negf.F*har_to_eV, negf.S, negf.g)
+Torth = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist+negf.fermi)
 io.savemat('SiNanowire_TESCF.mat', {'Elist':Elist, 'fermi':negf.fermi, 'T':T})
 
 
@@ -74,6 +73,6 @@ inds = negf.setContact1D([[1],[2]], T=300, eta=1e-4)
 negf.SCF(1e-3, 0.002, 200)
 negf.saveMAT('SiNanowire_ESCF_300K.mat')
 
-Torth = cohTransE(Elist+negf.fermi, negf.F*har_to_eV, negf.S, negf.g)
+Torth = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist+negf.fermi)
 io.savemat('SiNanowire_TESCF_300K.mat', {'Elist':Elist, 'fermi':negf.fermi, 'T':T})
 

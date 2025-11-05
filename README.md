@@ -26,7 +26,7 @@ Note: This package requires a licensed copy of Gaussian quantum chemistry softwa
 - Surface Green's function calculations using Bethe lattice approach
 - Transport calculations for molecular junctions
 - Support for spin-polarized calculations
-- Parallel processing capabilities
+- JAX framework integration for parallelization and GPU acceleration
 
 ## Requirements
 
@@ -34,9 +34,31 @@ Note: This package requires a licensed copy of Gaussian quantum chemistry softwa
 - gauopen 3.0.0 Python interface for Gaussian
 
 ### Python Dependencies
-- numpy
+- numpy<=1.26 (required for gauopen-3.0.0 compatibility)
 - scipy
 - matplotlib
+- jax (for parallelization and GPU support)
+
+### JAX Installation
+JAX can be installed with or without CUDA support:
+
+**CPU-only installation:**
+```bash
+pip install jax
+```
+
+**NVIDIA GPU installation (with CUDA):**
+```bash
+pip install jax[cuda12]  # For CUDA 12
+# or
+pip install jax[cuda11]  # For CUDA 11
+```
+
+JAX provides:
+- Automatic parallelization with `vmap` and `pmap`
+- JIT compilation for optimized performance
+- GPU acceleration for large matrix operations
+- Automatic differentiation capabilities
 
 ## Installation
 
@@ -47,6 +69,12 @@ cd GauNEGF
 
 # Install using pip
 pip install -e .
+
+# Install JAX (CPU-only)
+pip install jax
+
+# Or install JAX with CUDA support for GPU acceleration
+pip install jax[cuda12]  # For CUDA 12
 ```
 
 ## Quick Start
@@ -58,17 +86,18 @@ from gauNEGF import scf, transport
 negf = scf.NEGF("molecule", basis="lanl2dz", func="b3pw91")
 
 # Set contacts - left contact on atom 1, right contact on atom 2
+# Default contacts: energy independent, Gamma=0.2eV
 negf.setContacts([1], [2])
 
 # Set voltage bias
 negf.setVoltage(0.1)  # 0.1V bias
 
 # Run SCF calculation
-negf.SCF(1e-3, 0.02) # convergence @ 1e-3, damping=0.02
+negf.SCF(1e-3) # convergence @ 1e-3
 
 # Calculate current
-I = transport.quickCurrent(negf.F, negf.S, negf.sig1, negf.sig2, negf.fermi, negf.qV)
-
+harToEV = 27.211386 # Fock matrix uses Hartree units, all others use eV
+I = transport.current(negf.F*harToEV, negf.S, negf.sig1, negf.sig2, negf.fermi, negf.qV)
 ```
 
 ## Documentation
@@ -76,6 +105,42 @@ I = transport.quickCurrent(negf.F, negf.S, negf.sig1, negf.sig2, negf.fermi, neg
 Full API documentation with examples has been compiled and deployed with Github Pages: [https://wliverno.github.io/GauNEGF/](https://wliverno.github.io/GauNEGF/)
 
 For usage examples, see the files in the `examples/` directory.
+
+## Configuration
+
+GauNEGF uses a centralized configuration system for default parameters. All default values can be customized globally by modifying the configuration:
+
+```python
+from gauNEGF import config
+
+# View current defaults
+print(f"Default temperature: {config.TEMPERATURE} K")
+print(f"Default SCF tolerance: {config.SCF_CONVERGENCE_TOL}")
+
+```
+
+### Available Configuration Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `TEMPERATURE` | 0.0 | Temperature in Kelvin for Fermi-Dirac statistics |
+| `ETA` | 1e-9 | Broadening parameter in eV |
+| `ENERGY_STEP` | 0.001 | Default energy step size in eV |
+| `ADAPTIVE_INTEGRATION_TOL` | 1e-3 | Tolerance for adaptive integration |
+| `FERMI_CALCULATION_TOL` | 1e-5 | Tolerance for Fermi energy calculations |
+| `FERMI_SEARCH_CYCLES` | 10 | Number of cycles to run search before returning |
+| `SCF_CONVERGENCE_TOL` | 1e-5 | SCF convergence tolerance |
+| `SURFACE_GREEN_CONVERGENCE` | 1e-5 | Surface Green's function convergence |
+| `N_KT` | 10 | Number of kT for integration limits |
+| `ENERGY_MIN` | -1e6 | Lower bound for energy integration in eV |
+| `MAX_CYCLES` | 1000 | Maximum iteration cycles |
+| `MAX_GRID_POINTS` | 1000 | Maximum number of grid points |
+| `SCF_DAMPING` | 0.02 | SCF damping parameter |
+| `SCF_MAX_CYCLES` | 100 | Maximum SCF cycles |
+| `PULAY_MIXING_SIZE` | 4 | Number of iterations for Pulay mixing |
+| `SURFACE_RELAXATION_FACTOR` | 0.1 | Relaxation factor for surface calculations |
+
+These parameters affect all calculations unless explicitly overridden in function calls.
 
 ## Citation
 

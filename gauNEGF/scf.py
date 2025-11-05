@@ -36,19 +36,28 @@ References
 
 # Python packages
 import numpy as np
-from scipy import linalg as LA
-from scipy.linalg import fractional_matrix_power
+import numpy.linalg as LA
+import jax
+import jax.numpy as jnp
 from scipy import io
 import os
 import time
 import matplotlib.pyplot as plt
+
+# Enable double precision for accurate comparisons with NumPy
+jax.config.update("jax_enable_x64", True)
 
 # Gaussian interface packages
 from gauopen import QCBinAr as qcb
 
 # Developed packages
 from gauNEGF.matTools import *
-from gauNEGF.density import * 
+from gauNEGF.density import *
+
+# Use JAX functions directly
+from gauNEGF.config import (SCF_CONVERGENCE_TOL, SCF_DAMPING, SCF_MAX_CYCLES,
+                            FERMI_CALCULATION_TOL, PULAY_MIXING_SIZE, ENERGY_MIN)
+from gauNEGF.utils import fractional_matrix_power, inv, eig
 
 
 # CONSTANTS:
@@ -122,7 +131,7 @@ class NEGF(object):
 
     """
 
-    def __init__(self, fn, basis="chkbasis", func="hf", spin="r", fullSCF=True, route=None, section=None, nPulay=4):
+    def __init__(self, fn, basis="chkbasis", func="hf", spin="r", fullSCF=True, route=None, section=None, nPulay=PULAY_MIXING_SIZE):
         """
         Initialize NEGF calculator and run initial DFT calculation.
 
@@ -146,7 +155,7 @@ class NEGF(object):
         self.Total_E_Old=9999.0;
         
         #Default Integration Limits
-        self.Eminf = -1e5
+        self.Eminf = ENERGY_MIN
         self.fSearch = None
         self.fermi = None
         self.updFermi = False
@@ -172,7 +181,7 @@ class NEGF(object):
         self.X = np.array(fractional_matrix_power(self.S, -0.5))
         
         # Set Emin/Emax from orbitals
-        orbs, _ = LA.eig(self.X@self.F@self.X)
+        orbs, _ = eig(self.X @ self.F @ self.X)
         self.Emin = min(orbs.real)*har_to_eV - 5
         self.Emax = max(orbs.real)*har_to_eV
         self.convLevel = 9999
@@ -231,8 +240,8 @@ class NEGF(object):
             
         else:
             print('Using default Harris DFT guess to initialize...')
-            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="GUESS",chkname=self.chkfile, miscroute=self.otherRoute, add_section=section)
-            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock=True, miscroute=self.otherRoute, add_section=section)
+            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="GUESS",chkname=self.chkfile, miscroute=self.otherRoute, add_section=self.section)
+            self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock=True, miscroute=self.otherRoute, add_section=self.section)
             print("Done!")
             self.F, self.locs = getFock(self.bar, self.spin)
     
@@ -249,7 +258,7 @@ class NEGF(object):
         float
             Total number of electrons
         """
-        nOcc =  np.real(np.trace(self.P@self.S))
+        nOcc =  np.real(np.trace(self.P @ self.S))
         if self.spin == 'r':
             self.nelec = 2*nOcc
         else:
@@ -258,12 +267,12 @@ class NEGF(object):
 
     def setFock(self, F_):
         """
-        Set the Fock matrix, converting from eV to atomic units.
+        Set the Fock matrix, converting from Hartree to eV units.
 
         Parameters
         ----------
         F_ : ndarray
-            Fock matrix in Hartree units
+            Fock matrix in eV units
         """
         self.F = np.array(F_)/har_to_eV
 
@@ -298,7 +307,7 @@ class NEGF(object):
         ndarray
             Array of [HOMO, LUMO] energies in eV
         """
-        orbs, _ = LA.eig(self.X@self.F@self.X)
+        orbs, _ = eig(self.X @ self.F @ self.X)
         orbs = np.sort(orbs)*har_to_eV
         if self.spin=='r':
             homo_lumo = orbs[self.nae-1:self.nae+1].real
@@ -374,9 +383,9 @@ class NEGF(object):
         else:
             vecNorm = vec/dist
             field = -1*vecNorm*qV*V_to_au/(dist*0.0001)
-        self.bar.scalar("X-EFIELD", int(field[0]))
-        self.bar.scalar("Y-EFIELD", int(field[1]))
-        self.bar.scalar("Z-EFIELD", int(field[2]))
+        self.bar.scalar("X-EFIELD", round(field[0]))
+        self.bar.scalar("Y-EFIELD", round(field[1]))
+        self.bar.scalar("Z-EFIELD", round(field[2]))
         if not self.updFermi:
             print("E-field set to "+str(LA.norm(field))+" au")
     
@@ -550,14 +559,14 @@ class NEGF(object):
         GamBar2 = X @ self.Gam2 @ X
         
         
-        D,V = LA.eig(np.array(Fbar))
-        Vc = LA.inv(V.conj().T)
+        D,V = jnp.linalg.eig(np.array(Fbar))
+        Vc = jnp.linalg.inv(V.conj().T)
           
                 
         #Update Fermi Energy (if not constant)
         if self.updFermi:
             Nexp = self.bar.ne
-            conv = min(self.convLevel, 1e-3)
+            conv = min(self.convLevel, FERMI_CALCULATION_TOL)
             if self.spin=='r':
                 Nexp/=2
             self.fermi = bisectFermi(V,Vc,D,GamBar1+GamBar2,Nexp,conv, self.Eminf)
@@ -565,7 +574,7 @@ class NEGF(object):
             print(f'Fermi Energy set to {self.fermi:.2f} eV')
 
         #Integrate to get density matrix
-        if self.mu1 != self.mu2:
+        if self.mu1 == self.mu2:
             P = density(V, Vc, D, GamBar1+GamBar2, self.Eminf, self.fermi)
         else:
             P1 = density(V, Vc, D, GamBar1, self.Eminf, self.mu1)
@@ -574,7 +583,7 @@ class NEGF(object):
         
         # Calculate Level Occupation, Lowdin TF,  Return
         pshift = V.conj().T @ P @ V
-        self.P = X@P@X
+        self.P = X @ P @ X
         occList = np.diag(np.real(pshift)) 
         EList = np.array(np.real(D)).flatten()
         inds = np.argsort(EList)
@@ -679,7 +688,7 @@ class NEGF(object):
 
     # Main SCF loop, runs Fock <-> Density cycle until convergence reached
     # Convergence criteria: dE, RMSDP, and MaxDP < conv, or maxcycles reached
-    def SCF(self, conv=1e-5, damping=0.02, maxcycles=100, checkpoint=True, pulay=True):
+    def SCF(self, conv=SCF_CONVERGENCE_TOL, damping=SCF_DAMPING, maxcycles=SCF_MAX_CYCLES, checkpoint=True, pulay=True):
         """
         Run self-consistent field calculation until convergence.
 
@@ -735,8 +744,12 @@ class NEGF(object):
         checkpoint_file = self.ifile[:-4]+"_P.mat"
         final_file = self.ifile[:-4]+"_Final.mat"
         if os.path.exists(checkpoint_file) and checkpoint:
-            print(f"Found checkpoint file {checkpoint_file}, loading...")
-            self.setDen(io.loadmat(checkpoint_file)['den'])
+            try:
+                print(f"Found checkpoint file {checkpoint_file}, loading...")
+                self.setDen(io.loadmat(checkpoint_file)['den'])
+            except Exception as e:
+                print(f"Warning: checkpoint loaded - Error: {e}")
+            
 
         #Main SCF Loop
         Loop = True
@@ -827,5 +840,5 @@ class NEGF(object):
                   "S": self.S, "fermi": self.fermi, "qV": self.qV, 
                   "spin": self.spin, "den": self.P, "conv": self.convLevel}
         io.savemat(matfile, matdict)
-        return self.X@self.F@self.X
+        return self.X @ self.F @ self.X
 

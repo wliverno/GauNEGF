@@ -72,23 +72,24 @@ SCF Convergence
 
    .. code-block:: python
    
-       # Start with conservative mixing
-       negf.SCF(damping=0.005, maxcycles=200)
+       # Start with default mixing values (values over 0.05 will be unstable!)
+       negf.SCF(damping=0.02, maxcycles=200)
        
-       # Increase if convergence is slow
-       negf.runSCF(mix=0.02, maxcycles=100)
+       # Lower mixing if SCF is unstable
+       negf.SCF(damping=0.005, maxcycles=400)
        
-       # Values over 0.05 will be unstable!
+       # turn off pulay mixing if cyclical convergence values are observed (convergence will take longer)
+       negf.SCF(damping=0.02, maxcycles=1000, pulay=False)
 
 2. **Pulay Mixing**
 
    .. code-block:: python
    
        # Pulay mixing as implemented works well
-       # Increase nPulay if you have cyclical convergence values
+       # Increasing nPulay can increase convergence speed for difficult systems
        negf = NEGF(fn='system', nPulay=9)
-       # Note: increasing nPulay will have a similar effect as
-       # lowering mixing in the SCF cycle
+       # Side effect may be instability, consider setting pulay=False if stability is an issue
+       negf.SCF(damping=0.02, maxcycles=1000, pulay=False)
 
 3. **Change Initial Wavefunction Guess**
 
@@ -101,22 +102,22 @@ SCF Convergence
 Integration Parameters
 ~~~~~~~~~~~~~~~~~~
 
-Note that integration is only used by the NEGFE() class:
+Note that integration is only used by the NEGFE() class and by default is adaptive:
 
-1. **Automatic Integration Limits***
+1. **Adaptive Integration used by default***
 
+Change adapative integration tolerance in config.py, which is calculated as the maximum density matrix difference between two consecutive SCF cycles:
    .. code-block:: python
    
-       # tol = DOS cutoff value for Emin and
-       # limit to MaxDP for density generation
-       negf.integralCheck(tol=1e-4)
+      # Convergence Tolerances
+      ADAPTIVE_INTEGRATION_TOL = 1e-3     # Adaptive integration tolerance
 
-2. **Manually Set Integration Limits***
+2. **Manually Set Integration Grid***
 
    .. code-block:: python
    
        # Set grid size and Emin
-       negf.setIntegrationLimits(
+       negf.setIntegralLimits(
             N1=100, #Integration from Emin to mu
             N2=50, #Integration from Eminf to Emin
             Emin=-500
@@ -130,24 +131,6 @@ Note that integration is only used by the NEGFE() class:
        # Include finite temperature (300 Kelvin) 
        # even for energy-independent contacts
        negf.setSigma([1], [2], sig=-0.05j, T=300)
-
-Troubleshooting Guide
-------------------
-
-Common Issues
-~~~~~~~~~~~
-
-1. **SCF Convergence**
-
-   * Decrease mixing parameter
-   * Check Fermi level shifts over SCF cycles
-   * Check for unreasonable geometries
-
-2. **Transport Results**
-
-   * Verify energy range applied
-   * Start with simple energy independent contact
-   * Compare with similar systems
 
 Validation Checks
 ~~~~~~~~~~~~~~

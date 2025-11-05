@@ -1,42 +1,14 @@
-"""
-Surface Green's function implementation for 1D chain contacts.
-
-This module provides a 1D chain implementation for modeling semi-infinite
-contacts in quantum transport calculations. It supports three usage patterns:
-
-a) Fully automatic extraction from Fock matrix:
-   surfG1D(F, S, [[contact1], [contact2]], [[contact1connection], [contact2connection]])
-   - All parameters extracted from F/S using contact and connection indices
-
-b) Fock matrix with custom coupling:
-   surfG1D(F, S, [[contact1], [contact2]], [tau1, tau2], [stau1, stau2])
-   - Contact parameters from F/S, but with custom coupling matrices
-
-c) Fully specified contacts:
-   surfG1D(F, S, [[contact1], [contact2]], [tau1, tau2], [stau1, stau2],
-          [alpha1, alpha2], [salpha1, salpha2], [beta1, beta2], [sbeta1, sbeta2])
-   - All contact parameters specified manually
-
-The implementation uses an iterative scheme to calculate surface Green's
-functions for 1D chain contacts, with support for both manual parameter
-specification and automatic extraction from DFT calculations.
-"""
-
 # Python packages
-import numpy as np
-from numpy import linalg as LA
-from scipy.linalg import fractional_matrix_power
-import time
-import matplotlib.pyplot as plt
-from numpy import savetxt
+import jax
+import jax.numpy as np
+import jax.lax as lax
+from jax import jit
 
-# Gaussian interface packages
-from gauopen import QCOpMat as qco
-from gauopen import QCBinAr as qcb
-from gauopen import QCUtil as qcu
+# Configuration
+from gauNEGF.config import (ETA, SURFACE_GREEN_CONVERGENCE, SURFACE_RELAXATION_FACTOR)
+from gauNEGF.utils import fractional_matrix_power, inv
 
 #Constants
-kB = 8.617e-5           # eV/Kelvin
 
 class surfG:
     """
@@ -108,7 +80,7 @@ class surfG:
     gPrev : list
         Previous surface Green's functions for convergence
     """
-    def __init__(self, Fock, Overlap, indsList, taus=None, staus=None, alphas=None, aOverlaps=None, betas=None, bOverlaps=None, eta=1e-9):
+    def __init__(self, Fock, Overlap, indsList, taus=None, staus=None, alphas=None, aOverlaps=None, betas=None, bOverlaps=None, eta=ETA):
         """
         Initialize the surface Green's function calculator.
 
@@ -154,23 +126,23 @@ class surfG:
         self.F = np.array(Fock)
         self.S = np.array(Overlap)
         self.X = np.array(fractional_matrix_power(Overlap, -0.5))
-        self.indsList = indsList
-        self.poleList = len(indsList)*[np.array([], dtype=complex)]
-        self.Egrid = len(indsList)*[np.array([], dtype=complex)]
-        
+        # Keep indsList as Python list - loop unrolls with concrete indices
+        self.indsList = [np.array(inds) for inds in indsList]
+
         # Set Contact Coupling
         if taus is None:
-            taus = [indsList[-1], indsList[0]]
+            taus = [self.indsList[-1], self.indsList[0]]
+        taus = [np.array(tau) for tau in taus]
         if len(np.shape(taus[0])) == 1:
            self.tauFromFock = True
            self.tauInds = taus
-           self.tauList = [self.F[np.ix_(taus[0],indsList[0])], self.F[np.ix_(taus[1],indsList[-1])]]
-           self.stauList = [self.S[np.ix_(taus[0],indsList[0])], self.S[np.ix_(taus[1],indsList[-1])]]
+           self.tauList = [self.F[np.ix_(taus[0],self.indsList[0])], self.F[np.ix_(taus[1],self.indsList[-1])]]
+           self.stauList = [self.S[np.ix_(taus[0],self.indsList[0])], self.S[np.ix_(taus[1],self.indsList[-1])]]
         else:
            self.tauFromFock = False
-           self.tauList = taus
-           self.stauList = staus
-        
+           self.tauList = [np.array(tau) for tau in taus]
+           self.stauList = [np.array(stau) for stau in staus]
+
         # Set up contact information
         if alphas is None:
             self.contactFromFock = True
@@ -182,8 +154,16 @@ class surfG:
 
         # Set up broadening for retarded/advanced Green's function, initialize g
         self.eta = eta
-        self.gPrev = [np.zeros(np.shape(alpha)) for alpha in self.aList]
-    
+
+        # Store number of contacts for loop bounds
+        self.num_contacts = len(indsList)
+
+        # JIT compile g and sigma methods with static contact index
+        # This compiles separate versions for each contact (i=0, i=1, etc.)
+        # The expensive iterative calculation gets fully optimized
+        self.g = jit(self.g, static_argnums=(1,2,3))
+        self.sigma = jit(self.sigma, static_argnums=(1,2))
+
     def setContacts(self, alphas=None, aOverlaps=None, betas=None, bOverlaps=None):
         """
         Update contact parameters for the 1D chain.
@@ -218,23 +198,29 @@ class surfG:
         supported and will raise an error.
         """
         if self.contactFromFock:
-            self.aList = []
-            self.aSList = []
+            # Build lists first, then stack into JAX arrays
+            aList_temp = []
+            aSList_temp = []
             for inds in self.indsList:
-                self.aList.append(self.F[np.ix_(inds, inds)])
-                self.aSList.append(self.S[np.ix_(inds, inds)])
+                aList_temp.append(self.F[np.ix_(inds, inds)])
+                aSList_temp.append(self.S[np.ix_(inds, inds)])
+            # Stack into JAX arrays for traced indexing
+            self.aList = [np.array(a) for a in aList_temp]
+            self.aSList = [np.array(aS) for aS in aSList_temp]
         else:
-            self.aList = alphas
-            self.aSList = aOverlaps
-            
+            # Stack provided matrices into JAX arrays
+            self.aList = [np.array(alpha) for alpha in alphas]
+            self.aSList = [np.array(aOverlap) for aOverlap in aOverlaps]
+
         if self.contactFromFock:
-            self.bList = self.tauList
-            self.bSList = self.stauList
+            # tauList and stauList should already be lists from initialization
+            self.bList = [np.array(tau) for tau in self.tauList]
+            self.bSList = [np.array(stau) for stau in self.stauList]
         else:
-            self.bList = betas
-            self.bSList = bOverlaps
-    
-    def g(self, E, i, conv=1e-5, relFactor=0.1):
+            self.bList = [np.array(beta) for beta in betas]
+            self.bSList = [np.array(bOverlap) for bOverlap in bOverlaps]
+
+    def g(self, E, i, conv=SURFACE_GREEN_CONVERGENCE, relFactor=SURFACE_RELAXATION_FACTOR):
         """
         Calculate surface Green's function for a contact.
 
@@ -269,25 +255,45 @@ class surfG:
         Salpha = self.aSList[i]
         beta = self.bList[i]
         Sbeta = self.bSList[i]
+
+        # Prepare matrices using JAX
         A = (E+1j*self.eta)*Salpha - alpha
         B = (E+1j*self.eta)*Sbeta - beta
-        g = self.gPrev[i].copy()
-        count = 0
-        maxIter = int(1/(conv*relFactor))*10
-        diff = conv+1
-        while diff>conv and count<maxIter:
-            g_ = g.copy()
-            g = LA.inv(A - B@g@B.conj().T)
-            dg = abs(g - g_)/(abs(g).max())
-            g = g*relFactor + g_*(1-relFactor)
-            diff = dg.max()
-            count = count+1
-        if diff>conv:
-            print(f'Warning: exceeded max iterations! E: {E}, Conv: {diff}')
-        #print(f'g generated in {count} iterations with convergence {diff}')
-        self.gPrev[i] = g
+        B_dag = B.conj().T
+
+        # Iterative solution using jax.lax.while_loop
+        MAX_ITER = 2000
+
+        def cond_fun(state):
+            count, diff, g = state
+            return (diff > conv) & (count < MAX_ITER)
+
+        def body_fun(state):
+            count, diff, g = state
+
+            # Compute new Green's function using JAX operations
+            g_new = inv(A - B @ g @ B_dag)
+
+            # Compute convergence metric
+            dg = np.abs(g_new - g) / np.maximum(np.abs(g_new), 1e-12)
+            diff = np.max(dg)
+
+            # Apply relaxation mixing
+            g = g_new * relFactor + g * (1 - relFactor)
+            count += 1
+            return (count, diff, g)
+
+        # Initial state: (count, diff, g, g_prev)
+        init_state = (0, np.inf, inv(A))
+        count, diff, g = lax.while_loop(cond_fun, body_fun, init_state)
+
+        # Check convergence and warn if needed
+        #if diff>conv:
+        #    jax.debug.print('Warning: exceeded max iterations! E: {E}, Conv: {diff}',
+        #                     E=E, diff=diff, ordered=True)
+
         return g
-   
+
     def setF(self, F, mu1=None, mu2=None):
         """
         Update the Fock matrix and contact chemical potentials.
@@ -310,14 +316,17 @@ class surfG:
         If chemical potentials are provided, the corresponding contact
         parameters are shifted to align with the new potentials.
         """
-        self.F = F
+        self.F = np.array(F)
         if self.tauFromFock:
             taus = self.tauInds
-            indsList = self.indsList
-            self.F[np.ix_(indsList[0], indsList[0])] = self.F[np.ix_(taus[0], taus[0])].copy()
-            self.F[np.ix_(indsList[-1], indsList[-1])] = self.F[np.ix_(taus[1], taus[1])].copy()
-            self.tauList = [self.F[np.ix_(taus[0],indsList[0])], self.F[np.ix_(taus[1],indsList[-1])]]
-            self.stauList = [self.S[np.ix_(taus[0],indsList[0])], self.S[np.ix_(taus[1],indsList[-1])]]
+            indsList = self.indsList  # Python list
+            self.F = self.F.at[np.ix_(indsList[0], indsList[0])].set(self.F[np.ix_(taus[0], taus[0])].copy())
+            self.F = self.F.at[np.ix_(indsList[-1], indsList[-1])].set(self.F[np.ix_(taus[1], taus[1])].copy())
+            # Rebuild stacked arrays from new F
+            tau_temp = [self.F[np.ix_(taus[0],indsList[0])], self.F[np.ix_(taus[1],indsList[-1])]]
+            stau_temp = [self.S[np.ix_(taus[0],indsList[0])], self.S[np.ix_(taus[1],indsList[-1])]]
+            self.tauList = [np.array(tau) for tau in tau_temp]
+            self.stauList = [np.array(stau) for stau in stau_temp]
         if not self.contactFromFock:
             if self.fermiList[0] == None:
                 self.fermiList[0] = mu1
@@ -325,13 +334,14 @@ class surfG:
             else:
                 for i,mu in zip([0,-1], [mu1, mu2]):
                     fermi = self.fermiList[i]
-                    if fermi!= mu:
+                    if fermi is not None and mu is not None and fermi != mu:
                         dFermi = mu - fermi
-                        self.aList[i] += dFermi*np.eye(len(self.aList[i]))
-                        self.bList[i] += dFermi*self.bSList[i]
+                        # Use JAX immutable updates
+                        self.aList = self.aList.at[i].set(self.aList[i] + dFermi*np.eye(len(self.aList[i])))
+                        self.bList = self.bList.at[i].set(self.bList[i] + dFermi*self.bSList[i])
                         self.fermiList[i] = mu
-    
-    def sigma(self, E, i, conv=1e-5):
+
+    def sigma(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
         """
         Calculate self-energy matrix for a contact.
 
@@ -343,7 +353,7 @@ class surfG:
         ----------
         E : float
             Energy point in eV
-        i : int
+        i : int (can be traced)
             Contact index
         conv : float, optional
             Convergence criterion for surface Green's function (default: 1e-5)
@@ -353,16 +363,16 @@ class surfG:
         ndarray
             Self-energy matrix for contact i
         """
-        sigma = np.array(np.zeros(np.shape(self.F)), dtype=complex)
+        sigma = np.zeros(self.F.shape, dtype=complex)
         inds = self.indsList[i]
         stau = self.stauList[i]
         tau = self.tauList[i]
         t = E*stau - tau
-        sig = t@self.g(E, i, conv)@t.conj().T
-        sigma[np.ix_(inds, inds)] += sig
+        sig = t @ self.g(E, i, conv) @ t.conj().T
+        sigma = sigma.at[np.ix_(inds, inds)].add(sig)
         return sigma
-    
-    def sigmaTot(self, E, conv=1e-5):
+
+    def sigmaTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
         """
         Calculate total self-energy matrix from all contacts.
 
@@ -382,105 +392,10 @@ class surfG:
         ndarray
             Total self-energy matrix from all contacts
         """
-        sigma = np.array(np.zeros(np.shape(self.F)), dtype=complex)
-        for i, inds in enumerate(self.indsList):
-            stau = self.stauList[i]
-            tau = self.tauList[i]
-            t = E*stau - tau
-            sig = t@self.g(E, i, conv)@t.conj().T
-            sigma[np.ix_(inds, inds)] += sig
+        # Use Python for loop - JAX unrolls it with concrete indices
+        sigma = np.zeros(self.F.shape, dtype=complex)
+        for i in range(self.num_contacts):
+            sigma = sigma + self.sigma(E, i, conv)
         return sigma
-    
 
-    def denFunc(self, E, ind=None, mu=None, T=300):
-        """
-        Calculate density matrix contribution at a single energy point.
 
-        Computes the contribution to the density matrix at energy E for
-        specified orbitals. This is used by integration routines to
-        calculate the total density matrix.
-
-        Parameters
-        ----------
-        E : float
-            Energy point in eV
-        ind : int or None, optional
-            Contact index for partial density calculation (default: None)
-        mu : float or None, optional
-            Chemical potential in eV (default: None)
-        T : float, optional
-            Temperature in Kelvin (default: 300)
-
-        Returns
-        -------
-        ndarray
-            Density matrix contribution at energy E
-        """
-        kT = kB*T
-        sigTot = self.sigmaTot(E)
-        if ind is None:
-            sig = sigTot
-        else:
-            sig = self.sigma(E, ind)
-        Gambar = self.X@(1j*(sig - sig.conj().T))@self.X
-        if mu is not None:
-            Gambar /= (np.exp((np.real(E)-mu)/kT)+1)
-        Fbar = self.X@(self.F + sigTot)@self.X
-        D, V_lhp = LA.eig(Fbar)
-        V_uhp = LA.inv(V_lhp).conj().T
-        Gr = np.zeros(np.shape(Fbar), dtype=complex)
-        for i in range(len(D)):
-            vl = V_lhp[:, i].reshape(-1, 1)
-            vu = V_uhp[i, :].reshape(1, -1)
-            Gr += (vl@vu)/(E-D[i])
-        Ga = Gr.conj().T
-        return (Gr@Gambar@Ga, D)
-    
-    # Density matrix generation using direct integration across the (real) energy axis
-    # Not used, for testing purposes only
-    def densityGrid(self, Emin, Emax, ind=None, dE=0.001, mu=None, T=300):
-        """
-        Calculate density matrix contribution on a grid of energy points.
-
-        Computes the contribution to the density matrix for each energy
-        point in a grid from Emin to Emax. This is used for real-axis
-        integration of the density matrix.
-
-        Parameters
-        ----------
-        Emin : float
-            Minimum energy for integration in eV
-        Emax : float
-            Maximum energy for integration in eV
-        ind : int or None, optional
-            Contact index for partial density calculation (default: None)
-        dE : float, optional
-            Energy step size in eV (default: 0.001)
-        mu : float or None, optional
-            Chemical potential in eV (default: None)
-        T : float, optional
-            Temperature in Kelvin (default: 300)
-
-        Returns
-        -------
-        ndarray
-            Array of density matrix contributions at each energy point
-        """
-        # Create Fermi function if mu given
-        kT = kB*T
-        fermi = lambda E: 1
-        if mu is not None:
-            Emax += 5*kT
-            fermi = lambda E: 1/(np.exp((E-mu)/kT)+1)
-        # Direct integration
-        Egrid = np.arange(Emin, Emax, dE)
-        den = np.array(np.zeros(np.shape(self.F)), dtype=complex)
-        print('Starting Integration...')
-        for i in range(1,len(Egrid)):
-            E = (Egrid[i]+Egrid[i-1])/2
-            dE = Egrid[i]-Egrid[i-1]
-            den += self.denFunc(E, ind)[0]*fermi(E)*dE
-        print('Integration done!')
-        den /= 2*np.pi
-        return den
-    
