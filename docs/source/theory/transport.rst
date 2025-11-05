@@ -22,7 +22,7 @@ Basic transmission calculation:
 
 .. code-block:: python
 
-    from gauNEGF.transport import cohTrans
+    from gauNEGF.transport import calculate_transmission, SigmaCalculator
     import numpy as np
     
     # Energy grid
@@ -30,7 +30,7 @@ Basic transmission calculation:
     
     # Calculate transmission
     F_eV = negf.F*27.211386 #Convert from hartrees to eV
-    T = cohTrans(E, F_eV, negf.S, sig1, sig2)
+    T = calculate_transmission(F_eV, negf.S, SigmaCalculator(sig1, sig2), E)
 
 Current Calculations
 -----------------
@@ -51,13 +51,21 @@ Current calculation at finite bias:
 
 .. code-block:: python
 
-    from gauNEGF.transport import quickCurrent
+    from gauNEGF.transport import calculate_current, SigmaCalculator
     
-    # Calculate current
+    # Calculate current with energy-independent sigma
     F_eV = negf.F*27.211386 #Convert from hartrees to eV
-    I = quickCurrent(
+    I = calculate_current(
+        F_eV, negf.S, 
+        SigmaCalculator(sig1, sig2),
+        fermi=negf.fermi,
+        qV=0.1
+    )
+    
+    # Calculate current with energy-dependent sigma
+    I = calculate_current(
         F_eV, negf.S,
-        sig1, sig2,
+        SigmaCalculator(negf.g, energy_dependent=True),
         fermi=negf.fermi,
         qV=0.1
     )
@@ -77,9 +85,9 @@ Generate current-voltage curves:
         negf.setVoltage(v)
         negf.SCF()
         F_eV = negf.F*27.211386 #Convert from hartrees to eV
-        I.append(quickCurrent(
-            F_eV, negf.S,
-            sig1, sig2,
+        I.append(calculate_current(
+            F_eV, negf.S, 
+            SigmaCalculator(sig1, sig2),
             fermi=negf.fermi,
             qV=v
         ))
@@ -114,12 +122,14 @@ Spin-resolved transmission:
 
 .. code-block:: python
 
-    from gauNEGF.transport import cohTransSpin
+    from gauNEGF.transport import calculate_transmission, SigmaCalculator
     
     # Calculate spin-resolved transmission
-    T, Tspin = cohTransSpin(
-        E, negf.F, negf.S,
-        sig1, sig2,
+    Elist = np.linspace(-5, 5, 1000)
+    T, Tspin = calculate_transmission(
+        negf.F, negf.S, 
+        SigmaCalculator(sig1, sig2),
+        Elist + negf.fermi,
         spin='u'  # 'u' for unrestricted
     )
     
@@ -138,12 +148,14 @@ Calculate and analyze DOS:
 
 .. code-block:: python
 
-    from gauNEGF.transport import DOS
+    from gauNEGF.transport import calculate_dos, SigmaCalculator
     
     # Calculate DOS
-    dos, dos_list = DOS(
-        E, negf.F, negf.S,
-        sig1, sig2
+    Elist = np.linspace(-5, 5, 1000)
+    dos, dos_list = calculate_dos(
+        negf.F, negf.S, 
+        SigmaCalculator(sig1, sig2),
+        Elist + negf.fermi
     )
 
 Transmission Analysis
@@ -153,14 +165,51 @@ Analyze transmission features:
 .. code-block:: python
 
     # Plot transmission vs energy
-    plt.semilogy(E, T)
+    plt.semilogy(Elist, T)
     plt.xlabel('Energy (eV)')
     plt.ylabel('Transmission')
     
     # Find transmission peaks
     peaks = np.where(T > 0.5)[0]
     for p in peaks:
-        plt.axvline(E[p], color='r', ls='--')
+        plt.axvline(Elist[p], color='r', ls='--')
+
+Checkpointing
+~~~~~~~~~~~~
+Long-running calculations can be checkpointed to allow resuming after interruption:
+
+.. code-block:: python
+
+    from gauNEGF.transport import calculate_transmission, calculate_dos, calculate_current
+    
+    # Calculate transmission with checkpointing
+    T = calculate_transmission(
+        F, S, sigma_calculator, energy_list,
+        checkpoint_file='transmission_checkpoint.npz',
+        checkpoint_interval=50  # Save every 50 energies
+    )
+    
+    # Resume from checkpoint (if interrupted, just run again with same parameters)
+    T = calculate_transmission(
+        F, S, sigma_calculator, energy_list,
+        checkpoint_file='transmission_checkpoint.npz',
+        checkpoint_interval=50
+    )
+    
+    # DOS checkpointing works the same way
+    dos_total, dos_per_site = calculate_dos(
+        F, S, sigma_calculator, energy_list,
+        checkpoint_file='dos_checkpoint.npz',
+        checkpoint_interval=50
+    )
+    
+    # Current calculations use transmission checkpointing internally
+    I = calculate_current(
+        F, S, sigma_calculator,
+        fermi=0.0, qV=0.5,
+        checkpoint_file='current_transmission.npz',  # Stores transmission data
+        checkpoint_interval=50
+    )
 
 Example Analysis
 -------------
@@ -182,10 +231,10 @@ Example of a comprehensive transport analysis:
     
     # Calculate transmission
     E = np.linspace(-5, 5, 1000)
-    T = cohTransE(E+negf.fermi, negf.F*har_to_eV, negf.S, negf.g)
+    T = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist + negf.fermi)
     
     # Calculate DOS
-    dos, _ = DOSE(E+negf.fermi, negf.F*har_to_eV, negf.S, negf.g)
+    dos, _ = calculate_dos(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist + negf.fermi)
     
     # Generate IV curve
     V = np.linspace(0, 2, 21)
@@ -193,9 +242,9 @@ Example of a comprehensive transport analysis:
     for v in V:
         negf.setVoltage(v)
         negf.SCF()
-        I.append(quickCurrent(
-            negf.F*har_to_eV, negf.S,
-            sig1, sig2,
+        I.append(calculate_current(
+            negf.F*har_to_eV, negf.S, 
+            SigmaCalculator(sig1, sig2),
             fermi=negf.fermi,
             qV=v
         ))
@@ -206,12 +255,12 @@ Example of a comprehensive transport analysis:
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
     
     # Transmission
-    ax1.semilogy(E, T)
+    ax1.semilogy(Elist, T)
     ax1.set_xlabel(r'$E - E_F$ (eV)')
     ax1.set_ylabel('Transmission')
     
     # DOS
-    ax2.plot(E, dos)
+    ax2.plot(Elist, dos)
     ax2.set_xlabel(r'$E - E_F$ (eV)')
     ax2.set_ylabel('DOS')
     

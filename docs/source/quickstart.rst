@@ -24,6 +24,20 @@ First, create a Gaussian input file `ethane.gjf`:
     H   -0.882443    0.509483   -1.157832
     H    0.882443    0.509483   -1.157832
 
+Configuration
+-----------
+GauNEGF uses global configuration constants defined in ``gauNEGF.config`` for default parameters. You can customize these before running calculations:
+
+.. code-block:: python
+
+    from gauNEGF import config
+    
+    # View current defaults
+    print(f"Default broadening: {config.ETA} eV")
+    print(f"Default SCF tolerance: {config.SCF_CONVERGENCE_TOL}")
+    
+These variables are used as defaults for the various modules in gauNEGF based on performance with well-behaved systems. You can customize these to your needs.
+
 Basic Calculation
 --------------
 Run a basic NEGF-DFT calculation:
@@ -57,7 +71,7 @@ Calculate and plot transmission:
 
     import numpy as np
     import matplotlib.pyplot as plt
-    from gauNEGF.transport import cohTrans
+    from gauNEGF.transport import calculate_transmission, SigmaCalculator
     
     # Energy grid
     Elist = np.linspace(-5, 5, 1000)
@@ -65,7 +79,7 @@ Calculate and plot transmission:
     # Calculate transmission
     sig1, sig2 = negf.getSigma()
     F_eV = negf.F*27.211386
-    T = cohTrans(Elist, F_eV, negf.S, sig1, sig2)
+    T = calculate_transmission(F_eV, negf.S, SigmaCalculator(sig1, sig2), Elist)
     
     # Plot
     plt.figure()
@@ -81,7 +95,7 @@ Calculate current at different voltages:
 
 .. code-block:: python
 
-    from gauNEGF.transport import quickCurrent
+    from gauNEGF.transport import calculate_current, SigmaCalculator
     
     # Voltage range
     V = np.arange(-0.5, 0.5, 0.1)
@@ -92,7 +106,7 @@ Calculate current at different voltages:
     for v in V:
         negf.setVoltage(v)
         negf.SCF(1e-3, 0.02, 100)
-        I.append(quickCurrent(F_eV, negf.S, sig1, sig2, 
+        I.append(calculate_current(F_eV, negf.S, SigmaCalculator(sig1, sig2), 
                               qV=v, fermi=negf.fermi))
     
     # Plot IV curve
@@ -107,7 +121,7 @@ Next Steps
 ---------
 1. Try different contact parameters or energy-dependent contacts
 2. Check for current hysteresis by using a circular voltage sweep
-3. Explore spin-dependent transport using open shell systems
+3. Explore spin-dependent transport using open shell systems (e.g. `spin='u'`)
 4. Add solver parameters such as solvation models (e.g. `scrf=solvent=water`)
 
 For more detailed examples, see the :doc:`examples/index` section.
