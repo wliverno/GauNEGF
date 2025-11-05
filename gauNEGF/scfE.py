@@ -362,12 +362,14 @@ class NEGFE(NEGF):
 
             # Full integration methods (progession: muller/secant/poly --> bisect):
             methodFail = False
+            uBound = None
+            lBound = None
             if self.fermiMethod.lower() =='poly':
                 ne = self.bar.ne
                 if self.spin =='r':
                     ne /= 2
                 print('POLYNOMIAL REGRESSION METHOD:')
-                self.fermi, dE, P2, dN = calcFermiPolyFit(self.g, ne-nLower, self.Emin, fermi_old, 
+                self.fermi, dE, P2, dN, uBound, lBound = calcFermiPolyFit(self.g, ne-nLower, self.Emin, fermi_old, 
                                             self.N1, tol=self.tol, conv=conv, T=self.T)
                 print('Setting equilibrium density matrix...')
                 methodFail = (dN > conv)
@@ -383,7 +385,7 @@ class NEGFE(NEGF):
                 if self.spin =='r':
                     ne /= 2
                 print('MULLER METHOD:')
-                self.fermi, dE, P2, dN = calcFermiMuller(self.g, ne-nLower, self.Emin, fermi_old, 
+                self.fermi, dE, P2, dN, uBound, lBound = calcFermiMuller(self.g, ne-nLower, self.Emin, fermi_old, 
                                             self.N1, tol=self.tol, conv=conv, T=self.T)
                 print('Setting equilibrium density matrix...') 
                 methodFail = (dN > conv)
@@ -416,7 +418,7 @@ class NEGFE(NEGF):
                     ne /= 2
                 print('BISECT METHOD:')
                 self.fermi, dE, P2 = calcFermiBisect(self.g, ne-nLower, self.Emin, fermi_old, 
-                                            self.N1, tol=self.tol, conv=conv, T=self.T)  
+                                            self.N1, tol=self.tol, conv=conv, T=self.T, uBound=uBound, lBound=lBound)  
                 print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
                 print('Setting equilibrium density matrix...') 
                 P = P+P2 if self.mu1 == self.mu2 else compContourP2(self.mu1)
@@ -477,3 +479,4 @@ class NEGFE(NEGF):
         return dE
     
     
+
