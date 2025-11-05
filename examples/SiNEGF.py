@@ -44,14 +44,14 @@ print('Coherent transport for non-orth case')
 g = surfG(F, S, [contactInds, onsiteInds], eta=1e-4) #Added broadening to speed up convergence
 fermi = getFermiContact(g, ne)
 Elist = np.linspace(-5, 5, 1000)
-T = cohTransE(Elist+fermi, F, S, g)
+T = calculate_transmission(F, S, SigmaCalculator(g), Elist+fermi)
 
 # Transport calculations for non-orthogonal case
 print('Coherent transport for orth case')
 g = surfG(H, np.eye(len(H)), [contactInds, onsiteInds])
 fermi = getFermiContact(g, ne)
 Elist = np.linspace(-5, 5, 1000)
-Torth = cohTransE(Elist+fermi, H, np.eye(len(H)), g)
+Torth = calculate_transmission(H, np.eye(len(H)), SigmaCalculator(g), Elist+fermi)
 
 io.savemat('SiNanowire_TnoSCF.mat', {'Elist':Elist, 'fermi':fermi, 'T':T, 'Torth':Torth})
 
@@ -60,13 +60,12 @@ io.savemat('SiNanowire_TnoSCF.mat', {'Elist':Elist, 'fermi':fermi, 'T':T, 'Torth
 print(' ====== PART 2 ====== ')
 negf = NEGFE(fn='Si2', func='b3lyp', basis='lanl2dz')
 inds = negf.setContact1D([[1],[2]], eta=1e-4) #Again, some broadening to speed up convergence
-negf.setVoltage(0, fermiMethod='bisect')
+negf.setVoltage(0)
 # This type of contact is unstable, setting a low damping value
-negf.setIntegralLimits(512, 128, Emin=-24)
 negf.SCF(1e-2, 0.005, 200)
 negf.saveMAT('SiNanowire_ESCF.mat')
 
-Torth = cohTransE(Elist+negf.fermi, negf.F*har_to_eV, negf.S, negf.g)
+Torth = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist+negf.fermi)
 io.savemat('SiNanowire_TESCF.mat', {'Elist':Elist, 'fermi':negf.fermi, 'T':T})
 
 
@@ -74,6 +73,6 @@ inds = negf.setContact1D([[1],[2]], T=300, eta=1e-4)
 negf.SCF(1e-3, 0.002, 200)
 negf.saveMAT('SiNanowire_ESCF_300K.mat')
 
-Torth = cohTransE(Elist+negf.fermi, negf.F*har_to_eV, negf.S, negf.g)
+Torth = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist+negf.fermi)
 io.savemat('SiNanowire_TESCF_300K.mat', {'Elist':Elist, 'fermi':negf.fermi, 'T':T})
 
