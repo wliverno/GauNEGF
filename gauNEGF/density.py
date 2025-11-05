@@ -54,11 +54,12 @@ def _compute_dos_at_energy(E, F, S, sigma_total):
     Gr = inv(mat)
     return -jnp.imag(jnp.trace(Gr)) / jnp.pi
 
+# Debugging for fermi search functions
+FERMI_DEBUG=False
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
 kB = 8.617e-5           # eV/Kelvin
-
 
 ## HELPER FUNCTIONS
 def fermi(E, mu, T):
@@ -1143,7 +1144,7 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=ENERGY_MIN, 
     return fermi, Emin, N1, N2
 
 def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI_CALCULATION_TOL, 
-                    maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE, debug=True):
+                    maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE, uBound=None, lBound=None):
     """
     Calculate Fermi energy of system using bisection
     """
@@ -1153,16 +1154,14 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
     else:   
         pMu = lambda E: densityComplexN(g.F, g.S, g, Emin, E, N, T)
     E = Ef + 0.0
-    uBound = None
-    lBound = None
     P = None
     Ncurr = ne+0
     dE = tol
     counter = 0
+    g.setF(g.F, E, E)
+    P = pMu(E)
+    Ncurr = np.trace(P@g.S).real
     while None in [uBound, lBound] and counter<maxcycles:
-        g.setF(g.F, E, E)
-        P = pMu(E)
-        Ncurr = np.trace(P@g.S).real
         if counter==maxcycles:
             dE = 1e3
         if Ncurr> ne:
@@ -1173,15 +1172,15 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
             lBound = E + 0.0
             Ef = lBound
             E += dE
-        if debug==True:
+        if FERMI_DEBUG:
             print(f"DEBUG: Ef={Ef:.2f}, dN={ne-Ncurr:.2E}, dE={dE:.2E}")
         dos = _compute_dos_at_energy(E, g.S, g.F, g.sigmaTot(E))
         dE = max(2*abs(Ncurr-ne)/dos, dE)
         counter += 1
+        g.setF(g.F, E, E)
+        P = pMu(E)
+        Ncurr = np.trace(P@g.S).real
     while abs(ne - Ncurr) > conv and counter < maxcycles:
-        g.setF(g.F, Ef, Ef)
-        P = pMu(Ef)
-        Ncurr = np.trace(P@g.S)
         dN = ne-Ncurr
         if dN > 0 and Ef > lBound:
             lBound = Ef + 0.0
@@ -1189,16 +1188,20 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
             uBound = Ef + 0.0
         Ef = (uBound + lBound)/2
         dE = uBound - lBound
-        if debug==True:
+        if FERMI_DEBUG:
             print(f"DEBUG: Ef={Ef:.2f}, dN={dN:.2E}, dE={dE:.2E}")
         counter += 1
+        if abs(dN) > conv:
+            g.setF(g.F, Ef, Ef)
+            P = pMu(Ef)
+            Ncurr = np.trace(P@g.S)
     if counter == maxcycles:
         print(f'Warning: Max cycles reached, convergence = {abs(Ncurr-ne):.2E}')
     return Ef, dE, P
 
 def calcFermiSecant(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, 
                     conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, 
-                    T=TEMPERATURE, debug=True):
+                    T=TEMPERATURE):
     """
     Calculate Fermi energy using Secant method, updating dE at each step
     """
@@ -1217,7 +1220,7 @@ def calcFermiSecant(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         g.setF(g.F, Ef, Ef)
         P = pMu(Ef)
         nNext = np.trace(P@g.S).real
-        if debug==True:
+        if FERMI_DEBUG:
             print(f"DEBUG: Ef={Ef:.2f}, dN={nNext-ne:.2E}, dE={dE:.2E}")
         if abs(nNext - nCurr)<1e-10:
             print('Warning: change in ne low, reducing step size')
@@ -1235,7 +1238,7 @@ def calcFermiSecant(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
 
 def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, 
                     conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, 
-                    T=TEMPERATURE, debug=True):
+                    T=TEMPERATURE):
     """
     Calculate Fermi energy using Muller's method, starting with 3 initial points
     """
@@ -1251,22 +1254,23 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
     E1 = E2 - conv
     E0 = E2 + conv
 
+    uBound = None
+    lBound = None
+
     # Get initial density matrices and electron counts
-    g.setF(g.F, E2, E2)
-    P = pMu(E2)
-    n2 = np.trace(P@g.S).real - ne
-    if abs(n2) < conv:
-        return E2, 0, P, abs(n2)
-    g.setF(g.F, E1, E1)
-    P = pMu(E1)
-    n1 = np.trace(P@g.S).real - ne
-    if abs(n1) < conv:
-        return E1, conv, P, abs(n1)
-    g.setF(g.F, E0, E0)
-    P = pMu(E0)
-    n0 = np.trace(P@g.S).real - ne
-    if abs(n0) < conv:
-        return E0, conv, P, abs(n0)
+    nList = []
+    for E in [E2, E1, E0]:
+        g.setF(g.F, E, E)
+        P = pMu(E)
+        n = np.trace(P@g.S).real - ne
+        if n > 0:
+            uBound = min(uBound, E) if uBound is not None else E
+        elif n < 0:
+            lBound = max(lBound, E) if lBound is not None else E
+        if abs(n) < conv:
+            return E, 0, P, abs(n), uBound, lBound
+        nList.append(n)
+    n2, n1, n0 = nList
 
     counter = 3
     while counter < maxcycles:
@@ -1307,22 +1311,27 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         P = pMu(E2)
         n2 = np.trace(P@g.S).real - ne
 
+        if n2 > 0:
+            uBound = min(uBound, E2) if uBound is not None else E2
+        elif n2 < 0:
+            lBound = max(lBound, E2) if lBound is not None else E2
+
         # Check convergence
         if abs(n2) < conv:
             break
 
-        if debug==True:
+        if FERMI_DEBUG:
             print(f"DEBUG: Ef={E2:.2f}, dN={n2:.2E}, dE={dE:.2E}")
         counter += 1
 
     if counter == maxcycles:
         print(f'Warning: Max cycles reached, convergence = {abs(n2):.2E}')
 
-    return E2, dE, P, abs(n2)
+    return E2, dE, P, abs(n2), uBound, lBound
 
 def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
                     conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES,
-                    T=TEMPERATURE, order=3, debug=True):
+                    T=TEMPERATURE, order=3):
     """
     Calculate Fermi energy using polynomial regression fit with accumulating points.
 
@@ -1374,6 +1383,9 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
     # Lists to store history of points
     E_pts = []
     n_pts = []
+    
+    uBound = None
+    lBound = None
 
     # Initialize with first point
     E = Ef
@@ -1396,9 +1408,12 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         g.setF(g.F, E, E)
         P = pMu(E)
         n = np.trace(P@g.S).real - ne
-
+        if n > 0:
+            uBound = min(uBound, E) if uBound is not None else E
+        elif n < 0:
+            lBound = max(lBound, E) if lBound is not None else E
         if abs(n) < conv:
-            return E, step, P, abs(n)
+            return E, step, P, abs(n), uBound, lBound
 
         # Check if we have a meaningful difference from first point
         if n - n_first > 0:
@@ -1407,7 +1422,7 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         # Otherwise increase step size and try again
         step *= 10
         counter += 1
-        if debug==True:
+        if FERMI_DEBUG:
             print(f'Warning: Tried Ef = {E:2f} eV (too close to {Ef:2f} to get accurate dN {n-n_first:.2E})')
 
     E_pts.append(E)
@@ -1456,7 +1471,7 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
             E_pts.pop()
             n_pts.pop()
             counter -= 1  # Don't count this as a valid iteration
-            if debug==True:
+            if FERMI_DEBUG:
                 print('Warning: monotonicity exception corrected!')
         elif n_pts[-1] < 0 and E_next < E_pts[-1]:
             # Polynomial violated monotonicity - discard it and step in correct direction
@@ -1465,7 +1480,7 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
             E_pts.pop()
             n_pts.pop()
             counter -= 1  # Don't count this as a valid iteration
-            if debug==True:
+            if FERMI_DEBUG:
                 print('Warning: monotonicity exception corrected!')
 
         # Calculate new point
@@ -1473,6 +1488,10 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         g.setF(g.F, E, E)
         P = pMu(E)
         n = np.trace(P@g.S).real - ne
+        if n > 0:
+            uBound = min(uBound, E) if uBound is not None else E
+        elif n < 0:
+            lBound = max(lBound, E) if lBound is not None else E
 
         # Update history
         E_pts.append(E)
@@ -1485,11 +1504,12 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         if abs(n) < conv:
             break
 
-        if debug==True:
+        if FERMI_DEBUG:
             print(f"Iter {counter}: E = {E:.6f}, n-ne = {n:.3e}, dE = {dE:.3e}, order = {poly_order}")
         counter += 1
 
     if counter >= maxcycles:
         print(f'Warning: Max cycles reached, convergence = {abs(n):.2E}')
 
-    return E, dE, P, abs(n)
+    return E, dE, P, abs(n), uBound, lBound
+

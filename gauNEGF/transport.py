@@ -23,6 +23,7 @@ import jax
 import jax.numpy as jnp
 from jax import jit
 import scipy.io as io
+from scipy.integrate import trapezoid
 from gauNEGF.utils import inv
 from gauNEGF.config import ENERGY_STEP, N_KT, TEMPERATURE
 
@@ -660,7 +661,7 @@ def calculate_current(F, S, sigma_calculator, fermi, qV, T=TEMPERATURE, spin=Non
         spin = 'r'
     
     # Handle negative qV by making dE negative (matches legacy behavior)
-    if qV == 0:
+    if np.allclose(0, qV):
         return 0.0 if spin == 'r' else [0.0, 0.0, 0.0, 0.0]
     elif qV < 0:
         dE = -1 * abs(dE)
@@ -702,12 +703,12 @@ def calculate_current(F, S, sigma_calculator, fermi, qV, T=TEMPERATURE, spin=Non
     if T == 0: 
         # Zero temperature integration
         if spin_transmissions is not None:
-            current_spin = [eoverh * np.trapezoid(spin_transmissions[:, i], integration_energies)
+            current_spin = [eoverh * trapezoid(spin_transmissions[:, i], integration_energies)
                            for i in range(4)]
             current_total = sum(current_spin)
             return current_total, current_spin
         else:
-            current_total = eoverh * np.trapezoid(transmissions, integration_energies)
+            current_total = eoverh * trapezoid(transmissions, integration_energies)
             # Apply spin factor for restricted calculations
             if spin == 'r':
                 current_total *= 2
@@ -718,12 +719,12 @@ def calculate_current(F, S, sigma_calculator, fermi, qV, T=TEMPERATURE, spin=Non
                        1/(np.exp((integration_energies - muL)/(kB*T)) + 1))
         
         if spin_transmissions is not None:
-            current_spin = [eoverh * np.trapezoid(spin_transmissions[:, i] * dfermi, integration_energies)
+            current_spin = [eoverh * trapezoid(spin_transmissions[:, i] * dfermi, integration_energies)
                            for i in range(4)]
             current_total = sum(current_spin)
             return current_total, current_spin
         else:
-            current_total = eoverh * np.trapezoid(transmissions * dfermi, integration_energies)
+            current_total = eoverh * trapezoid(transmissions * dfermi, integration_energies)
             # Apply spin factor for restricted calculations
             if spin == 'r':
                 current_total *= 2
