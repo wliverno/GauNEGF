@@ -11,7 +11,7 @@ Example of spin-dependent transport:
 .. code-block:: python
 
     from gauNEGF.scf import NEGF
-    from gauNEGF.transport import cohTransSpin
+    from gauNEGF.transport import calculate_transmission, SigmaCalculator
     
     # Initialize with unrestricted calculation
     negf = NEGF(
@@ -32,21 +32,27 @@ Example of spin-dependent transport:
     negf.SCF(1e-3, 0.01)
     
     # Calculate spin-resolved transmission
-    sigma1, sigma1 = negf.getSigma()
-    T, Tspin = cohTransSpin(
-        E, negf.F, negf.S,
-        sigma1, sigma2,
-        spin='u'
+    sigma1, sigma2 = negf.getSigma()
+    Elist = np.linspace(-5, 5, 1000)
+    T, Tspin = calculate_transmission(
+        negf.F, negf.S, SigmaCalculator(sigma1, sigma2), 
+        Elist + negf.fermi, spin='u'
     )
 
 Temperature Effects
 ---------------
 
-Including finite temperature:
+Finite temperature can be set globally in the ``config.py`` file:
+
+.. code-block:: python
+
+    TEMPERATURE = 300
+
+Or locally in an NEGF object by setting the temperature argument:
 
 .. code-block:: python
  
-    # Set basic temperature-dependent contact
+    # Set basic temperature-dependent contact 
     negf.setSigma(
         [1], [2],  
         -0.05j, 
@@ -70,7 +76,7 @@ Using realistic contact models:
     # Bethe lattice contacts at atoms {1,2,3} and {6,7,8}
     negf.setContactBethe(
         contactList=[[1,2,3], [6,7,8]],
-        latFile='Au', # Slater coster parameters define in Au.bethe
+        latFile='Au', # Slater Koster parameters define in Au.bethe
         eta=1e-6      # Broadening term (eV)
     )
     
@@ -82,27 +88,6 @@ Using realistic contact models:
         eta = 1e-6              # Broadening term (eV)
     )
 
-Parallel Processing
----------------
-
-If you know what you are doing and want to parallelize *each* integration point then you can manually set this in the densityComplex function:
-
-.. code-block:: python
-
-    from gauNEGF.density import densityComplex
-    
-    # Parallel density calculation
-    P = densityComplex(
-        F, S, g,
-        Emin=-50,
-        mu=0,
-        N=100,
-        parallel=True,
-        numWorkers=4
-    )
-
-Note this is usually slower than the default numpy parallelization. *Only proceed if you know what you are doing*
-
 Custom Analysis
 ------------
 
@@ -112,14 +97,14 @@ Advanced analysis tools:
 
     import numpy as np
     import matplotlib.pyplot as plt
-    from gauNEGF.transport import DOS, cohTransE
+    from gauNEGF.transport import calculate_dos, calculate_transmission, SigmaCalculator
     
     #... run energy dependent NEGFE() calculation
 
     # Calculate DOS and transmission
     E = np.linspace(-5, 5, 1000)
-    dos, dos_list = DOSE(E, negf.F, negf.S, g)
-    T = cohTransE(E, negf.F, negf.S, negf.g)
+    dos, dos_list = calculate_dos(negf.F, negf.S, SigmaCalculator(g), E)
+    T = calculate_transmission(negf.F, negf.S, SigmaCalculator(negf.g), E)
     
     # Plot correlation
     plt.figure(figsize=(10, 5))
@@ -136,9 +121,3 @@ Advanced analysis tools:
     plt.tight_layout()
     plt.show()
 
-Next Steps
---------
-1. Develop custom contact models
-2. Implement new analysis tools
-3. Optimize performance
-4. Add error handling 

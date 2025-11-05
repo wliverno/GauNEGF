@@ -86,18 +86,3 @@ Then you can run the following code to test the installation:
 
 This will initialize the NEGF object by reading from the checkpoint file or running a new SCF in Gaussian.
 
-Common Issues
------------
-
-1. **Gaussian Not Found**
-
-   * Check PATH settings
-   * Verify environment variables
-   * Test gdv command directly
-
-2. **Import Errors**
-
-   * Check Python version
-   * Verify all dependencies installed
-   * Check for version conflicts
-

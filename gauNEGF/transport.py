@@ -18,10 +18,13 @@ References
 """
 
 import numpy as np
+import os
 import jax
 import jax.numpy as jnp
 from jax import jit
 import scipy.io as io
+from gauNEGF.utils import inv
+from gauNEGF.config import ENERGY_STEP, N_KT, TEMPERATURE
 
 # Enable double precision for accurate comparisons with NumPy
 jax.config.update("jax_enable_x64", True)
@@ -147,7 +150,7 @@ class SigmaCalculator:
 def _transmission_kernel_restricted(E, F, S, sigma_total, gamma1, gamma2):
     """JIT-compiled kernel for restricted transmission calculation."""
     mat = E * S - F - sigma_total
-    Gr = jnp.linalg.inv(mat)
+    Gr = inv(mat)
     Ga = jnp.conj(Gr).T
     temp = gamma1 @ Gr @ gamma2
     return jnp.real(jnp.trace(temp @ Ga))
@@ -156,7 +159,7 @@ def _transmission_kernel_restricted(E, F, S, sigma_total, gamma1, gamma2):
 def _transmission_kernel_spin_block(E, F, S, sigma_total, gamma1, gamma2, N):
     """JIT-compiled kernel for spin-resolved block transmission calculation."""
     mat = E * S - F - sigma_total
-    Gr = jnp.linalg.inv(mat)
+    Gr = inv(mat)
     Ga = jnp.conj(Gr).T
 
     # Extract spin blocks efficiently
@@ -177,13 +180,13 @@ def _transmission_kernel_spin_block(E, F, S, sigma_total, gamma1, gamma2, N):
 def _dos_kernel(E, F, S, sigma_total):
     """JIT-compiled kernel for density of states calculation."""
     mat = E * S - F - sigma_total
-    Gr = jnp.linalg.inv(mat)
+    Gr = inv(mat)
     dos_per_site = -jnp.imag(jnp.diag(Gr)) / jnp.pi
     total_dos = jnp.sum(dos_per_site)
     return total_dos, dos_per_site
 
 
-def transmission_single_energy(E, F, S, sigma_calc, spin=None):
+def transmission_single_energy(E, F_jax, S_jax, sigma_calc, spin=None):
     """
     Calculate transmission at a single energy using linalg.py functions.
 
@@ -191,10 +194,10 @@ def transmission_single_energy(E, F, S, sigma_calc, spin=None):
     ----------
     E : float
         Energy in eV
-    F : ndarray
-        Fock matrix
-    S : ndarray
-        Overlap matrix
+    F_jax : jax.numpy.ndarray
+        Fock matrix (already JAX array)
+    S_jax : jax.numpy.ndarray
+        Overlap matrix (already JAX array)
     sigma_calc : SigmaCalculator
         Sigma calculator object
     spin : str, optional
@@ -211,30 +214,26 @@ def transmission_single_energy(E, F, S, sigma_calc, spin=None):
         For 'r': transmission value
         For 'u'/'ro'/'g': (total_transmission, [T_up_up, T_up_down, T_down_up, T_down_down])
     """
-    F = np.asarray(F)
-    S = np.asarray(S)
 
     if spin is None:
         spin = 'r'  # Always default to restricted
 
     # Determine N based on spin configuration
     if spin == 'r':
-        N = F.shape[0]
+        N = F_jax.shape[0]
     else:
-        N = F.shape[0] // 2
+        N = F_jax.shape[0] // 2
 
     # Get self-energies and gamma matrices (pass matrix size for spin expansion)
-    matrix_size = F.shape[0]
+    matrix_size = F_jax.shape[0]
     sigma_total = sigma_calc.get_sigma_total(E, spin, matrix_size)
     gamma1 = sigma_calc.get_gamma(E, 0, spin, matrix_size)  # Left contact
     gamma2 = sigma_calc.get_gamma(E, -1, spin, matrix_size)  # Right contact
 
-    # Convert to JAX arrays for JIT compilation
-    F_jax = jnp.array(F)
-    S_jax = jnp.array(S)
-    sigma_total_jax = jnp.array(sigma_total)
-    gamma1_jax = jnp.array(gamma1)
-    gamma2_jax = jnp.array(gamma2)
+    # Convert sigma/gamma to JAX arrays (these are energy-dependent, so convert here)
+    sigma_total_jax = jnp.asarray(sigma_total)
+    gamma1_jax = jnp.asarray(gamma1)
+    gamma2_jax = jnp.asarray(gamma2)
 
     if spin == 'r':
         # Use JIT-compiled restricted transmission kernel
@@ -251,7 +250,7 @@ def transmission_single_energy(E, F, S, sigma_calc, spin=None):
         # Add JIT kernel for generalized case - implement later if needed
         # For now, fall back to original implementation
         mat = E * S_jax - F_jax - sigma_total_jax
-        Gr = jnp.linalg.inv(mat)
+        Gr = inv(mat)
         Ga = jnp.conj(Gr).T
 
         # Extract spinor indices
@@ -282,7 +281,7 @@ def transmission_single_energy(E, F, S, sigma_calc, spin=None):
         raise ValueError(f"Unknown spin configuration '{spin}'. Use 'r', 'u', 'ro', or 'g'")
 
 
-def dos_single_energy(E, F, S, sigma_calc, spin=None):
+def dos_single_energy(E, F_jax, S_jax, sigma_calc, spin=None):
     """
     Calculate density of states at a single energy using linalg.py functions.
 
@@ -290,10 +289,10 @@ def dos_single_energy(E, F, S, sigma_calc, spin=None):
     ----------
     E : float
         Energy in eV
-    F : ndarray
-        Fock matrix
-    S : ndarray
-        Overlap matrix
+    F_jax : jax.numpy.ndarray
+        Fock matrix (already JAX array)
+    S_jax : jax.numpy.ndarray
+        Overlap matrix (already JAX array)
     sigma_calc : SigmaCalculator
         Sigma calculator object
     spin : str, optional
@@ -307,20 +306,15 @@ def dos_single_energy(E, F, S, sigma_calc, spin=None):
         For 'u'/'ro'/'g': (total_dos, dos_per_site, dos_spin_up, dos_spin_down)
         where dos_per_site includes both spins, dos_spin_up/down are separate
     """
-    F = np.asarray(F)
-    S = np.asarray(S)
-
     if spin is None:
         spin = 'r'
 
     # Get total self-energy for the appropriate spin case
-    matrix_size = F.shape[0]
+    matrix_size = F_jax.shape[0]
     sigma_total = sigma_calc.get_sigma_total(E, spin, matrix_size)
 
-    # Convert to JAX arrays for JIT compilation
-    F_jax = jnp.array(F)
-    S_jax = jnp.array(S)
-    sigma_total_jax = jnp.array(sigma_total)
+    # Convert sigma to JAX array (energy-dependent, so convert here)
+    sigma_total_jax = jnp.asarray(sigma_total)
 
     if spin == 'r':
         # Use JIT-compiled DOS kernel
@@ -329,7 +323,12 @@ def dos_single_energy(E, F, S, sigma_calc, spin=None):
 
     elif spin in ['u', 'ro']:
         # Unrestricted/restricted open - split into spin up and down blocks
-        N = F.shape[0] // 2
+        N = F_jax.shape[0] // 2
+
+        # Calculate Green's function
+        mat = E * S_jax - F_jax - sigma_total_jax
+        Gr = inv(mat)
+        Gr = np.asarray(Gr)
 
         # Extract spin-resolved Green's functions
         Gr_up = Gr[:N, :N]      # Up-up block
@@ -351,7 +350,12 @@ def dos_single_energy(E, F, S, sigma_calc, spin=None):
 
     elif spin == 'g':
         # Generalized case - extract spinor components
-        N = F.shape[0] // 2
+        N = F_jax.shape[0] // 2
+
+        # Calculate Green's function
+        mat = E * S_jax - F_jax - sigma_total_jax
+        Gr = inv(mat)
+        Gr = np.asarray(Gr)
 
         # Extract alpha and beta spinor indices
         alpha_indices = np.arange(0, 2*N, 2)
@@ -379,11 +383,16 @@ def dos_single_energy(E, F, S, sigma_calc, spin=None):
         raise ValueError(f"Unknown spin configuration '{spin}'. Use 'r', 'u', 'ro', or 'g'")
 
 
-def calculate_transport(F, S, sigma_calculator, energy_list, calculation='transmission',
-                       spin=None, fermi=None, qV=None, T=0, **kwargs):
+def calculate_transmission(F, S, sigma_calculator, energy_list,
+                          spin=None, checkpoint_file=None, 
+                          checkpoint_interval=10):
     """
-    Unified transport calculation dispatcher with automatic parallelization support.
-
+    Calculate transmission over energy range with checkpointing.
+    
+    Uses -1 as placeholder for uncalculated energies. Saves checkpoint
+    every checkpoint_interval energies. If checkpoint_file exists, resumes
+    from first uncalculated energy.
+    
     Parameters
     ----------
     F : ndarray
@@ -394,163 +403,335 @@ def calculate_transport(F, S, sigma_calculator, energy_list, calculation='transm
         Sigma calculator object
     energy_list : array_like
         List of energies in eV
-    calculation : str, optional
-        Type of calculation: 'transmission', 'current', 'dos' (default: 'transmission')
     spin : str, optional
-        Spin configuration using Gaussian labels ('r', 'u', 'ro', 'g')
-        If None, defaults to 'r'
-    fermi : float, optional
-        Fermi energy in eV (required for current calculations)
-    qV : float, optional
-        Applied bias voltage in eV (required for current calculations)
-    T : float, optional
-        Temperature in Kelvin (default: 0)
-    **kwargs
-        Additional parameters passed to calculation functions
-
+        Spin configuration ('r', 'u', 'ro', 'g'). Defaults to 'r'
+    checkpoint_file : str, optional
+        Path to checkpoint file (.npz format). If None, no checkpointing
+    checkpoint_interval : int, optional
+        Save checkpoint every N energies (default: 10)
+    
     Returns
     -------
     ndarray or tuple
-        Results depend on calculation type and spin:
-        - 'transmission': array of transmission values (+ spin arrays for open shell)
-        - 'current': integrated current value (scalar, + spin currents for open shell)
-        - 'dos': (dos_values, dos_per_site_list, [+ spin components for open shell])
+        For restricted: transmission array (N,)
+        For open shell: (transmission (N,), spin_transmission (N,4))
     """
-    F = np.asarray(F)
-    S = np.asarray(S)
+
+    
     energy_list = np.asarray(energy_list)
-
-    # Handle legacy parameter naming (spin_config -> spin)
-    if 'spin_config' in kwargs:
-        if spin is None:
-            # Map from internal names back to Gaussian labels
-            spin_config_map = {'restricted': 'r', 'unrestricted': 'u', 'generalized': 'g'}
-            spin = spin_config_map.get(kwargs['spin_config'], 'r')
-        kwargs.pop('spin_config')  # Remove to avoid conflicts
-
-    if calculation == 'transmission':
-        results = []
-        spin_results = []
-
-        for E in energy_list:
-            result = transmission_single_energy(E, F, S, sigma_calculator, spin)
-            if isinstance(result, tuple):
-                # Spin-resolved result
-                total_trans, spin_trans = result
-                results.append(total_trans)
-                spin_results.append(spin_trans)
+    n_energies = len(energy_list)
+    
+    if spin is None:
+        spin = 'r'
+    
+    # Convert F and S to JAX arrays once before the loop (prevents recompilation)
+    F_jax = jnp.asarray(F)
+    S_jax = jnp.asarray(S)
+    
+    # Initialize or load checkpoint
+    if checkpoint_file and os.path.exists(checkpoint_file):
+        data = np.load(checkpoint_file, allow_pickle=True)
+        # Check if energy_list matches
+        if 'energy_list' in data:
+            checkpoint_energies = data['energy_list']
+            if not np.allclose(checkpoint_energies, energy_list, rtol=1e-10):
+                print(f"Warning: energy_list in checkpoint doesn't match. Starting fresh.")
+                transmission = -1 * np.ones(n_energies)
+                spin_trans = None
             else:
-                # Scalar result
-                results.append(result)
-
-        if spin_results:
-            return np.array(results), np.array(spin_results)
+                transmission = data['transmission'] if 'transmission' in data else -1 * np.ones(n_energies)
+                if spin in ['u', 'ro', 'g']:
+                    spin_trans = data['spin_transmission'] if 'spin_transmission' in data else -1 * np.ones((n_energies, 4))
+                else:
+                    spin_trans = None
         else:
-            return np.array(results)
-
-    elif calculation == 'current':
-        if fermi is None or qV is None:
-            raise ValueError("fermi and qV must be provided for current calculations")
-
-        # Calculate energy window for integration
-        muL = fermi - qV/2
-        muR = fermi + qV/2
-
-        if T == 0:
-            # Zero temperature - integrate between chemical potentials
-            if qV > 0:
-                integration_energies = energy_list[(energy_list >= muL) & (energy_list <= muR)]
-            else:
-                integration_energies = energy_list[(energy_list >= muR) & (energy_list <= muL)]
-        else:
-            # Finite temperature - need broader energy range
-            kT = kB * T
-            spread = 5 * kT
-            integration_energies = energy_list[(energy_list >= min(muL, muR) - spread) &
-                                             (energy_list <= max(muL, muR) + spread)]
-
-        # Calculate transmission for integration energies
-        transmissions = []
-        spin_transmissions = []
-
-        for E in integration_energies:
-            result = transmission_single_energy(E, F, S, sigma_calculator, spin)
-            if isinstance(result, tuple):
-                total_trans, spin_trans = result
-                transmissions.append(total_trans)
-                spin_transmissions.append(spin_trans)
-            else:
-                transmissions.append(result)
-
-        transmissions = np.array(transmissions)
-
-        if T == 0:
-            # Zero temperature integration
-            if spin_transmissions:
-                spin_transmissions = np.array(spin_transmissions)
-                current_spin = [eoverh * np.trapz(spin_transmissions[:, i], integration_energies)
-                               for i in range(4)]
-                current_total = eoverh * np.trapz(transmissions, integration_energies)
-                return current_total, current_spin
-            else:
-                current_total = eoverh * np.trapz(transmissions, integration_energies)
-                # Apply spin factor for restricted calculations
-                if spin == 'r' or spin is None:
-                    current_total *= 2
-                return current_total
-        else:
-            # Finite temperature integration with Fermi-Dirac distribution
-            dfermi = (1/(np.exp((integration_energies - muR)/(kB*T)) + 1) -
-                     1/(np.exp((integration_energies - muL)/(kB*T)) + 1))
-
-            if spin_transmissions:
-                spin_transmissions = np.array(spin_transmissions)
-                current_spin = [eoverh * np.trapz(spin_transmissions[:, i] * dfermi, integration_energies)
-                               for i in range(4)]
-                current_total = eoverh * np.trapz(transmissions * dfermi, integration_energies)
-                return current_total, current_spin
-            else:
-                current_total = eoverh * np.trapz(transmissions * dfermi, integration_energies)
-                # Apply spin factor for restricted calculations
-                if spin == 'r' or spin is None:
-                    current_total *= 2
-                return current_total
-
-    elif calculation == 'dos':
-        dos_values = []
-        dos_per_site_list = []
-        dos_spin_up_list = []
-        dos_spin_down_list = []
-
-        for E in energy_list:
-            result = dos_single_energy(E, F, S, sigma_calculator, spin)
-            if len(result) == 2:
-                # Restricted case: (total_dos, dos_per_site)
-                total_dos, dos_per_site = result
-                dos_values.append(total_dos)
-                dos_per_site_list.append(dos_per_site)
-            else:
-                # Open shell case: (total_dos, dos_per_site, dos_spin_up, dos_spin_down)
-                total_dos, dos_per_site, dos_spin_up, dos_spin_down = result
-                dos_values.append(total_dos)
-                dos_per_site_list.append(dos_per_site)
-                dos_spin_up_list.append(dos_spin_up)
-                dos_spin_down_list.append(dos_spin_down)
-
-        if dos_spin_up_list:
-            # Return spin-resolved DOS for open shell cases
-            return (np.array(dos_values), dos_per_site_list,
-                   dos_spin_up_list, dos_spin_down_list)
-        else:
-            # Return simple DOS for restricted case
-            return np.array(dos_values), dos_per_site_list
-
+            transmission = -1 * np.ones(n_energies)
+            spin_trans = None
     else:
-        raise ValueError(f"Unknown calculation type: {calculation}")
+        # Pre-allocate with -1 placeholders
+        transmission = -1 * np.ones(n_energies)
+        if spin in ['u', 'ro', 'g']:
+            spin_trans = -1 * np.ones((n_energies, 4))
+        else:
+            spin_trans = None
+    
+    # Find remaining energies to calculate
+    remaining = np.where(transmission == -1)[0]
+    
+    # Calculate remaining energies
+    for idx, i in enumerate(remaining):
+        E = energy_list[i]
+        result = transmission_single_energy(E, F_jax, S_jax, sigma_calculator, spin)
+        
+        # Store result
+        if isinstance(result, tuple):
+            transmission[i] = result[0]
+            spin_trans[i] = np.asarray(result[1])
+        else:
+            transmission[i] = result
+        
+        # Save checkpoint periodically
+        if checkpoint_file and (idx % checkpoint_interval == 0):
+            if spin_trans is not None:
+                np.savez(checkpoint_file, transmission=transmission, 
+                        spin_transmission=spin_trans, energy_list=energy_list)
+            else:
+                np.savez(checkpoint_file, transmission=transmission, energy_list=energy_list)
+    
+    # Final save
+    if checkpoint_file:
+        if spin_trans is not None:
+            np.savez(checkpoint_file, transmission=transmission, 
+                    spin_transmission=spin_trans, energy_list=energy_list)
+        else:
+            np.savez(checkpoint_file, transmission=transmission, energy_list=energy_list)
+    
+    # Return in expected format
+    if spin_trans is not None:
+        return transmission, spin_trans
+    else:
+        return transmission
 
 
-## CURRENT FUNCTIONS
-def current(F, S, sig1, sig2, fermi, qV, T=0, spin="r",dE=0.01):
+def calculate_dos(F, S, sigma_calculator, energy_list,
+                  spin=None, checkpoint_file=None,
+                  checkpoint_interval=10):
+    """
+    Calculate DOS over energy range with checkpointing.
+    
+    Uses -1 as placeholder for uncalculated energies. Saves checkpoint
+    every checkpoint_interval energies. If checkpoint_file exists, resumes
+    from first uncalculated energy.
+    
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix
+    S : ndarray
+        Overlap matrix
+    sigma_calculator : SigmaCalculator
+        Sigma calculator object
+    energy_list : array_like
+        List of energies in eV
+    spin : str, optional
+        Spin configuration ('r', 'u', 'ro', 'g'). Defaults to 'r'
+    checkpoint_file : str, optional
+        Path to checkpoint file (.npz format). If None, no checkpointing
+    checkpoint_interval : int, optional
+        Save checkpoint every N energies (default: 10)
+    
+    Returns
+    -------
+    tuple
+        For restricted: (dos_total (N,), dos_per_site (N,M))
+        For open shell: (dos_total (N,), dos_per_site (N,M), dos_spin (N,2))
+        where M = F.shape[0] (number of sites)
+    """
+    
+    energy_list = np.asarray(energy_list)
+    n_energies = len(energy_list)
+    n_sites = F.shape[0]  # M sites
+    
+    if spin is None:
+        spin = 'r'
+    
+    # Convert F and S to JAX arrays once before the loop (prevents recompilation)
+    F_jax = jnp.asarray(F)
+    S_jax = jnp.asarray(S)
+    
+    # Initialize or load checkpoint
+    if checkpoint_file and os.path.exists(checkpoint_file):
+        data = np.load(checkpoint_file, allow_pickle=True)
+        # Check if energy_list matches
+        if 'energy_list' in data:
+            checkpoint_energies = data['energy_list']
+            if not np.allclose(checkpoint_energies, energy_list, rtol=1e-10):
+                print(f"Warning: energy_list in checkpoint doesn't match. Starting fresh.")
+                dos_total = -1 * np.ones(n_energies)
+                dos_per_site = -1 * np.ones((n_energies, n_sites))
+                dos_spin = None
+            else:
+                dos_total = data['dos_total'] if 'dos_total' in data else -1 * np.ones(n_energies)
+                dos_per_site = data['dos_per_site'] if 'dos_per_site' in data else -1 * np.ones((n_energies, n_sites))
+                if spin in ['u', 'ro', 'g']:
+                    dos_spin = data['dos_spin'] if 'dos_spin' in data else -1 * np.ones((n_energies, 2))
+                else:
+                    dos_spin = None
+        else:
+            dos_total = -1 * np.ones(n_energies)
+            dos_per_site = -1 * np.ones((n_energies, n_sites))
+            dos_spin = None
+    else:
+        # Pre-allocate with -1 placeholders
+        dos_total = -1 * np.ones(n_energies)
+        dos_per_site = -1 * np.ones((n_energies, n_sites))
+        if spin in ['u', 'ro', 'g']:
+            dos_spin = -1 * np.ones((n_energies, 2))
+        else:
+            dos_spin = None
+    
+    # Find remaining energies to calculate
+    remaining = np.where(dos_total == -1)[0]
+    
+    # Calculate remaining energies
+    for idx, i in enumerate(remaining):
+        E = energy_list[i]
+        result = dos_single_energy(E, F_jax, S_jax, sigma_calculator, spin)
+        
+        # Store result
+        if len(result) == 2:
+            # Restricted: (total_dos, dos_per_site)
+            dos_total[i] = result[0]
+            dos_per_site[i] = np.asarray(result[1])
+        else:
+            # Open shell: (total_dos, dos_per_site, dos_spin_up, dos_spin_down)
+            dos_total[i] = result[0]
+            dos_per_site[i] = np.asarray(result[1])
+            dos_spin[i, 0] = np.sum(result[2])  # dos_up total
+            dos_spin[i, 1] = np.sum(result[3])  # dos_down total
+        
+        # Save checkpoint periodically
+        if checkpoint_file and (idx % checkpoint_interval == 0):
+            if dos_spin is not None:
+                np.savez(checkpoint_file, dos_total=dos_total, 
+                        dos_per_site=dos_per_site, dos_spin=dos_spin, 
+                        energy_list=energy_list)
+            else:
+                np.savez(checkpoint_file, dos_total=dos_total, 
+                        dos_per_site=dos_per_site, energy_list=energy_list)
+    
+    # Final save
+    if checkpoint_file:
+        if dos_spin is not None:
+            np.savez(checkpoint_file, dos_total=dos_total, 
+                    dos_per_site=dos_per_site, dos_spin=dos_spin, 
+                    energy_list=energy_list)
+        else:
+            np.savez(checkpoint_file, dos_total=dos_total, 
+                    dos_per_site=dos_per_site, energy_list=energy_list)
+    
+    # Return in expected format
+    if dos_spin is not None:
+        return dos_total, dos_per_site, dos_spin
+    else:
+        return dos_total, dos_per_site
+
+
+def calculate_current(F, S, sigma_calculator, fermi, qV, T=TEMPERATURE, spin=None, dE=ENERGY_STEP,
+                     **kwargs):
+    """
+    Calculate current at applied voltage with checkpointing.
+    
+    Generates energy grid internally based on fermi, qV, T, and dE, then calculates
+    transmission over integration window and integrates. Uses transmission checkpointing
+    internally. The checkpoint file stores transmission data which can be reused.
+    
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix
+    S : ndarray
+        Overlap matrix
+    sigma_calculator : SigmaCalculator
+        Sigma calculator object
+    fermi : float
+        Fermi energy in eV
+    qV : float
+        Applied bias voltage in eV
+    T : float, optional
+        Temperature in Kelvin (default: TEMPERATURE from config)
+    spin : str, optional
+        Spin configuration ('r', 'u', 'ro', 'g'). Defaults to 'r'
+    dE : float, optional
+        Energy step for integration in eV (default: ENERGY_STEP from config)
+    **kwargs
+        Additional parameters (such as checkpointing parameters) passed to calculate_transmission
+    
+    Returns
+    -------
+    float or tuple
+        For restricted: current value (float)
+        For open shell: (current_total (float), current_spin (4,))
+    """
+    if fermi is None or qV is None:
+        raise ValueError("fermi and qV must be provided for current calculations")
+    
+    if spin is None:
+        spin = 'r'
+    
+    # Handle negative qV by making dE negative (matches legacy behavior)
+    if qV == 0:
+        return 0.0 if spin == 'r' else [0.0, 0.0, 0.0, 0.0]
+    elif qV < 0:
+        dE = -1 * abs(dE)
+    else:
+        dE = abs(dE)
+    
+    # Calculate chemical potentials
+    muL = fermi - qV/2
+    muR = fermi + qV/2
+    
+    # Generate energy grid for integration
+    if T == 0:
+        # Zero temperature - integrate between chemical potentials
+        integration_energies = np.arange(muL, muR, dE)
+    else:
+        # Finite temperature - need broader energy range
+        kT = kB * T
+        spread = np.sign(dE) * N_KT * kT
+        integration_energies = np.arange(muL - spread, muR + spread, dE)
+    
+    if len(integration_energies) == 0:
+        raise ValueError("No energies in integration window. Check fermi, qV, and dE.")
+    
+    # Calculate transmission for integration energies    
+    transmission_result = calculate_transmission(
+        F, S, sigma_calculator, integration_energies,
+        spin=spin, **kwargs
+    )
+    
+    if isinstance(transmission_result, tuple):
+        transmissions, spin_transmissions = transmission_result
+        transmissions = np.asarray(transmissions)
+        spin_transmissions = np.asarray(spin_transmissions)
+    else:
+        transmissions = np.asarray(transmission_result)
+        spin_transmissions = None
+    
+    # Integrate transmission
+    if T == 0: 
+        # Zero temperature integration
+        if spin_transmissions is not None:
+            current_spin = [eoverh * np.trapezoid(spin_transmissions[:, i], integration_energies)
+                           for i in range(4)]
+            current_total = sum(current_spin)
+            return current_total, current_spin
+        else:
+            current_total = eoverh * np.trapezoid(transmissions, integration_energies)
+            # Apply spin factor for restricted calculations
+            if spin == 'r':
+                current_total *= 2
+            return current_total
+    else:
+        # Finite temperature integration with Fermi-Dirac distribution
+        dfermi = np.abs(1/(np.exp((integration_energies - muR)/(kB*T)) + 1) -
+                       1/(np.exp((integration_energies - muL)/(kB*T)) + 1))
+        
+        if spin_transmissions is not None:
+            current_spin = [eoverh * np.trapezoid(spin_transmissions[:, i] * dfermi, integration_energies)
+                           for i in range(4)]
+            current_total = sum(current_spin)
+            return current_total, current_spin
+        else:
+            current_total = eoverh * np.trapezoid(transmissions * dfermi, integration_energies)
+            # Apply spin factor for restricted calculations
+            if spin == 'r':
+                current_total *= 2
+            return current_total
+
+
+## LEGACY FUNCTIONS
+def current(F, S, sig1, sig2, fermi, qV, T=TEMPERATURE, spin="r",dE=ENERGY_STEP):
     """
     Calculate coherent current using NEGF with energy-independent self-energies.
 
@@ -592,18 +773,14 @@ def current(F, S, sig1, sig2, fermi, qV, T=0, spin="r",dE=0.01):
         Elist = np.arange(muL, muR, dE)
     else:
         kT = kB*T
-        spread = np.sign(dE)*5*kT
+        spread = np.sign(dE)*N_KT*kT
         Elist = np.arange(muL-spread, muR+spread, dE)
 
-    # Map spin notation and create sigma calculator
-    spin_config = 'restricted' if spin == 'r' else 'unrestricted'
+    # Create sigma calculator and use checkpointable current calculation
     sigma_calc = SigmaCalculator(sig1, sig2, energy_dependent=False)
+    return calculate_current(F, S, sigma_calc, fermi=fermi, qV=qV, T=T, spin=spin, dE=dE)
 
-    # Use unified transport system
-    return calculate_transport(F, S, sigma_calc, Elist, calculation='current',
-                             spin_config=spin_config, fermi=fermi, qV=qV, T=T)
-
-def currentSpin(F, S, sig1, sig2, fermi, qV, T=0, spin="r",dE=0.01):
+def currentSpin(F, S, sig1, sig2, fermi, qV, T=TEMPERATURE, spin="r",dE=ENERGY_STEP):
     """
     Calculate coherent spin current using NEGF with energy-independent self-energies.
 
@@ -633,29 +810,9 @@ def currentSpin(F, S, sig1, sig2, fermi, qV, T=0, spin="r",dE=0.01):
     list
         Spin-currents (in Amperes) [I↑↑, I↑↓, I↓↑, I↓↓]
     """
-    # Create energy grid
-    if qV < 0:
-        dE = -1*abs(dE)
-    else:
-        dE = abs(dE)
-    muL = fermi - qV/2
-    muR = fermi + qV/2
-
-    if T == 0:
-        Elist = np.arange(muL, muR, dE)
-    else:
-        kT = kB*T
-        spread = np.sign(dE)*5*kT
-        Elist = np.arange(muL-spread, muR+spread, dE)
-
-    # Map spin notation and create sigma calculator
-    spin_map = {'r': 'restricted', 'u': 'unrestricted', 'ro': 'unrestricted', 'g': 'generalized'}
-    spin_config = spin_map.get(spin, 'restricted')
+    # Create sigma calculator and use checkpointable current calculation
     sigma_calc = SigmaCalculator(sig1, sig2, energy_dependent=False)
-
-    # Use unified transport system
-    result = calculate_transport(F, S, sigma_calc, Elist, calculation='current',
-                               spin_config=spin_config, fermi=fermi, qV=qV, T=T)
+    result = calculate_current(F, S, sigma_calc, fermi=fermi, qV=qV, T=T, spin=spin, dE=dE)
 
     if isinstance(result, tuple):
         # Return spin currents if available
@@ -665,9 +822,9 @@ def currentSpin(F, S, sig1, sig2, fermi, qV, T=0, spin="r",dE=0.01):
         return [0, 0, 0, 0]
 
 
-def currentE(F, S, g, fermi, qV, T=0, spin="r",dE=0.01):
+def currentE(F, S, g, fermi, qV, T=TEMPERATURE, spin="r",dE=ENERGY_STEP):
     """
-    Calculate coherent current at T=0K using NEGF with energy-dependent self-energies.
+    Calculate coherent current using NEGF with energy-dependent self-energies.
 
     Parameters
     ----------
@@ -693,32 +850,13 @@ def currentE(F, S, g, fermi, qV, T=0, spin="r",dE=0.01):
     float
         Current in Amperes
     """
-    # Create energy grid
-    if qV < 0:
-        dE = -1*abs(dE)
-    else:
-        dE = abs(dE)
-    muL = fermi - qV/2
-    muR = fermi + qV/2
-
-    if T == 0:
-        Elist = np.arange(muL, muR, dE)
-    else:
-        kT = kB*T
-        spread = np.sign(dE)*5*kT
-        Elist = np.arange(muL-spread, muR+spread, dE)
-
-    # Map spin notation and create sigma calculator
-    spin_config = 'restricted' if spin == 'r' else 'unrestricted'
+    # Create sigma calculator and use checkpointable current calculation
     sigma_calc = SigmaCalculator(g, energy_dependent=True)
+    return calculate_current(F, S, sigma_calc, fermi=fermi, qV=qV, T=T, spin=spin, dE=dE)
 
-    # Use unified transport system
-    return calculate_transport(F, S, sigma_calc, Elist, calculation='current',
-                             spin_config=spin_config, fermi=fermi, qV=qV, T=T)
-
-def currentF(fn, dE=0.01, T=0):
+def currentF(fn, dE=ENERGY_STEP, T=TEMPERATURE):
     """
-    Calculate current from saved SCF matrix file.
+    Calculate current from saved SCF matrix file. 
 
     Parameters
     ----------
@@ -774,10 +912,9 @@ def cohTrans(Elist, F, S, sig1, sig2):
     Supports both vector and matrix self-energies. For vector self-energies,
     diagonal matrices are constructed internally.
     """
-    # Create sigma calculator and use unified transport system
+    # Create sigma calculator and use checkpointable transmission calculation
     sigma_calc = SigmaCalculator(sig1, sig2, energy_dependent=False)
-    transmissions = calculate_transport(F, S, sigma_calc, Elist,
-                                      calculation='transmission', spin_config='restricted')
+    transmissions = calculate_transmission(F, S, sigma_calc, Elist, spin='r')
 
     # Print results to match original behavior
     for E, T in zip(Elist, transmissions):
@@ -823,14 +960,9 @@ def cohTransSpin(Elist, F, S, sig1, sig2, spin='u'):
     [F↓↑  F↓↓], [S↓↑  S↓↓]
     which are then combined into a 2Nx2N matrix.
     """
-    # Map spin notation to unified system
-    spin_map = {'r': 'restricted', 'u': 'unrestricted', 'ro': 'unrestricted', 'g': 'generalized'}
-    spin_config = spin_map.get(spin, 'unrestricted')
-
-    # Create sigma calculator and use unified transport system
+    # Create sigma calculator and use checkpointable transmission calculation
     sigma_calc = SigmaCalculator(sig1, sig2, energy_dependent=False)
-    result = calculate_transport(F, S, sigma_calc, Elist,
-                               calculation='transmission', spin_config=spin_config)
+    result = calculate_transmission(F, S, sigma_calc, Elist, spin=spin)
 
     if isinstance(result, tuple):
         transmissions, spin_transmissions = result
@@ -869,9 +1001,9 @@ def DOS(Elist, F, S, sig1, sig2):
         - DOS: Total density of states at each energy
         - DOSList: Site-resolved DOS at each energy
     """
-    # Create sigma calculator and use unified transport system
+    # Create sigma calculator and use checkpointable DOS calculation
     sigma_calc = SigmaCalculator(sig1, sig2, energy_dependent=False)
-    dos_values, dos_per_site_list = calculate_transport(F, S, sigma_calc, Elist, calculation='dos')
+    dos_values, dos_per_site_list = calculate_dos(F, S, sigma_calc, Elist, spin='r')
     return dos_values.tolist(), dos_per_site_list
 
 ## ENERGY DEPENDENT SIGMA:
@@ -901,10 +1033,9 @@ def cohTransE(Elist, F, S, g):
     Uses the surface Green's function calculator to compute energy-dependent
     self-energies at each energy point.
     """
-    # Create sigma calculator and use unified transport system
+    # Create sigma calculator and use checkpointable transmission calculation
     sigma_calc = SigmaCalculator(g, energy_dependent=True)
-    transmissions = calculate_transport(F, S, sigma_calc, Elist,
-                                      calculation='transmission', spin_config='restricted')
+    transmissions = calculate_transmission(F, S, sigma_calc, Elist, spin='r')
 
     # Print results to match original behavior
     for E, T in zip(Elist, transmissions):
@@ -936,14 +1067,9 @@ def cohTransSpinE(Elist, F, S, g, spin='u'):
         - Tr: Total transmission at each energy
         - Tspin: Array of spin-resolved transmissions [T↑↑, T↑↓, T↓↑, T↓↓]
     """
-    # Map spin notation to unified system
-    spin_map = {'r': 'restricted', 'u': 'unrestricted', 'ro': 'unrestricted', 'g': 'generalized'}
-    spin_config = spin_map.get(spin, 'unrestricted')
-
-    # Create sigma calculator and use unified transport system
+    # Create sigma calculator and use checkpointable transmission calculation
     sigma_calc = SigmaCalculator(g, energy_dependent=True)
-    result = calculate_transport(F, S, sigma_calc, Elist,
-                               calculation='transmission', spin_config=spin_config)
+    result = calculate_transmission(F, S, sigma_calc, Elist, spin=spin)
 
     if isinstance(result, tuple):
         transmissions, spin_transmissions = result
@@ -980,9 +1106,9 @@ def DOSE(Elist, F, S, g):
         - DOS: Total density of states at each energy
         - DOSList: Site-resolved DOS at each energy
     """
-    # Create sigma calculator and use unified transport system
+    # Create sigma calculator and use checkpointable DOS calculation
     sigma_calc = SigmaCalculator(g, energy_dependent=True)
-    dos_values, dos_per_site_list = calculate_transport(F, S, sigma_calc, Elist, calculation='dos')
+    dos_values, dos_per_site_list = calculate_dos(F, S, sigma_calc, Elist, spin='r')
 
     # Print results to match original behavior
     for E, dos in zip(Elist, dos_values):
