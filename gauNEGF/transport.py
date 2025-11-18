@@ -157,11 +157,14 @@ def _transmission_kernel_restricted(E, F, S, sigma_total, gamma1, gamma2):
     return jnp.real(jnp.trace(temp @ Ga))
 
 @jit
-def _transmission_kernel_spin_block(E, F, S, sigma_total, gamma1, gamma2, N):
+def _transmission_kernel_spin_block(E, F, S, sigma_total, gamma1, gamma2):
     """JIT-compiled kernel for spin-resolved block transmission calculation."""
     mat = E * S - F - sigma_total
     Gr = inv(mat)
     Ga = jnp.conj(Gr).T
+
+    # Compute N from matrix dimensions (matrices are 2N x 2N)
+    N = F.shape[0] // 2
 
     # Extract spin blocks efficiently
     Gr_blocks = jnp.array([Gr[:N, :N], Gr[:N, N:], Gr[N:, :N], Gr[N:, N:]])
@@ -244,40 +247,26 @@ def transmission_single_energy(E, F_jax, S_jax, sigma_calc, spin=None):
     elif spin in ['u', 'ro']:
         # Use JIT-compiled spin block transmission kernel
         total_transmission, T_spin = _transmission_kernel_spin_block(
-            E, F_jax, S_jax, sigma_total_jax, gamma1_jax, gamma2_jax, N)
+            E, F_jax, S_jax, sigma_total_jax, gamma1_jax, gamma2_jax)
         return float(total_transmission), T_spin.tolist()
 
     elif spin == 'g':
-        # Add JIT kernel for generalized case - implement later if needed
-        # For now, fall back to original implementation
-        mat = E * S_jax - F_jax - sigma_total_jax
-        Gr = inv(mat)
-        Ga = jnp.conj(Gr).T
-
-        # Extract spinor indices
-        a_indices = jnp.arange(0, 2*N, 2)  # Alpha spin indices
-        b_indices = jnp.arange(1, 2*N, 2)  # Beta spin indices
-
-        Gr_blocks = [Gr[jnp.ix_(a_indices, a_indices)], Gr[jnp.ix_(a_indices, b_indices)],
-                    Gr[jnp.ix_(b_indices, a_indices)], Gr[jnp.ix_(b_indices, b_indices)]]
-        Ga_blocks = [Ga[jnp.ix_(a_indices, a_indices)], Ga[jnp.ix_(a_indices, b_indices)],
-                    Ga[jnp.ix_(b_indices, a_indices)], Ga[jnp.ix_(b_indices, b_indices)]]
-
-        # Use diagonal gamma blocks for generalized case
-        gamma1_blocks = [gamma1_jax[jnp.ix_(a_indices, a_indices)], gamma1_jax[jnp.ix_(a_indices, a_indices)],
-                        gamma1_jax[jnp.ix_(b_indices, b_indices)], gamma1_jax[jnp.ix_(b_indices, b_indices)]]
-        gamma2_blocks = [gamma2_jax[jnp.ix_(a_indices, a_indices)], gamma2_jax[jnp.ix_(b_indices, b_indices)],
-                        gamma2_jax[jnp.ix_(a_indices, a_indices)], gamma2_jax[jnp.ix_(b_indices, b_indices)]]
-
-        T_spin = []
-        for i in range(4):
-            temp = gamma1_blocks[i] @ Gr_blocks[i] @ gamma2_blocks[i]
-            T_ij = jnp.real(jnp.trace(temp @ Ga_blocks[i]))
-            T_spin.append(float(T_ij))
-
-        total_transmission = sum(T_spin)
-        return total_transmission, T_spin
-
+        # Shuffle matrices from spinor form to block form to use the JIT kernel
+        # Spinor form: [alpha_0, beta_0, alpha_1, beta_1, ...]
+        # Block form: [alpha_0, alpha_1, ..., beta_0, beta_1, ...]
+        perm_indices = jnp.concatenate([jnp.arange(0, 2*N, 2), jnp.arange(1, 2*N, 2)])
+        
+        # Shuffle all matrices consistently
+        F_shuffled = F_jax[jnp.ix_(perm_indices, perm_indices)]
+        S_shuffled = S_jax[jnp.ix_(perm_indices, perm_indices)]
+        sigma_total_shuffled = sigma_total_jax[jnp.ix_(perm_indices, perm_indices)]
+        gamma1_shuffled = gamma1_jax[jnp.ix_(perm_indices, perm_indices)]
+        gamma2_shuffled = gamma2_jax[jnp.ix_(perm_indices, perm_indices)]
+        
+        # Use JIT-compiled spin block transmission kernel
+        total_transmission, T_spin = _transmission_kernel_spin_block(
+            E, F_shuffled, S_shuffled, sigma_total_shuffled, gamma1_shuffled, gamma2_shuffled)
+        return float(total_transmission), T_spin.tolist()
     else:
         raise ValueError(f"Unknown spin configuration '{spin}'. Use 'r', 'u', 'ro', or 'g'")
 

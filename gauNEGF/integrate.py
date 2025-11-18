@@ -52,8 +52,8 @@ parallel_logger.debug(f"Device List: {jax.devices()}")
 # INTEGRATION-SPECIFIC CONSTANTS
 # =============================================================================
 
-MAX_VMAP_MEMORY_GB = 4.0              # Use vmap if estimated memory < this (GB)
-FORCE_SYNCHRONOUS = False             # Force synchronous operation (for accurate timing)
+MAX_VMAP_MEMORY_GB = 5.0              # Use vmap if estimated memory < this (GB)
+FORCE_SYNCHRONOUS = True              # Force synchronous operation (for accurate timing)
 
 # Memory calculation constants
 MEMORY_PER_MATRIX_FACTOR = 16         # Bytes per complex128 element
