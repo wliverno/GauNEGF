@@ -28,8 +28,7 @@ jax.config.update("jax_enable_x64", True)
 
 # Configuration
 from gauNEGF.config import (TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, 
-                            FERMI_SEARCH_CYCLES, SCF_CONVERGENCE_TOL, N_KT, ENERGY_MIN, 
-                            MAX_CYCLES, MAX_GRID_POINTS)
+                            FERMI_SEARCH_CYCLES, N_KT, ENERGY_MIN, MAX_CYCLES, MAX_GRID_POINTS)
 from scipy.special import roots_legendre
 from scipy.special import roots_chebyu
 import matplotlib.pyplot as plt
@@ -329,7 +328,7 @@ def density(V, Vc, D, Gam, Emin, mu):
     den = V@ prefactor @ V.conj().T
     return den
 
-def bisectFermi(V, Vc, D, Gam, Nexp, conv=SCF_CONVERGENCE_TOL, Eminf=ENERGY_MIN):
+def bisectFermi(V, Vc, D, Gam, Nexp, conv=FERMI_CALCULATION_TOL, Eminf=ENERGY_MIN):
     """
     Find Fermi energy using bisection method.
 
@@ -1180,7 +1179,7 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
         g.setF(g.F, E, E)
         P = pMu(E)
         Ncurr = np.trace(P@g.S).real
-    while abs(ne - Ncurr) > conv and counter < maxcycles:
+    while abs(ne - Ncurr) > conv and counter < maxcycles and uBound != lBound:
         dN = ne-Ncurr
         if dN > 0 and Ef > lBound:
             lBound = Ef + 0.0
@@ -1197,6 +1196,8 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
             Ncurr = np.trace(P@g.S)
     if counter == maxcycles:
         print(f'Warning: Max cycles reached, convergence = {abs(Ncurr-ne):.2E}')
+    elif uBound == lBound:
+        print(f'Warning: Bisection failed, convergence = {abs(Ncurr-ne):.2E}')
     return Ef, dE, P
 
 def calcFermiSecant(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, 
@@ -1394,7 +1395,7 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
     n = np.trace(P@g.S).real - ne
 
     if abs(n) < conv:
-        return E, 0, P, abs(n)
+        return E, 0, P, abs(n), uBound, lBound
 
     E_pts.append(E)
     n_pts.append(n)
