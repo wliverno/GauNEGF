@@ -181,7 +181,7 @@ class NEGFE(NEGF):
         return inds
 
     # Set up Fermi Search algorithm after setting system Fermi energies
-    def setVoltage(self, qV, fermi=np.nan, Emin=None, Eminf=None, fermiMethod='muller'):
+    def setVoltage(self, qV, fermi=np.nan, Emin=None, Eminf=None, fermiMethod=None):
         """
         Set voltage bias and Fermi search method.
 
@@ -204,7 +204,10 @@ class NEGFE(NEGF):
         if self.mu1 != self.mu2 and self.N1 is not None:
             self.Nnegf=50 # Default grid
         if self.updFermi:
-            self.fermiMethod = fermiMethod
+            if not hasattr(self, 'fermiMethod'):
+                self.fermiMethod = 'muller' if fermiMethod is None else fermiMethod
+            elif fermiMethod is not None:
+                self.fermiMethod = fermiMethod
         jax.clear_caches() # reset compiled functions
     
     def setIntegralLimits(self, N1=None, N2=None, Nnegf=None, tol=ADAPTIVE_INTEGRATION_TOL, Emin=None):
@@ -273,7 +276,7 @@ class NEGFE(NEGF):
                 self.fermi, dE, P = calcFermiSecant(self.g, ne-nLower, self.Emin, self.fermi, 
                                                     self.N1, tol=self.tol, maxcycles=20)
                 print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
-                self.setVoltage(self.qV, fermiMethod=self.fermiMethod)
+                self.setVoltage(self.qV)
                 self.P = P
         print('INTEGRATION LIMITS SET!')
         print('#############################')
@@ -329,6 +332,9 @@ class NEGFE(NEGF):
         # Fermi Energy Update using local self-energy approximation
         if self.updFermi:
             fermi_old = self.fermi+0.0
+            ne = self.bar.ne
+            if self.spin =='r':
+                ne /= 2
             conv= min(self.convLevel, FERMI_CALCULATION_TOL)
             if self.fermiMethod.lower() =='predict':
                 # Generate inputs for energy-independent density calculation
@@ -360,14 +366,15 @@ class NEGFE(NEGF):
                 print('Calculating equilibrium density matrix:')
                 P += compContourP2(self.mu1)
 
+                # Fix number of electrons
+                nActual = np.real(np.trace(P @ self.S))
+                P *= ne/nActual
+
             # Full integration methods (progession: muller/secant/poly --> bisect):
             methodFail = False
             uBound = None
             lBound = None
             if self.fermiMethod.lower() =='poly':
-                ne = self.bar.ne
-                if self.spin =='r':
-                    ne /= 2
                 print('POLYNOMIAL REGRESSION METHOD:')
                 self.fermi, dE, P2, dN, uBound, lBound = calcFermiPolyFit(self.g, ne-nLower, self.Emin, fermi_old, 
                                             self.N1, tol=self.tol, conv=conv, T=self.T)
@@ -381,9 +388,6 @@ class NEGFE(NEGF):
                     P = P+P2 if self.mu1 == self.mu2 else compContourP2(self.mu1)
             
             if self.fermiMethod.lower() =='muller':
-                ne = self.bar.ne
-                if self.spin =='r':
-                    ne /= 2
                 print('MULLER METHOD:')
                 self.fermi, dE, P2, dN, uBound, lBound = calcFermiMuller(self.g, ne-nLower, self.Emin, fermi_old, 
                                             self.N1, tol=self.tol, conv=conv, T=self.T)
@@ -397,9 +401,6 @@ class NEGFE(NEGF):
                     P = P+P2 if self.mu1 == self.mu2 else compContourP2(self.mu1)
 
             if self.fermiMethod.lower() =='secant':
-                ne = self.bar.ne
-                if self.spin =='r':
-                    ne /= 2
                 print('SECANT METHOD:')
                 self.fermi, dE, P2, dN = calcFermiSecant(self.g, ne-nLower, self.Emin, fermi_old, 
                                             self.N1, tol=self.tol, conv=conv, T=self.T)
@@ -413,9 +414,6 @@ class NEGFE(NEGF):
                     P = P+P2 if self.mu1 == self.mu2 else compContourP2(self.mu1)
 
             if self.fermiMethod.lower() =='bisect' or methodFail:
-                ne = self.bar.ne
-                if self.spin =='r':
-                    ne /= 2
                 print('BISECT METHOD:')
                 self.fermi, dE, P2 = calcFermiBisect(self.g, ne-nLower, self.Emin, fermi_old, 
                                             self.N1, tol=self.tol, conv=conv, T=self.T, uBound=uBound, lBound=lBound)  
@@ -427,7 +425,7 @@ class NEGFE(NEGF):
                 raise Exception('Error: invalid Fermi search method, needs to be \'muller\',' + \
                                                  '\'secant\', \'bisect\' or \'predict\' or \'default\'')
             # Shift Emin, mu1, and mu2 and update contact self-energies
-            self.setVoltage(self.qV, fermiMethod=self.fermiMethod)
+            self.setVoltage(self.qV)
             self.Emin += self.fermi-fermi_old
             self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
         else:

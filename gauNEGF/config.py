@@ -30,5 +30,5 @@ PULAY_MIXING_SIZE = 4           # Number of iterations for Pulay mixing
 
 # GPU/CPU Integration Logging Configuration
 LOG_LEVEL = 'DEBUG'              # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
-LOG_PERFORMANCE = True           # Enable GPU performance logging
+LOG_PERFORMANCE = False          # Enable GPU performance logging
 
