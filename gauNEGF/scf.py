@@ -646,10 +646,13 @@ class NEGF(object):
             coeff = LA.solve(self.pMat, self.pB)[:-1]
             print("Applying Pulay Coeff: ", coeff)
             self.P = sum([self.pList[i, :, :]*coeff[i] for i in range(len(coeff))])
+            #ratio =  self.bar.ne/np.real(np.trace(self.P @ self.S))
+            #self.P *= ratio
             self.pList[0, :, :] = self.P
         else:
             print("Applying Damping value=", damping)
             self.P = self.pList[0, :, :]
+
         storeDen(self.bar, self.P, self.spin)
         
         # Update counters, print data
@@ -671,8 +674,10 @@ class NEGF(object):
             Energy difference from previous iteration
         """
         # Run Gaussian, update SCF Energy
+        dE = -1
         try:
             self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="DENSITY", miscroute=self.otherRoute, add_section=self.section)
+            dE = 0
         except Exception as e:
             print("WARNING: DFT METHOD HAD AN ERROR, CYCLE INVALID:")
             print(e)
@@ -682,7 +687,7 @@ class NEGF(object):
         print("SCF energy: ", self.Total_E)
 
         # Convergence variables: dE, RMSDP and MaxDP
-        dE = self.Total_E-self.Total_E_Old
+        dE = self.Total_E-self.Total_E_Old if dE !=-1 else -1
         print(f'Energy difference is: {dE:.3E}')
         return dE
 
@@ -747,6 +752,8 @@ class NEGF(object):
             try:
                 print(f"Found checkpoint file {checkpoint_file}, loading...")
                 self.setDen(io.loadmat(checkpoint_file)['den'])
+                self.fermi=io.loadmat(checkpoint_file)['fermi'][0][0]
+                self.setVoltage(self.qV)
             except Exception as e:
                 print(f"Warning: checkpoint loaded - Error: {e}")
             
@@ -774,11 +781,15 @@ class NEGF(object):
             
             # Write monitor variables
             TotalE.append(self.Total_E)
-            count.append(Niter)
-            PP.append(self.nelec)
+            if dE == -1:
+                #Niter -= 1
+                self.convLevel = 9999
+            else:
+                count.append(Niter)
+                PP.append(self.nelec)
+                self.convLevel = max(RMSDP, MaxDP, abs(dE))
             
             # Check 3 convergence criteria
-            self.convLevel = max(RMSDP, MaxDP, abs(dE))
             if self.convLevel<conv:
                 print('##########################################')
                 print('Convergence achieved after '+str(Niter)+' iterations!')
@@ -789,10 +800,10 @@ class NEGF(object):
                 Loop = False
 
             # Save progress
-            if self.convLevel < minConv and checkpoint:
+            if checkpoint:#self.convLevel < minConv and checkpoint:
                 print('Saving density checkpoint...')
-                io.savemat(checkpoint_file, {'den':self.P, 'conv':self.convLevel})
-                minConv = self.convLevel + 0.0 
+                io.savemat(checkpoint_file, {'den':self.P, 'conv':self.convLevel, 'fermi':self.fermi})
+                #minConv = self.convLevel + 0.0 
             Niter += 1
 
         if self.convLevel < conv and checkpoint:

@@ -52,8 +52,8 @@ parallel_logger.debug(f"Device List: {jax.devices()}")
 # INTEGRATION-SPECIFIC CONSTANTS
 # =============================================================================
 
-MAX_VMAP_MEMORY_GB = 5.0              # Use vmap if estimated memory < this (GB)
-FORCE_SYNCHRONOUS = True              # Force synchronous operation (for accurate timing)
+MAX_VMAP_MEMORY_GB = 1.0              # Use vmap if estimated memory < this (GB)
+FORCE_SYNCHRONOUS = False             # Force synchronous operation (for accurate timing)
 
 # Memory calculation constants
 MEMORY_PER_MATRIX_FACTOR = 16         # Bytes per complex128 element
@@ -81,6 +81,45 @@ def _gless_matrix_ops(sig, sigTot, E, F, S):
     gless = Gr_E @ gamma_E @ Ga_E
     return gless
 
+def _GIntSeq(weighted_func, F, S, g, Elist, weights, ind=None):
+    assert Elist.size == weights.size, "Elist and weights must have the same length"
+    assert F.shape == S.shape, "F and S must have the same shape"
+    assert F.shape[0] == F.shape[1], "F and S must be square matrices"
+
+    start_time = time.time()
+
+    # Convert to JAX arrays
+    F_jax = jnp.array(F)
+    S_jax = jnp.array(S)
+    Elist_jax = jnp.array(Elist)
+    weights_jax = jnp.array(weights)
+
+    matrix_size = F.shape[0]
+    num_energies = len(Elist_jax)
+    parallel_logger.info(f"GInt using sequencial (lax.scan): {matrix_size}x{matrix_size} matrix, {num_energies} energies")
+    start_time = time.time()
+    
+    # Function for lax.scan
+    def scan_fn(carry, inputs):
+        E, w = inputs
+        carry += weighted_func(E, w, F_jax, S_jax, g)
+        return carry, 1
+
+    # Integrate
+    result = jnp.zeros_like(F_jax, dtype=complex)
+    result, count = jax.lax.scan(scan_fn, result, (Elist_jax, weights_jax))
+    total = np.sum(count)
+    assert total == num_energies, f"Integration only used {total} points, expected {num_energies} points"
+
+    # Time and return
+    if FORCE_SYNCHRONOUS:
+        jax.block_until_ready(result)
+    elapsed = time.time() - start_time
+    parallel_logger.debug(f"GInt seq completed in {elapsed:.3f}s")
+    return result
+
+
+
 def _GInt(weighted_func, F, S, g, Elist, weights, ind=None):
     assert Elist.size == weights.size, "Elist and weights must have the same length"
     assert F.shape == S.shape, "F and S must have the same shape"
@@ -101,7 +140,7 @@ def _GInt(weighted_func, F, S, g, Elist, weights, ind=None):
 
     if num_energies * matrix_size_gb < MAX_VMAP_MEMORY_GB:
         parallel_logger.info(f"GInt using vmap: {matrix_size}x{matrix_size} matrix, {num_energies} energies, {num_energies*matrix_size_gb:.2f}GB")
-        result = jax.vmap(weighted_func, in_axes=(0, 0, None, None))(Elist_jax, weights_jax, F_jax, S_jax)
+        result = jax.vmap(weighted_func, in_axes=(0, 0, None, None, None))(Elist_jax, weights_jax, F_jax, S_jax, g)
         integrated = jnp.sum(result, axis=0)
         if FORCE_SYNCHRONOUS:
             jax.block_until_ready(integrated)
@@ -115,7 +154,7 @@ def _GInt(weighted_func, F, S, g, Elist, weights, ind=None):
         start_time = time.time()
         def scan_fn(carry, inputs):
             E_batch, w_batch = inputs
-            result = jax.vmap(weighted_func, in_axes=(0, 0, None, None))(E_batch, w_batch, F_jax, S_jax)
+            result = jax.vmap(weighted_func, in_axes=(0, 0, None, None, None))(E_batch, w_batch, F_jax, S_jax, g)
             carry += jnp.sum(result, axis=0)
             count = jnp.ones(result.shape[0])
             return carry, count
@@ -165,7 +204,7 @@ def GrInt(F, S, g, Elist, weights):
     ndarray
         Integrated retarded Green's function (NxN)
     """
-    def weighted_func_Gr(E, weight, F_jax, S_jax):
+    def weighted_func_Gr(E, weight, F_jax, S_jax, g):
         sigTot = g.sigmaTot(E)
         Gr = _gr_matrix_ops(sigTot, E, F_jax, S_jax)
         return weight * Gr
@@ -198,7 +237,7 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
     ndarray
         Integrated lesser Green's function (NxN)
     """
-    def weighted_func_GrLess(E, weight, F_jax, S_jax):
+    def weighted_func_GrLess(E, weight, F_jax, S_jax, g):
         useTot = (ind is None)
         sigTot = g.sigmaTot(E)
         sigma = sigTot if useTot else g.sigma(E, ind)
