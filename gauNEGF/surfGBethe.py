@@ -897,6 +897,7 @@ class surfGBAt:
         self.H = H
         self.Slist = Slist
         self.Vlist = Vlist
+        self.spin = 'r'         # spin-dependence not implemented yet
         self.NN = len(Slist)
         assert self.NN == 12, "Error: surfGBAt only implemented for FCC using 12 NN"
         #self.Slist = [np.zeros((dim,dim)) for n in range(self.NN)] #To match ANT.Gaussian default

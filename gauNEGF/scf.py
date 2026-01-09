@@ -159,6 +159,9 @@ class NEGF(object):
         self.fSearch = None
         self.fermi = None
         self.updFermi = False
+        
+        # Spin-locking attributes (optional feature, disabled by default)
+        self.spinLockEnabled = False
     
         # Start calculation: Load Initial Matrices from Gaussian
         print('Calculation started at '+str(time.asctime()))
@@ -173,12 +176,12 @@ class NEGF(object):
         self.P = getDen(self.bar, spin)
         self.F, self.locs = getFock(self.bar, spin)
         self.nsto = len(self.locs)
-        Omat = np.array(self.bar.matlist["OVERLAP"].expand())
+        Omat = jnp.array(self.bar.matlist["OVERLAP"].expand())
         if spin == "ro" or spin == "u":
-            self.S = np.block([[Omat, np.zeros(Omat.shape)],[np.zeros(Omat.shape),Omat]])
+            self.S = jnp.block([[Omat, jnp.zeros(Omat.shape)],[jnp.zeros(Omat.shape),Omat]])
         else:
             self.S = Omat
-        self.X = np.array(fractional_matrix_power(self.S, -0.5))
+        self.X = fractional_matrix_power(self.S, -0.5)
         
         # Set Emin/Emax from orbitals
         orbs, _ = eig(self.X @ self.F @ self.X)
@@ -276,22 +279,44 @@ class NEGF(object):
         """
         self.F = np.array(F_)/har_to_eV
 
-    def setDen(self, P_):
+    def setDen(self, P_, enableSpinLock=False):
         """
         Set the density matrix and update dependent quantities.
 
         Updates the density matrix, stores it in Gaussian format,
         recalculates the number of electrons, and updates the Fock matrix.
+        Optionally extracts and stores spin information for spin-locking.
 
         Parameters
         ----------
         P_ : ndarray
             New density matrix
+        enableSpinLock : bool, optional
+            If True, extract and lock spin orientations from the density matrix.
+            This is an advanced feature for specialized use cases. Default: False
         """
         self.P = P_ 
         storeDen(self.bar, self.P, self.spin)
         self.updateN() 
         print(f'Density matrix loaded, nelec = {self.nelec:.2f} electrons')
+        
+        # Enable/disable spin-locking
+        if enableSpinLock:
+            if self.spin in ['g', 'u', 'ro']:
+                self.spinLockEnabled = True
+                # Store the original density as the locked reference
+                # This ensures we always lock to the same spin structure, not a drifting one
+                self.P_locked = self.P.copy()
+                print('Spin-locking enabled: will use original density as reference for spin orientations')
+            elif self.spin == 'r':
+                print('Warning: Spin-locking requested for restricted calculation, disabling')
+                self.spinLockEnabled = False
+        else:
+            # Disable spin-locking if not explicitly enabled
+            self.spinLockEnabled = False
+            if hasattr(self, 'P_locked'):
+                delattr(self, 'P_locked')
+        
         self.PToFock()
 
     def getHOMOLUMO(self):
@@ -593,7 +618,7 @@ class NEGF(object):
         #    print("Energy=", str(pair[1]), ", Occ=", str(pair[0]))
 
         return EList[inds], occList[inds]
-
+    
     def PMix(self, damping, Pulay=False):
         """
         Mix old and new density matrices using damping or Pulay DIIS method [2].
@@ -627,8 +652,63 @@ class NEGF(object):
         .. [2] Pulay, P. (1980). DOI: 10.1016/0009-2614(80)80396-4
         .. [3] Palacios, J. J., et al. (2002). DOI: 10.1103/PhysRevB.66.035322
         """
-        # Store Old Density Info
+        # Apply spin-locking if enabled (before mixing)
         Pback = getDen(self.bar, self.spin)
+        if self.spinLockEnabled:
+            # Validate compatibility
+            if self.spin not in ['g', 'u', 'ro']:
+                print('Warning: Spin-locking not compatible with spin type, disabling')
+                self.spinLockEnabled = False
+            elif not hasattr(self, 'P_locked'):
+                print('Warning: P_locked not found, disabling spin-locking')
+                self.spinLockEnabled = False
+            else:
+                # Apply spin-locking projection using ORIGINAL locked density as reference
+                # NOT Pback, which is the previous iteration's mixed density
+                n_orbitals = self.P.shape[0] // 2
+                U = np.eye(self.P.shape[0], dtype=complex)
+                
+                for i in range(n_orbitals):
+                    # Extract 2x2 blocks based on spin type
+                    if self.spin == 'g':
+                        # Generalized: interleaved structure
+                        block_current = self.P[2*i:2*i+2, 2*i:2*i+2]
+                        block_locked = self.P_locked[2*i:2*i+2, 2*i:2*i+2]
+                    elif self.spin in ['u', 'ro']:
+                        # Unrestricted: construct from diagonal elements
+                        block_current = np.array([[self.P[i, i], 0], 
+                                                   [0, self.P[n_orbitals+i, n_orbitals+i]]], dtype=complex)
+                        block_locked = np.array([[self.P_locked[i, i], 0], 
+                                                  [0, self.P_locked[n_orbitals+i, n_orbitals+i]]], dtype=complex)
+                    
+                    # Normalize both blocks (for Bloch vector extraction)
+                    trace_current = np.trace(block_current)
+                    trace_locked = np.trace(block_locked)
+                    
+                    if abs(trace_current) > 1e-10:
+                        block_current_norm = block_current / trace_current
+                    else:
+                        block_current_norm = np.eye(2, dtype=complex) / 2.0
+                    
+                    if abs(trace_locked) > 1e-10:
+                        block_locked_norm = block_locked / trace_locked
+                    else:
+                        block_locked_norm = np.eye(2, dtype=complex) / 2.0
+                    
+                    # Transform FROM current TO locked structure
+                    U_i = self._spinorTF(block_current_norm, block_locked_norm)
+                    
+                    # Place in transformation matrix
+                    if self.spin == 'g':
+                        U[2*i:2*i+2, 2*i:2*i+2] = U_i
+                    elif self.spin in ['u', 'ro']:
+                        idx = np.ix_([i, n_orbitals+i], [i, n_orbitals+i])
+                        U[idx] = U_i
+                
+            # Apply transformation
+            self.P = U @ self.P @ U.conj().T
+        
+        # Store Old Density Info
         Dense_old = np.diag(Pback)
         Dense_diff = abs(np.diag(self.P) - Dense_old)
         self.pList[1:, :, :] = self.pList[:-1, :, :]
@@ -852,4 +932,66 @@ class NEGF(object):
                   "spin": self.spin, "den": self.P, "conv": self.convLevel}
         io.savemat(matfile, matdict)
         return self.X @ self.F @ self.X
+
+    def _spinorTF(self, rho_initial, rho_target):
+        """
+        Find unitary transformation U such that U @ rho_initial @ U.conj().T = rho_target using Bloch sphere rotation.
+
+        Parameters
+        ----------
+        rho_initial : ndarray
+            Initial density matrix
+        rho_target : ndarray
+            Target density matrix
+
+        Returns
+        -------
+        ndarray
+            Unitary transformation matrix U
+        """
+        # Pauli matrices
+        sigma_x = np.array([[0, 1], [1, 0]], dtype=complex)
+        sigma_y = np.array([[0, -1j], [1j, 0]], dtype=complex)
+        sigma_z = np.array([[1, 0], [0, -1]], dtype=complex)
+        
+        # Extract Bloch vectors
+        def get_bloch_vector(rho):
+            x = np.trace(rho @ sigma_x).real
+            y = np.trace(rho @ sigma_y).real
+            z = np.trace(rho @ sigma_z).real
+            return np.array([x, y, z])
+        
+        r_init = get_bloch_vector(rho_initial)
+        r_targ = get_bloch_vector(rho_target)
+        
+        # Normalize to unit vectors
+        r_init_norm = LA.norm(r_init)
+        r_targ_norm = LA.norm(r_targ)
+        
+        if r_init_norm < 1e-12 or r_targ_norm < 1e-12:
+            return np.eye(2, dtype=complex)  # One is maximally mixed
+        
+        n_init = r_init / r_init_norm
+        n_targ = r_targ / r_targ_norm
+        
+        # Find rotation axis and angle
+        cross = np.cross(n_init, n_targ)
+        dot = np.dot(n_init, n_targ)
+        
+        if LA.norm(cross) < 1e-12:
+            return np.eye(2, dtype=complex)  # Already aligned
+        
+        axis = cross / LA.norm(cross)
+        angle = np.arccos(np.clip(dot, -1, 1))
+        
+        # U = exp(-i * angle/2 * axis · sigma) = exp (A)
+        # Construct A = -i * angle/2 * axis · sigma
+        A = -1j * angle/2 * (axis[0]*sigma_x + axis[1]*sigma_y + axis[2]*sigma_z)
+        
+        # Eigendecomposition: A = V @ D @ V^(-1)
+        # For anti-Hermitian A, eigenvalues are purely imaginary
+        D, V = np.linalg.eig(A)
+        
+        # exp(A) = V @ diag(exp(D)) @ V^(-1)
+        return V @ np.diag(np.exp(D)) @ np.linalg.inv(V)
 

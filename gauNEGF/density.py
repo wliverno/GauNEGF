@@ -53,6 +53,56 @@ def _compute_dos_at_energy(E, F, S, sigma_total):
     Gr = inv(mat)
     return -jnp.imag(jnp.trace(Gr)) / jnp.pi
 
+
+@jit
+def lineIntSpin(lineInt):
+    N = lineInt.shape[0]
+    nOrbs = N//2
+    
+    # Pauli matrices
+    I2 = jnp.eye(2, dtype=complex)
+    sigma_x = jnp.array([[0,1],[1,0]], dtype=complex)
+    sigma_y = jnp.array([[0,-1j],[1j,0]], dtype=complex)
+    sigma_z = jnp.array([[1,0],[0,-1]], dtype=complex)
+    
+    # Rotation matrices
+    Ux = jnp.kron(jnp.eye(nOrbs), jnp.array([[1,1],[-1, 1]])/jnp.sqrt(2))
+    Uy = jnp.kron(jnp.eye(nOrbs), jnp.array([[1,-1j],[-1j,1]])/jnp.sqrt(2))
+    Uz = jnp.eye(N)
+    Us = jnp.stack([Ux, Uy, Uz])  # Shape: (3, N, N)
+    
+    # Vectorized rotation and extraction
+    def extract_diagonal_diffs(U):
+        int_rot = U @ lineInt @ U.conj().T
+        P_rot = -1*jnp.imag(int_rot) / jnp.pi
+        
+        # Reshape to (nOrbs, 2, nOrbs, 2) for block processing
+        P_blocks = P_rot.reshape(nOrbs, 2, nOrbs, 2)
+        
+        # Extract diagonal differences: [0,0] - [1,1] for each block
+        return P_blocks[:, 0, :, 0] - P_blocks[:, 1, :, 1]  # Shape: (nOrbs, nOrbs)
+    
+    # Apply to all rotations at once using vmap
+    m_vec = jax.vmap(extract_diagonal_diffs)(Us)  # Shape: (3, nOrbs, nOrbs)
+    
+    # Charge density (vectorized)
+    P_z = -1*jnp.imag(lineInt) / jnp.pi
+    n = jnp.trace(P_z.reshape(nOrbs, 2, nOrbs, 2), axis1=1, axis2=3)
+    
+    # Vectorized block assembly
+    # Create Pauli matrices stack
+    sigmas = jnp.stack([sigma_x, sigma_y, sigma_z])  # Shape: (3, 2, 2)
+    
+    # Compute all 2x2 blocks at once
+    # n[i,j] * I2 + sum_alpha(m_vec[alpha,i,j] * sigma_alpha)
+    blocks = (n[:, :, None, None] * I2[None, None, :, :] + 
+              jnp.einsum('aij,akl->ijkl', m_vec, sigmas)) * 0.5
+    
+    # Reshape blocks back to full matrix
+    P = blocks.transpose(0, 2, 1, 3).reshape(N, N)
+    
+    return P
+
 # Debugging for fermi search functions
 FERMI_DEBUG=False
 
@@ -382,6 +432,7 @@ def bisectFermi(V, Vc, D, Gam, Nexp, conv=FERMI_CALCULATION_TOL, Eminf=ENERGY_MI
     return fermi
 
 ## ENERGY DEPENDENT DENSITY FUNCTIONS
+ 
 def densityRealN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True):
     """
     Calculate equilibrium density matrix using real-axis integration on a specified grid.
@@ -418,7 +469,7 @@ def densityRealN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True):
     kT = kB*T
     Emax = mu + nKT*kT
     mid = (Emax-Emin)/2
-    defInt = np.array(np.zeros(np.shape(F)), dtype=complex)
+    lineInt = np.array(np.zeros(np.shape(F)), dtype=complex)
     x,w = roots_legendre(N)
     x = np.real(x)
     
@@ -428,12 +479,18 @@ def densityRealN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True):
     if showText:
         print(f'Integrating {N} points along real axis...')
 
-    defInt = GrInt(F, S, g, Elist, weights)
+    lineInt = GrInt(F, S, g, Elist, weights)
 
     if showText:
         print('Integration done!')
     
-    return (-1+0j)*np.imag(defInt)/(np.pi)
+
+    # For non-collinear spin, we need the full complex result, not just imaginary part
+    if g.spin == 'g':
+        return lineIntSpin(lineInt) 
+    else:
+        # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19) 
+        return -1*jnp.imag(lineInt) / np.pi
 
 def densityReal(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, maxN=MAX_CYCLES, debug=False):
     """
@@ -744,8 +801,14 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True, meth
     if showText:
         print('Integration done!')
 
-    #Return -Im(Integral)/pi, Equation 19 in 10.1103/PhysRevB.63.245407
-    return (1+0j)*np.imag(lineInt)/np.pi
+    # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19) gives a real matrix, 
+
+    # For non-collinear spin, we need the full complex result, not just imaginary part
+    if g.spin == 'g':
+        return lineIntSpin(-1*lineInt) 
+    else:
+        # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19) 
+        return jnp.imag(lineInt) / np.pi 
 
 def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, debug=False):
     """
@@ -812,9 +875,13 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
     
         lineInt += integratePointsAdaptiveANT(computePointBroadening, tol=tol, debug=debug)
 
-    #Return -Im(Integral)/pi, Equation 19 in 10.1103/PhysRevB.63.245407
-    return (1+0j)*np.imag(lineInt)/np.pi
 
+    # For non-collinear spin, we need the full complex result, not just imaginary part
+    if g.spin == 'g':
+        return lineIntSpin(-1*lineInt)
+    else:
+        # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19)
+        return jnp.imag(lineInt) / np.pi 
 
 ## INTEGRATION LIMIT FUNCTIONS
 # Calculate Emin using DOS
@@ -1513,4 +1580,5 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         print(f'Warning: Max cycles reached, convergence = {abs(n):.2E}')
 
     return E, dE, P, abs(n), uBound, lBound
+
 
