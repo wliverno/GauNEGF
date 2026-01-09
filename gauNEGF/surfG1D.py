@@ -80,7 +80,7 @@ class surfG:
     gPrev : list
         Previous surface Green's functions for convergence
     """
-    def __init__(self, Fock, Overlap, indsList, taus=None, staus=None, alphas=None, aOverlaps=None, betas=None, bOverlaps=None, eta=ETA):
+    def __init__(self, Fock, Overlap, indsList, taus=None, staus=None, alphas=None, aOverlaps=None, betas=None, bOverlaps=None, eta=ETA, spin='r'):
         """
         Initialize the surface Green's function calculator.
 
@@ -125,6 +125,7 @@ class surfG:
         # Set up system
         self.F = np.array(Fock)
         self.S = np.array(Overlap)
+        self.spin = spin
         self.X = np.array(fractional_matrix_power(Overlap, -0.5))
         # Keep indsList as Python list - loop unrolls with concrete indices
         self.indsList = [np.array(inds) for inds in indsList]

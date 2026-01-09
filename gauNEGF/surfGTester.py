@@ -59,7 +59,7 @@ class surfGTest:
     parameters are unused but maintained for interface consistency with other
     surface Green's function calculators.
     """
-    def __init__(self, Fock, Overlap, indsList, sig1=None, sig2=None):
+    def __init__(self, Fock, Overlap, indsList, sig1=None, sig2=None, spin='r'):
         """
         Initialize constant self-energy calculator.
         
@@ -78,6 +78,7 @@ class surfGTest:
         """
         self.F = Fock
         self.S = Overlap
+        self.spin = spin
         self.N = len(Fock)
         self.indsList = indsList
         self.sig = [np.array(np.zeros((self.N, self.N)), dtype=complex)]*2

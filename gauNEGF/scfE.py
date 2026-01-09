@@ -137,7 +137,7 @@ class NEGFE(NEGF):
                 tauList = (ind1, ind2)
 
         # Generate surfG() object for the molecule + contacts and initialize variables
-        self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eta)
+        self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eta, spin)
         
         if alphas is not None:
             muL = getFermi1DContact(self.g, neList[0], 0)
@@ -173,7 +173,7 @@ class NEGFE(NEGF):
         """
         super().setSigma(lContact, rContact, sig, sig2)
         inds = (self.lInd, self.rInd)
-        self.g = surfGTest(self.F*har_to_eV, self.S, inds, sig, sig2)
+        self.g = surfGTest(self.F*har_to_eV, self.S, inds, sig, sig2, spin)
         
         # Update other variables
         self.setIntegralLimits()
@@ -321,13 +321,14 @@ class NEGFE(NEGF):
         else:
             P = densityRealN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
         nLower = np.trace(self.S@P).real
-
         # Helper function for densityComplex()
         def compContourP2(mu):
                 if self.N1 is not None:
-                    return densityComplexN(self.F*har_to_eV, self.S, self.g, self.Emin, mu, N=self.N1, T=self.T)
+                    return densityComplexN(self.F*har_to_eV, self.S, self.g, self.Emin, 
+                                                    mu, N=self.N1, T=self.T)
                 else:
-                    return densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, mu, tol=self.tol, T=self.T)
+                    return densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, 
+                                                    mu, tol=self.tol, T=self.T)
 
         # Fermi Energy Update using local self-energy approximation
         if self.updFermi:
