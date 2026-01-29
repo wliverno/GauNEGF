@@ -279,7 +279,7 @@ class NEGF(object):
         """
         self.F = np.array(F_)/har_to_eV
 
-    def setDen(self, P_, enableSpinLock=False):
+    def setDen(self, P_, enableSpinLock=False, spinLockList=None):
         """
         Set the density matrix and update dependent quantities.
 
@@ -294,6 +294,8 @@ class NEGF(object):
         enableSpinLock : bool, optional
             If True, extract and lock spin orientations from the density matrix.
             This is an advanced feature for specialized use cases. Default: False
+        spinLockList : list, optional
+            List of atoms to apply sp
         """
         self.P = P_ 
         storeDen(self.bar, self.P, self.spin)
@@ -307,6 +309,9 @@ class NEGF(object):
                 # Store the original density as the locked reference
                 # This ensures we always lock to the same spin structure, not a drifting one
                 self.P_locked = self.P.copy()
+                if hasattr(spinLockList, '__iter__') and hasattr(self, 'locs'):
+                    inds = np.where(np.isin(abs(self.locs), spinLockList, invert=True))[0]
+                    self.P_locked[np.ix_(inds, inds)] = 0
                 print('Spin-locking enabled: will use original density as reference for spin orientations')
             elif self.spin == 'r':
                 print('Warning: Spin-locking requested for restricted calculation, disabling')
@@ -681,32 +686,33 @@ class NEGF(object):
                         block_locked = np.array([[self.P_locked[i, i], 0], 
                                                   [0, self.P_locked[n_orbitals+i, n_orbitals+i]]], dtype=complex)
                     
-                    # Normalize both blocks (for Bloch vector extraction)
                     trace_current = np.trace(block_current)
                     trace_locked = np.trace(block_locked)
-                    
-                    if abs(trace_current) > 1e-10:
-                        block_current_norm = block_current / trace_current
+                    if abs(trace_current) > 1e-10 and abs(trace_locked) > 1e-10:
+                        U_i = self._spinorTF(block_current, block_locked)
                     else:
-                        block_current_norm = np.eye(2, dtype=complex) / 2.0
+                        U_i = np.eye(2) #identity
                     
-                    if abs(trace_locked) > 1e-10:
-                        block_locked_norm = block_locked / trace_locked
-                    else:
-                        block_locked_norm = np.eye(2, dtype=complex) / 2.0
+                    newSpinor = U_i@block_current@U_i.conj().T
                     
-                    # Transform FROM current TO locked structure
-                    U_i = self._spinorTF(block_current_norm, block_locked_norm)
-                    
-                    # Place in transformation matrix
+                    # Place in transformation matrix (Unused, commented out below)
+                    # Rotate spinor on main diagonal, leave off-diagonals untouched
                     if self.spin == 'g':
                         U[2*i:2*i+2, 2*i:2*i+2] = U_i
+                        self.P = self.P.at[2*i:2*i+2, 2*i:2*i+2].set(newSpinor)
                     elif self.spin in ['u', 'ro']:
                         idx = np.ix_([i, n_orbitals+i], [i, n_orbitals+i])
                         U[idx] = U_i
+                        self.P = self.P.at[idx].set(newSpinor)
                 
-            # Apply transformation
-            self.P = U @ self.P @ U.conj().T
+            # Apply transformation to Fock matrix 
+            #U_nonorth = self.X@U@LA.inv(self.X)
+            #self.F = U_nonorth @ self.F @ U_nonorth.conj().T
+            #self.FockToP()
+
+            # Apply transformation directly to density matrix
+            #U_nonorth = self.X@U@LA.inv(self.X)
+            #self.P = U_nonorth @ self.P @ U_nonorth.conj().T
         
         # Store Old Density Info
         Dense_old = np.diag(Pback)
@@ -867,7 +873,7 @@ class NEGF(object):
             else:
                 count.append(Niter)
                 PP.append(self.nelec)
-                self.convLevel = max(RMSDP, MaxDP, abs(dE))
+                self.convLevel = max(RMSDP, MaxDP, abs(dE)/damping)
             
             # Check 3 convergence criteria
             if self.convLevel<conv:
@@ -880,7 +886,7 @@ class NEGF(object):
                 Loop = False
 
             # Save progress
-            if checkpoint:#self.convLevel < minConv and checkpoint:
+            if self.convLevel < minConv and checkpoint:
                 print('Saving density checkpoint...')
                 io.savemat(checkpoint_file, {'den':self.P, 'conv':self.convLevel, 'fermi':self.fermi})
                 #minConv = self.convLevel + 0.0 

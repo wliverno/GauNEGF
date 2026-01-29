@@ -148,6 +148,11 @@ class SigmaCalculator:
 
 # JIT-compiled computational kernels for performance
 @jit
+def _Im(A):
+    """JIT-compiled kernel for imaginary part of operator. """
+    return (A - jnp.conj(A).T)/2j
+
+@jit
 def _transmission_kernel_restricted(E, F, S, sigma_total, gamma1, gamma2):
     """JIT-compiled kernel for restricted transmission calculation."""
     mat = E * S - F - sigma_total
@@ -185,7 +190,7 @@ def _dos_kernel(E, F, S, sigma_total):
     """JIT-compiled kernel for density of states calculation."""
     mat = E * S - F - sigma_total
     Gr = inv(mat)
-    dos_per_site = -jnp.imag(jnp.diag(Gr)) / jnp.pi
+    dos_per_site = -_Im(jnp.diag(Gr)) / jnp.pi
     total_dos = jnp.sum(dos_per_site)
     return total_dos, dos_per_site
 
@@ -325,8 +330,8 @@ def dos_single_energy(E, F_jax, S_jax, sigma_calc, spin=None):
         Gr_down = Gr[N:, N:]    # Down-down block
 
         # Calculate spin-resolved DOS
-        dos_up_per_site = -np.imag(np.diag(Gr_up)) / np.pi
-        dos_down_per_site = -np.imag(np.diag(Gr_down)) / np.pi
+        dos_up_per_site = -_Im(np.diag(Gr_up)) / np.pi
+        dos_down_per_site = -_Im(np.diag(Gr_down)) / np.pi
 
         # Total DOS per site (both spins)
         dos_per_site = np.concatenate([dos_up_per_site, dos_down_per_site])
@@ -356,11 +361,11 @@ def dos_single_energy(E, F_jax, S_jax, sigma_calc, spin=None):
         Gr_beta = Gr[np.ix_(beta_indices, beta_indices)]
 
         # Calculate spin-resolved DOS
-        dos_alpha_per_site = -np.imag(np.diag(Gr_alpha)) / np.pi
-        dos_beta_per_site = -np.imag(np.diag(Gr_beta)) / np.pi
+        dos_alpha_per_site = -_Im(np.diag(Gr_alpha)) / np.pi
+        dos_beta_per_site = -_Im(np.diag(Gr_beta)) / np.pi
 
         # Total DOS per site (both spins)
-        dos_per_site = -np.imag(np.diag(Gr)) / np.pi
+        dos_per_site = -_Im(np.diag(Gr)) / np.pi
 
         # Totals
         total_dos_alpha = np.sum(dos_alpha_per_site)
