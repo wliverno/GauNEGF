@@ -54,55 +54,6 @@ def _compute_dos_at_energy(E, F, S, sigma_total):
     return -jnp.imag(jnp.trace(Gr)) / jnp.pi
 
 
-@jit
-def lineIntSpin(lineInt):
-    N = lineInt.shape[0]
-    nOrbs = N//2
-    
-    # Pauli matrices
-    I2 = jnp.eye(2, dtype=complex)
-    sigma_x = jnp.array([[0,1],[1,0]], dtype=complex)
-    sigma_y = jnp.array([[0,-1j],[1j,0]], dtype=complex)
-    sigma_z = jnp.array([[1,0],[0,-1]], dtype=complex)
-    
-    # Rotation matrices
-    Ux = jnp.kron(jnp.eye(nOrbs), jnp.array([[1,1],[-1, 1]])/jnp.sqrt(2))
-    Uy = jnp.kron(jnp.eye(nOrbs), jnp.array([[1,-1j],[-1j,1]])/jnp.sqrt(2))
-    Uz = jnp.eye(N)
-    Us = jnp.stack([Ux, Uy, Uz])  # Shape: (3, N, N)
-    
-    # Vectorized rotation and extraction
-    def extract_diagonal_diffs(U):
-        int_rot = U @ lineInt @ U.conj().T
-        P_rot = -1*jnp.imag(int_rot) / jnp.pi
-        
-        # Reshape to (nOrbs, 2, nOrbs, 2) for block processing
-        P_blocks = P_rot.reshape(nOrbs, 2, nOrbs, 2)
-        
-        # Extract diagonal differences: [0,0] - [1,1] for each block
-        return P_blocks[:, 0, :, 0] - P_blocks[:, 1, :, 1]  # Shape: (nOrbs, nOrbs)
-    
-    # Apply to all rotations at once using vmap
-    m_vec = jax.vmap(extract_diagonal_diffs)(Us)  # Shape: (3, nOrbs, nOrbs)
-    
-    # Charge density (vectorized)
-    P_z = -1*jnp.imag(lineInt) / jnp.pi
-    n = jnp.trace(P_z.reshape(nOrbs, 2, nOrbs, 2), axis1=1, axis2=3)
-    
-    # Vectorized block assembly
-    # Create Pauli matrices stack
-    sigmas = jnp.stack([sigma_x, sigma_y, sigma_z])  # Shape: (3, 2, 2)
-    
-    # Compute all 2x2 blocks at once
-    # n[i,j] * I2 + sum_alpha(m_vec[alpha,i,j] * sigma_alpha)
-    blocks = (n[:, :, None, None] * I2[None, None, :, :] + 
-              jnp.einsum('aij,akl->ijkl', m_vec, sigmas)) * 0.5
-    
-    # Reshape blocks back to full matrix
-    P = blocks.transpose(0, 2, 1, 3).reshape(N, N)
-    
-    return P
-
 # Debugging for fermi search functions
 FERMI_DEBUG=False
 
@@ -485,12 +436,8 @@ def densityRealN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True):
         print('Integration done!')
     
 
-    # For non-collinear spin, we need the full complex result, not just imaginary part
-    if g.spin == 'g':
-        return lineIntSpin(lineInt) 
-    else:
-        # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19) 
-        return -1*jnp.imag(lineInt) / np.pi
+    # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19) 
+    return (1j/(2*jnp.pi)) * (lineInt - lineInt.conj().T)
 
 def densityReal(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, maxN=MAX_CYCLES, debug=False):
     """
@@ -801,14 +748,8 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True, meth
     if showText:
         print('Integration done!')
 
-    # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19) gives a real matrix, 
-
-    # For non-collinear spin, we need the full complex result, not just imaginary part
-    if g.spin == 'g':
-        return lineIntSpin(-1*lineInt) 
-    else:
-        # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19) 
-        return jnp.imag(lineInt) / np.pi 
+    # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19) 
+    return (-1j/(2*jnp.pi)) * (lineInt - lineInt.conj().T)
 
 def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, debug=False):
     """
@@ -876,12 +817,8 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
         lineInt += integratePointsAdaptiveANT(computePointBroadening, tol=tol, debug=debug)
 
 
-    # For non-collinear spin, we need the full complex result, not just imaginary part
-    if g.spin == 'g':
-        return lineIntSpin(-1*lineInt)
-    else:
-        # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19)
-        return jnp.imag(lineInt) / np.pi 
+    # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19)
+    return (-1j/(2*jnp.pi)) * (lineInt - lineInt.conj().T)
 
 ## INTEGRATION LIMIT FUNCTIONS
 # Calculate Emin using DOS

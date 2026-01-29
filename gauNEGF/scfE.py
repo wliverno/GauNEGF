@@ -173,7 +173,7 @@ class NEGFE(NEGF):
         """
         super().setSigma(lContact, rContact, sig, sig2)
         inds = (self.lInd, self.rInd)
-        self.g = surfGTest(self.F*har_to_eV, self.S, inds, sig, sig2, spin)
+        self.g = surfGTest(self.F*har_to_eV, self.S, inds, sig, sig2, self.spin)
         
         # Update other variables
         self.setIntegralLimits()
