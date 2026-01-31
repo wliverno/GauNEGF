@@ -24,11 +24,11 @@ References
 """
 
 # Python packages
-import jax
-import jax.numpy as np
+import jax.numpy as jnp
 import jax.numpy.linalg as LA 
 from jax import jit
 import jax.lax as lax
+import jax
 
 # Developed packages
 from gauNEGF.density import getFermiContact
@@ -118,7 +118,7 @@ class surfGB:
         self.spin = spin
         orbMap = bar.ibfatm[bar.ibfatm>0] 
         orbTyp = bar.ibftyp[bar.ibfatm>0]
-        coords =np.array([bar.c[i*3:(i+1)*3] for i in range(len(bar.c)//3)])*bohr_to_ang
+        coords =jnp.array([bar.c[i*3:(i+1)*3] for i in range(len(bar.c)//3)])*bohr_to_ang
         self.N = len(orbMap)
 
         # Collect contact information
@@ -126,23 +126,23 @@ class surfGB:
             indsList = []
             cList = []
             for atom in contact:
-                inds = np.where(np.isin(orbMap, atom))[0]
+                inds = jnp.where(jnp.isin(orbMap, atom))[0]
                 cList.append(coords[atom-1])
                 assert len(inds) == 9, f'Error: Atom {atom} has {len(inds)} basis functions, expecting 9'
-                inds = inds[np.argsort(abs(orbTyp[inds])//1000)]
+                inds = inds[jnp.argsort(abs(orbTyp[inds])//1000)]
                 indsList.append(inds)
             self.indsLists.append(indsList)
             # Calculate plane direction using SVD
-            cList = np.array(cList)  # Convert list to JAX array
-            centeredCoords = cList-np.mean(cList, axis=0)
+            cList = jnp.array(cList)  # Convert list to JAX array
+            centeredCoords = cList-jnp.mean(cList, axis=0)
             _, _, Vt = LA.svd(centeredCoords)
-            contDir = np.mean(cList, axis=0)-np.mean(coords, axis=0)
+            contDir = jnp.mean(cList, axis=0)-jnp.mean(coords, axis=0)
             contVec = Vt[-1]
-            if np.dot(contDir, contVec)<0:
+            if jnp.dot(contDir, contVec)<0:
                 contVec *= -1 
             self.cVecs.append(contVec)
             # Calculate one lattice direction for lining up atoms
-            vInd = np.argmin(np.array([LA.norm(v - cList[0]) for v in cList[1:]]))+1
+            vInd = jnp.argmin(jnp.array([LA.norm(v - cList[0]) for v in cList[1:]]))+1
             latVec = cList[vInd]-cList[0]
             latDist = LA.norm(latVec)
             self.latVecs.append(latVec/latDist)
@@ -159,15 +159,15 @@ class surfGB:
                 for c2 in coords:
                     l = LA.norm(c2-c)
                     # if within 0.2*nearest neighbor dist and not the same atom
-                    if l > 0.8 * latDist and l < 1.2 * latDist and not np.allclose(c2, c):
+                    if l > 0.8 * latDist and l < 1.2 * latDist and not jnp.allclose(c2, c):
                         nAtVecs.append((c2-c)/l) #Unit vector for that direction
                 
                 # Align out of plane vectors (two options)
                 nVecs = nVecs1.copy()
                 outOfPlane = [3,4,5,9,10,11]
                 for vec in nAtVecs:
-                    valList = np.array([np.dot(vec, direction) for direction in nVecs2])
-                    dirInd = np.argmax(valList)
+                    valList = jnp.array([jnp.dot(vec, direction) for direction in nVecs2])
+                    dirInd = jnp.argmax(valList)
                     if dirInd in outOfPlane and valList[dirInd]>0.9:
                         nVecs = nVecs2.copy()
                         break
@@ -175,8 +175,8 @@ class surfGB:
                 # Now that orientation is fixed, track all neighbors
                 nInds = []
                 for vec in nAtVecs:
-                    valList = np.array([np.dot(vec, direction) for direction in nVecs])
-                    dirInd = np.argmax(valList)
+                    valList = jnp.array([jnp.dot(vec, direction) for direction in nVecs])
+                    dirInd = jnp.argmax(valList)
                     if valList[dirInd]>0.9:
                         nInds.append(dirInd)
                     else:
@@ -242,52 +242,52 @@ class surfGB:
         """
         
         # Project first_neighbor onto plane perpendicular to plane_normal
-        proj = first_neighbor - np.dot(first_neighbor, plane_normal) * plane_normal
+        proj = first_neighbor - jnp.dot(first_neighbor, plane_normal) * plane_normal
         first_neighbor = proj / LA.norm(proj)
         
         # Generate in-plane vectors using 60-degree rotations
         in_plane_vectors = []
-        rotation_angle = np.pi / 3  # 60 degrees
+        rotation_angle = jnp.pi / 3  # 60 degrees
         
         for i in range(3):
             angle = i * rotation_angle
             # Rodrigues rotation formula
-            cos_theta = np.cos(angle)
-            sin_theta = np.sin(angle)
+            cos_theta = jnp.cos(angle)
+            sin_theta = jnp.sin(angle)
             
-            K = np.array([[0, -plane_normal[2], plane_normal[1]],
+            K = jnp.array([[0, -plane_normal[2], plane_normal[1]],
                          [plane_normal[2], 0, -plane_normal[0]],
                          [-plane_normal[1], plane_normal[0], 0]])
             
-            R = np.eye(3) + sin_theta * K + (1 - cos_theta) * np.matmul(K, K)
-            rotated_vector = np.dot(R, first_neighbor)
+            R = jnp.eye(3) + sin_theta * K + (1 - cos_theta) * jnp.matmul(K, K)
+            rotated_vector = jnp.dot(R, first_neighbor)
             in_plane_vectors.append(rotated_vector / LA.norm(rotated_vector))
         
         # Generate out-of-plane vectors
-        out_of_plane_angle = np.arccos(1/np.sqrt(3)) # ~54.74
+        out_of_plane_angle = jnp.arccos(1/jnp.sqrt(3)) # ~54.74
         
         out_of_plane_vectors = []
         # Add 30deg = pi/6 rotation to base vector before going out of plane
-        rot_angle = np.pi/6
-        K = np.array([[0, -plane_normal[2], plane_normal[1]],
+        rot_angle = jnp.pi/6
+        K = jnp.array([[0, -plane_normal[2], plane_normal[1]],
                       [plane_normal[2], 0, -plane_normal[0]],
                       [-plane_normal[1], plane_normal[0], 0]])
-        R = np.eye(3) + np.sin(rot_angle) * K + (1 - np.cos(rot_angle)) * np.matmul(K, K)
-        rotated_first = np.dot(R, first_neighbor)
-        out_of_plane_base = np.cos(out_of_plane_angle) * rotated_first + \
-                      np.sin(out_of_plane_angle) * plane_normal
+        R = jnp.eye(3) + jnp.sin(rot_angle) * K + (1 - jnp.cos(rot_angle)) * jnp.matmul(K, K)
+        rotated_first = jnp.dot(R, first_neighbor)
+        out_of_plane_base = jnp.cos(out_of_plane_angle) * rotated_first + \
+                      jnp.sin(out_of_plane_angle) * plane_normal
         
         for i in range(3):
-            angle = i * 2 * np.pi / 3  # 120 degree rotations
-            cos_theta = np.cos(angle)
-            sin_theta = np.sin(angle)
+            angle = i * 2 * jnp.pi / 3  # 120 degree rotations
+            cos_theta = jnp.cos(angle)
+            sin_theta = jnp.sin(angle)
 
-            K = np.array([[0, -plane_normal[2], plane_normal[1]],
+            K = jnp.array([[0, -plane_normal[2], plane_normal[1]],
                          [plane_normal[2], 0, -plane_normal[0]],
                          [-plane_normal[1], plane_normal[0], 0]])
 
-            R = np.eye(3) + sin_theta * K + (1 - cos_theta) * np.matmul(K, K)
-            rotated_vector = np.dot(R, out_of_plane_base)
+            R = jnp.eye(3) + sin_theta * K + (1 - cos_theta) * jnp.matmul(K, K)
+            rotated_vector = jnp.dot(R, out_of_plane_base)
             out_of_plane_vectors.append(rotated_vector)
         
         # Add corresponding opposite vectors at the (k+6)%12 location
@@ -352,7 +352,7 @@ class surfGB:
         # Setup onsite H0 matrix before Fermi level shifting
         hdiag = [self.Edict['s']]+ [self.Edict['p']]*3 + [self.Edict['dd']]+ \
                 [self.Edict['dt']]*2 + [self.Edict['dd'], self.Edict['dt']]
-        self.H0 = np.diag(np.array(hdiag))
+        self.H0 = jnp.diag(jnp.array(hdiag))
 
     def constructMat(self, Mdict, dirCosines):
         """
@@ -384,7 +384,7 @@ class surfGB:
         - [4:9,4:9]: d-d block
         """
 
-        M = np.zeros((dim, dim))
+        M = jnp.zeros((dim, dim))
         
         #Original matrix before rotation - assuming [0,0,1] bond direction
         # s-s coefficient
@@ -420,56 +420,56 @@ class surfGB:
         M = M.at[8,8].set(Mdict['ddd']) #dxy - dxy 
         
         # Initialize 9x9 transformation matrix and polar directions
-        tr = np.zeros((9, 9))
+        tr = jnp.zeros((9, 9))
         x, y, z = dirCosines
-        theta = np.arccos(z)  # polar angle from z-axis
-        phi = np.arctan2(y, x)  # azimuthal angle in x-y plane
+        theta = jnp.arccos(z)  # polar angle from z-axis
+        phi = jnp.arctan2(y, x)  # azimuthal angle in x-y plane
         
         # s orbital (1x1) at position [0,0] - always 1 since spherically symmetric
         tr = tr.at[0,0].set(1.0)
         
         # p orbitals (3x3) at positions [1:4,1:4]
         # [px,py,pz] block - describes how p orbitals transform under rotation
-        tr = tr.at[1:4,1:4].set(np.array([
-            [np.cos(theta) * np.cos(phi), -np.sin(phi)  , np.sin(theta)*np.cos(phi)],
-            [np.cos(theta) * np.sin(phi),  np.cos(phi)  , np.sin(theta)*np.sin(phi)], 
-            [-np.sin(theta)             ,  0            , np.cos(theta)]
+        tr = tr.at[1:4,1:4].set(jnp.array([
+            [jnp.cos(theta) * jnp.cos(phi), -jnp.sin(phi)  , jnp.sin(theta)*jnp.cos(phi)],
+            [jnp.cos(theta) * jnp.sin(phi),  jnp.cos(phi)  , jnp.sin(theta)*jnp.sin(phi)], 
+            [-jnp.sin(theta)             ,  0            , jnp.cos(theta)]
         ]))
         
         # d orbitals (5x5) at positions [4:9,4:9]
         # [d3z2-r2, dxz, dyz, dx2-y2, dxy] block - transforms the five d orbitals
-        d_block = np.zeros((5,5))
+        d_block = jnp.zeros((5,5))
         
         # Copying formula from ANT.Gaussian directly
         d_block = d_block.at[0,0].set((3 * z**2 - 1) / 2)
-        d_block = d_block.at[0,1].set(-np.sqrt(3) * np.sin(2*theta) / 2)
-        d_block = d_block.at[0,3].set(np.sqrt(3) * np.sin(theta)**2 / 2)
+        d_block = d_block.at[0,1].set(-jnp.sqrt(3) * jnp.sin(2*theta) / 2)
+        d_block = d_block.at[0,3].set(jnp.sqrt(3) * jnp.sin(theta)**2 / 2)
         
-        d_10 = np.sqrt(3) * np.sin(2*theta) * np.cos(phi) / 2
+        d_10 = jnp.sqrt(3) * jnp.sin(2*theta) * jnp.cos(phi) / 2
         d_block = d_block.at[1,0].set(d_10)
-        d_block = d_block.at[1,1].set(np.cos(2*theta) * np.cos(phi))
-        d_block = d_block.at[1,2].set(-np.cos(theta) * np.sin(phi))
-        d_block = d_block.at[1,3].set(-d_10 / np.sqrt(3))
-        d_block = d_block.at[1,4].set(np.sin(theta) * np.sin(phi))
+        d_block = d_block.at[1,1].set(jnp.cos(2*theta) * jnp.cos(phi))
+        d_block = d_block.at[1,2].set(-jnp.cos(theta) * jnp.sin(phi))
+        d_block = d_block.at[1,3].set(-d_10 / jnp.sqrt(3))
+        d_block = d_block.at[1,4].set(jnp.sin(theta) * jnp.sin(phi))
         
-        d_20 = np.sqrt(3) * np.sin(2*theta) * np.sin(phi) / 2
+        d_20 = jnp.sqrt(3) * jnp.sin(2*theta) * jnp.sin(phi) / 2
         d_block = d_block.at[2,0].set(d_20)
-        d_block = d_block.at[2,1].set(np.cos(2*theta) * np.sin(phi))
-        d_block = d_block.at[2,2].set(np.cos(theta) * np.cos(phi))
-        d_block = d_block.at[2,3].set(-d_20 / np.sqrt(3))
-        d_block = d_block.at[2,4].set(-np.sin(theta) * np.cos(phi))
+        d_block = d_block.at[2,1].set(jnp.cos(2*theta) * jnp.sin(phi))
+        d_block = d_block.at[2,2].set(jnp.cos(theta) * jnp.cos(phi))
+        d_block = d_block.at[2,3].set(-d_20 / jnp.sqrt(3))
+        d_block = d_block.at[2,4].set(-jnp.sin(theta) * jnp.cos(phi))
         
-        d_block = d_block.at[3,0].set(np.sqrt(3) * np.sin(theta)**2 * np.cos(2*phi) / 2)
-        d_block = d_block.at[3,1].set(np.sin(2*theta) * np.cos(2*phi) / 2)
-        d_block = d_block.at[3,2].set(-np.sin(theta) * np.sin(2*phi))
-        d_block = d_block.at[3,3].set((1 + np.cos(theta)**2) * np.cos(2*phi) / 2)
-        d_block = d_block.at[3,4].set(-np.cos(theta) * np.sin(2*phi))
+        d_block = d_block.at[3,0].set(jnp.sqrt(3) * jnp.sin(theta)**2 * jnp.cos(2*phi) / 2)
+        d_block = d_block.at[3,1].set(jnp.sin(2*theta) * jnp.cos(2*phi) / 2)
+        d_block = d_block.at[3,2].set(-jnp.sin(theta) * jnp.sin(2*phi))
+        d_block = d_block.at[3,3].set((1 + jnp.cos(theta)**2) * jnp.cos(2*phi) / 2)
+        d_block = d_block.at[3,4].set(-jnp.cos(theta) * jnp.sin(2*phi))
         
-        d_block = d_block.at[4,0].set(np.sqrt(3) * np.sin(theta)**2 * np.sin(2*phi) / 2)
-        d_block = d_block.at[4,1].set(np.sin(2*theta) * np.sin(2*phi) / 2)
-        d_block = d_block.at[4,2].set(np.sin(theta) * np.cos(2*phi))
-        d_block = d_block.at[4,3].set((1 + np.cos(theta)**2) * np.sin(2*phi) / 2)
-        d_block = d_block.at[4,4].set(np.cos(theta) * np.cos(2*phi))
+        d_block = d_block.at[4,0].set(jnp.sqrt(3) * jnp.sin(theta)**2 * jnp.sin(2*phi) / 2)
+        d_block = d_block.at[4,1].set(jnp.sin(2*theta) * jnp.sin(2*phi) / 2)
+        d_block = d_block.at[4,2].set(jnp.sin(theta) * jnp.cos(2*phi))
+        d_block = d_block.at[4,3].set((1 + jnp.cos(theta)**2) * jnp.sin(2*phi) / 2)
+        d_block = d_block.at[4,4].set(jnp.cos(theta) * jnp.cos(2*phi))
         
         tr = tr.at[4:9,4:9].set(d_block)
         
@@ -509,7 +509,7 @@ class surfGB:
             The Journal of Chemical Physics, 134(4), 044118.
             DOI: 10.1063/1.3526044
         """
-        sig = np.zeros((self.N, self.N), dtype=complex)
+        sig = jnp.zeros((self.N, self.N), dtype=complex)
         sigSurf = self.gList[i].sigma(E, conv)
 
         # Get contact-specific data for this static contact index
@@ -519,12 +519,12 @@ class surfGB:
         # Apply self energies in first 9 directions that aren't attached to atom
         for nInds, Finds in zip(nIndLists_i, indsLists_i):
             # Sum contributions from all 9 directions, then subtract connected ones
-            sigAtom = np.sum(sigSurf[:9], axis=0)
+            sigAtom = jnp.sum(sigSurf[:9], axis=0)
             for neighbor_idx in nInds:
                 sigAtom = sigAtom - sigSurf[neighbor_idx]# Compute indices not connected to device (JAX-compatible)
 
             # Update sigma matrix
-            sig = sig.at[np.ix_(Finds, Finds)].set(sigAtom)
+            sig = sig.at[jnp.ix_(Finds, Finds)].set(sigAtom)
 
         # Apply de-orthonormalization technique from ANT.Gaussian if orthonormal
         sig = lax.cond(self.Sdict['sss'] == 0,
@@ -534,9 +534,9 @@ class surfGB:
 
         # Handle spin - use if/else since spin is static
         if self.spin == 'u' or self.spin == 'ro':
-            sig = np.kron(np.eye(2), sig)
+            sig = jnp.kron(jnp.eye(2), sig)
         elif self.spin == 'g':
-            sig = np.kron(sig, np.eye(2))
+            sig = jnp.kron(sig, jnp.eye(2))
         # else: spin == 'r', keep sig as-is
 
         return sig 
@@ -663,15 +663,15 @@ class surfGB:
         M = self.constructMat(self.Vdict, [1, 0, 0])
     
         # dxy should be zero along x-axis
-        np.testing.assert_almost_equal(M[0,8], 0.0,
+        jnp.testing.assert_almost_equal(M[0,8], 0.0,
             err_msg="dxy not zero along x-axis")
         
         # dx2-y2 should be sqrt(3)/2 * sds along x-axis
-        np.testing.assert_almost_equal(M[0,7], np.sqrt(3)/2 * Vdict['sds'],
+        jnp.testing.assert_almost_equal(M[0,7], jnp.sqrt(3)/2 * Vdict['sds'],
             err_msg="dx2-y2 incorrect along x-axis")
     
         # dz2 should be -1/2 along x-axis
-        np.testing.assert_almost_equal(M[0,4], -0.5 * Vdict['sds'],
+        jnp.testing.assert_almost_equal(M[0,4], -0.5 * Vdict['sds'],
             err_msg="dz2 incorrect along x-axis")
     
         print("d orbital angular function tests passed!")
@@ -685,14 +685,14 @@ class surfGB:
         """
     
         # Test inversion symmetry
-        dir1 = [1/np.sqrt(2), 1/np.sqrt(2), 0]
-        dir2 = [-1/np.sqrt(2), -1/np.sqrt(2), 0]
+        dir1 = [1/jnp.sqrt(2), 1/jnp.sqrt(2), 0]
+        dir2 = [-1/jnp.sqrt(2), -1/jnp.sqrt(2), 0]
     
         M1 = self.constructMat(self.Vdict, dir1)
         M2 = self.constructMat(self.Vdict, dir2)
     
         # d-d block should be identical under inversion
-        np.testing.assert_array_almost_equal(
+        jnp.testing.assert_array_almost_equal(
             M1[4:,4:], M2[4:,4:],
             err_msg="d-d block not symmetric under inversion")
     
@@ -713,14 +713,14 @@ class surfGB:
         M = self.constructMat(Vdict, [1, 0, 0])
     
         # px-dxy should be zero along x-axis
-        np.testing.assert_almost_equal(
+        jnp.testing.assert_almost_equal(
             M[1,8], 0.0,
             err_msg="px-dxy interaction incorrect along x-axis")
     
         # Test pz-dz2 interaction along z-axis
         M = self.constructMat(Vdict, [0, 0, 1])
         expected = Vdict['pds']  # Should be pure sigma
-        np.testing.assert_almost_equal(
+        jnp.testing.assert_almost_equal(
             M[3,4], expected,
             err_msg="pz-dz2 interaction incorrect along z-axis")
     
@@ -742,7 +742,7 @@ class surfGB:
     
         # Should be pure delta interaction
         expected = Vdict['ddd']
-        np.testing.assert_almost_equal(
+        jnp.testing.assert_almost_equal(
             M[6,6], expected,
             err_msg="dyz-dyz interaction incorrect along x-axis")
     
@@ -750,7 +750,7 @@ class surfGB:
         M = self.constructMat(Vdict, [0, 0, 1])
         # Should be pure sigma interaction
         expected = Vdict['dds']
-        np.testing.assert_almost_equal(
+        jnp.testing.assert_almost_equal(
             M[4,4], expected,
             err_msg="dz2-dz2 interaction incorrect along z-axis")
     
@@ -777,15 +777,15 @@ class surfGB:
             ([0, 1, 0], "y-axis"),
             
             # 45-degree rotations
-            ([1/np.sqrt(2), 0, 1/np.sqrt(2)], "45° in xz-plane"),
-            ([0, 1/np.sqrt(2), 1/np.sqrt(2)], "45° in yz-plane"),
-            ([1/np.sqrt(2), 1/np.sqrt(2), 0], "45° in xy-plane"),
+            ([1/jnp.sqrt(2), 0, 1/jnp.sqrt(2)], "45° in xz-plane"),
+            ([0, 1/jnp.sqrt(2), 1/jnp.sqrt(2)], "45° in yz-plane"),
+            ([1/jnp.sqrt(2), 1/jnp.sqrt(2), 0], "45° in xy-plane"),
         ]
         
         print("\nTesting hopping matrix physics...")
         
         for direction, name in test_cases:
-            direction = np.array(direction)
+            direction = jnp.array(direction)
             x, y, z = direction
             
             print(f"\nChecking {name} direction: [{x:.3f}, {y:.3f}, {z:.3f}]")
@@ -797,7 +797,7 @@ class surfGB:
                     f"s-p hopping not antisymmetric for p{i}"
                     
             # Check total s-p hopping magnitude is preserved
-            s_p_total = np.sqrt(V[0,1]**2 + V[0,2]**2 + V[0,3]**2)
+            s_p_total = jnp.sqrt(V[0,1]**2 + V[0,2]**2 + V[0,3]**2)
             assert abs(s_p_total - s_p_mag) < eps, \
                 f"s-p hopping magnitude not preserved: {s_p_total:.6f} != {s_p_mag:.6f}"
                 
@@ -890,17 +890,17 @@ class surfGBAt:
         AssertionError
             If matrix dimensions are incorrect or number of neighbors != 12
         """
-        assert np.shape(H) == (dim,dim), f"Error with H dim, should be {dim}x{dim}"
+        assert jnp.shape(H) == (dim,dim), f"Error with H dim, should be {dim}x{dim}"
         for S,V in zip(Slist, Vlist):
-            assert np.shape(S) == (dim,dim), f"Error with S dim, should be {dim}x{dim}"
-            assert np.shape(V) == (dim,dim), f"Error with F dim, should be {dim}x{dim}"
+            assert jnp.shape(S) == (dim,dim), f"Error with S dim, should be {dim}x{dim}"
+            assert jnp.shape(V) == (dim,dim), f"Error with F dim, should be {dim}x{dim}"
         self.H = H
         self.Slist = Slist
         self.Vlist = Vlist
         self.spin = 'r'         # spin-dependence not implemented yet
         self.NN = len(Slist)
         assert self.NN == 12, "Error: surfGBAt only implemented for FCC using 12 NN"
-        #self.Slist = [np.zeros((dim,dim)) for n in range(self.NN)] #To match ANT.Gaussian default
+        #self.Slist = [jnp.zeros((dim,dim)) for n in range(self.NN)] #To match ANT.Gaussian default
         self.eta = eta
         self.T = T
         self.sigmaKprev = None
@@ -938,15 +938,15 @@ class surfGBAt:
             fermiPrev = self.fermi
             dFermi =  fermi - fermiPrev
             # Onsite energies
-            self.H = self.H + dFermi*np.eye(dim)
+            self.H = self.H + dFermi*jnp.eye(dim)
             # And hopping overlaps
             for j,S in enumerate(self.Slist):
                 self.Vlist[j] = self.Vlist[j] + dFermi*S
-            #print(np.diag(self.H))
+            #print(jnp.diag(self.H))
             self.fermi = fermi
 
-        H0x = np.kron(np.eye(self.NN+1), self.H)
-        S0x = np.eye(dim*(self.NN+1))
+        H0x = jnp.kron(jnp.eye(self.NN+1), self.H)
+        S0x = jnp.eye(dim*(self.NN+1))
         for i in range(self.NN):
             S0x = S0x.at[-dim:, i*dim:(i+1)*dim].set(self.Slist[i])
             S0x = S0x.at[i*dim:(i+1)*dim, -dim:].set(self.Slist[i].T)
@@ -992,8 +992,8 @@ class surfGBAt:
         #if self.sigmaKprev is not None and self.Eprev != Eminf and abs(self.Eprev - E) <1:
         #    sigmaK = self.sigmaKprev.copy()
         #else:
-        sigmaK = np.array([np.eye(dim)*-1j for k in range(self.NN)], dtype=complex)
-        A = (E - self.eta*1j)*np.eye(dim) - self.H
+        sigmaK = jnp.array([jnp.eye(dim)*-1j for k in range(self.NN)], dtype=complex)
+        A = (E - self.eta*1j)*jnp.eye(dim) - self.H
         
         #Self-consistency loop using jax.lax.while_loop
         maxIter = 1000
@@ -1005,7 +1005,7 @@ class surfGBAt:
         def body_fun(state):
             count, diff, sigmaK, sigmaK_ = state
             sigmaK_ = sigmaK.copy()
-            sigTot = np.sum(sigmaK, axis=0)
+            sigTot = jnp.sum(sigmaK, axis=0)
            
             for k in range(self.NN):
                 pair_k = (k + 6)%12 # Opposite direction vector
@@ -1014,16 +1014,17 @@ class surfGBAt:
                 sigmaK = sigmaK.at[k].set(mix*(B@gK@B.conj().T) + (1-mix)*sigmaK_[k])
             
             # Convergence Check
-            diff = np.max(np.abs(sigmaK - sigmaK_))/np.max(np.abs(sigmaK_))
+            diff = jnp.max(jnp.abs(sigmaK - sigmaK_))/jnp.max(jnp.abs(sigmaK_))
             count += 1
             return (count, diff, sigmaK, sigmaK_)
         
         # Initial state: (count, diff, sigmaK, sigmaK_)
-        init_state = (0, np.inf, sigmaK, sigmaK.copy())
+        init_state = (0, jnp.inf, sigmaK, sigmaK.copy())
         count, diff, sigmaK, sigmaK_ = lax.while_loop(cond_fun, body_fun, init_state)
         
-        # Warning check (outside JIT if needed)
-        #print(f'Warning: sigmaK() exceeded {maxIter} iterations! E: {E}, Conv: {diff}')
+        # Diagnostic output 
+        # lax.cond(diff > conv, lambda _: jax.debug.print("sigma: count={count}, diff={diff}",
+        #               count=count, diff=diff), lambda _: None, count, diff)
         
         self.sigmaKprev = sigmaK
         self.Eprev= E
@@ -1076,7 +1077,7 @@ class surfGBAt:
         
         #Self-consistency loop using jax.lax.while_loop
         maxIter = 1000
-        A = (E - self.eta*1j)*np.eye(dim) - self.H
+        A = (E - self.eta*1j)*jnp.eye(dim) - self.H
         planeVec = [0,1,2,6,7,8] # Location of vectors in plane
         
         def cond_fun(state):
@@ -1086,7 +1087,7 @@ class surfGBAt:
         def body_fun(state):
             count, diff, sigSurf, sigSurf_ = state
             sigSurf_ = sigSurf.copy()
-            sigTot = np.sum(sigSurf, axis=0)
+            sigTot = jnp.sum(sigSurf, axis=0)
             g = LA.inv(A - sigTot) # subtracted from sigTot
             for k in planeVec:
                 pair_k = (k + 6)%12 # Opposite direction vector
@@ -1094,17 +1095,17 @@ class surfGBAt:
                 sigSurf = sigSurf.at[k].set(mix*(B@g@B.conj().T) + (1-mix)*sigSurf_[k])
             
             # Convergence Check
-            diff = np.max(np.abs(sigSurf - sigSurf_))/np.max(np.abs(sigSurf_))
+            diff = jnp.max(jnp.abs(sigSurf - sigSurf_))/jnp.max(jnp.abs(sigSurf_))
             count += 1
             return (count, diff, sigSurf, sigSurf_)
         
         # Initial state: (count, diff, sigSurf, sigSurf_)
-        init_state = (0, np.inf, sigSurf, sigSurf.copy()) # set diff to 0 to bypass second loop
+        init_state = (0, jnp.inf, sigSurf, sigSurf.copy()) # set diff to 0 to bypass second loop
         count, diff, sigSurf, sigSurf_ = lax.while_loop(cond_fun, body_fun, init_state)
         
-        # Warning check (outside JIT if needed)
-        #if diff > conv:
-        #    print(f'Warning: sigma() exceeded {maxIter} iterations! E: {E}, Conv: {diff}')
+        # Diagnostic output - Cond doesn't work anyway
+        # lax.cond(diff > conv, lambda _: jax.debug.print("sigma: count={count}, diff={diff}",
+        #               count=count, diff=diff), lambda _: None, count, diff)
         
         return sigSurf
     
@@ -1128,19 +1129,18 @@ class surfGBAt:
     
     # Wrapper function for compatibility with density.py methods
     def sigmaTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
-        sig = np.zeros(((self.NN + 1)*dim, (self.NN+1)*dim), dtype=complex)
+        sig = jnp.zeros(((self.NN + 1)*dim, (self.NN+1)*dim), dtype=complex)
         sigK = self.sigmaK(E, conv)
-        sigTot = np.sum(sigK, axis=0)
+        sigTot = jnp.sum(sigK, axis=0)
         for k in range(self.NN):
             pair_k = (k + 6)%12 # Opposite direction vector
             sig = sig.at[k*dim:(k+1)*dim,k*dim:(k+1)*dim].set(sigTot - sigK[pair_k])
         return sig
 
-    # Get the bulk DOS of the Bethe lattice
-    @jit
+    # Get the surface DOS of the Bethe lattice
     def DOS(self, E):
         """
-        Calculate bulk density of states of the Bethe lattice.
+        Calculate surface density of states of the Bethe lattice.
 
         Parameters
         ----------
@@ -1152,12 +1152,12 @@ class surfGBAt:
         float
             Density of states at energy E
         """
-        Gr = LA.inv((E-1j*self.eta)*np.eye(dim)- self.H - np.sum(self.sigma(E), axis=0))
-        return -np.trace(Gr).imag/np.pi
+        Gr = LA.inv((E-1j*self.eta)*jnp.eye(dim)- self.H - jnp.sum(self.sigma(E), axis=0))
+        return -jnp.trace(Gr).imag/jnp.pi
 
     
     # Calculate fermi energy using bisection (to specified tolerance)
-    def calcFermi(self, ne, fGuess=5, tol=FERMI_CALCULATION_TOL):
+    def calcFermi(self, ne, tol=FERMI_CALCULATION_TOL):
         """
         Calculate Fermi energy using bisection method.
 

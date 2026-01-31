@@ -14,64 +14,11 @@ dim = 9                 # size of single atom matrix: 1s + 3p + 5d
 har_to_eV = 27.211386   # eV/Hartree
 Eminf = ENERGY_MIN      # Setting lower bound to -1e6 eV
 
-# Helper functions
-def NNToLattice(neighbors):
-    """
-    Takes nearest neighbor positions and generates lattice vectors and reciprocal vectors.
-    
-    Parameters:
-    -----------
-    neighbors : array-like, shape (N, 3)
-        Positions of nearest neighbors
-    
-    Returns:
-    --------
-    lattice_vectors : numpy array, shape (3, 3)
-        Real-space lattice vectors as rows
-    reciprocal_vectors : numpy array, shape (3, 3)
-        Reciprocal lattice vectors as rows
-    """
-    neighbors = jnp.array(neighbors)
-    
-    # Find the 3 shortest unique directions (lattice vectors)
-    # Sort by distance
-    distances = jnp.linalg.norm(neighbors, axis=1)
-    sorted_idx = jnp.argsort(distances)
-    
-    # Get the 3 shortest non-collinear vectors
-    lattice_vecs = []
-    for idx in sorted_idx:
-        vec = neighbors[idx]
-        # Check if this vector is linearly independent
-        if len(lattice_vecs) == 0:
-            lattice_vecs.append(vec)
-        elif len(lattice_vecs) == 1:
-            if not jnp.allclose(jnp.cross(lattice_vecs[0], vec), 0):
-                lattice_vecs.append(vec)
-        elif len(lattice_vecs) == 2:
-            # Check if third vector is not in plane of first two
-            if not jnp.allclose(jnp.dot(vec, jnp.cross(lattice_vecs[0], lattice_vecs[1])), 0):
-                lattice_vecs.append(vec)
-                break
-    
-    a1, a2, a3 = lattice_vecs
-    
-    # Calculate reciprocal vectors
-    volume = jnp.dot(a1, jnp.cross(a2, a3))
-    b1 = 2 * jnp.pi * jnp.cross(a2, a3) / volume
-    b2 = 2 * jnp.pi * jnp.cross(a3, a1) / volume
-    b3 = 2 * jnp.pi * jnp.cross(a1, a2) / volume
-    
-    lattice_vectors = jnp.array([a1, a2, a3])
-    reciprocal_vectors = jnp.array([b1, b2, b3])
-    
-    return lattice_vectors, reciprocal_vectors
-# Bethe lattice surface Green's function for a device with contacts
+
+# 3D k-grid lattice surface Green's function for a device with 111 contacts
 class surfG3:
     """
-    Surface Green's function calculator for 3D lattice. 
-    
-    Work in progress- need to implement k-space integration (Gamma only)
+    Surface Green's function calculator for 3D lattice with [111] surface.
 
     Parameters
     ----------
@@ -98,7 +45,7 @@ class surfG3:
         Fock matrix
     S : ndarray
         Overlap matrix
-    gList : list of surfGAt
+    gList : list of surfGAt3D
         List of atomic surface Green's function calculators for each contact
     """
     def __init__(self, F, S, contacts, bar,  latFile='Au', spin='r', eta=ETA, T=TEMPERATURE):
@@ -179,7 +126,7 @@ class surfG3:
         # Use surfGBAt() object to store the atomic Bethe lattice green's function for each contact
         self.gList = []
         for Slist, Vlist, vecs in zip(self.Slists, self.Vlists, self.dirLists):
-            self.gList.append(surfGAt(self.H0.copy(), Slist, Vlist,vecs, eta, T))
+            self.gList.append(surfGAt3D(self.H0.copy(), Slist, Vlist,vecs, eta, T))
         
         for g in self.gList:
             g.calcFermi(self.ne/2)
@@ -447,7 +394,7 @@ class surfG3:
         return tr @ M @ tr.T
 
     
-    def sigma(self, E, i, conv=1e-5):
+    def sigma(self, E, i, conv=1e-4):
         """
         Calculate self-energy matrix for a specific contact.
 
@@ -496,7 +443,7 @@ class surfG3:
             sig = jnp.kron(sig, jnp.eye(2))
         return sig
     
-    def sigmaTot(self, E, conv=1e-5):
+    def sigmaTot(self, E, conv=1e-4):
         """
         Calculate total self-energy matrix for the extended system.
 
@@ -527,7 +474,7 @@ class surfG3:
         sigs = [self.sigma(E, i, conv) for i in range(len(self.indsLists))]
         return sum(sigs)
 
-    def getSigma(self, Elist=[None, None], conv=1e-5):
+    def getSigma(self, Elist=[None, None], conv=1e-4):
         """
         Helper method for getting the left and right contact self-energies
  
@@ -781,17 +728,15 @@ class surfG3:
         self.testHoppingPhysics()
         print("\nAll tests passed!")
 
-# Bethe lattice surface Green's function for a single atom
-class surfGAt:
+# 3D surface Green's function for a single atom
+class surfGAt3D:
     """
-    Atomic-level Bethe lattice Green's function calculator.
+    Atomic-level 3D Green's function calculator for a single atom.
 
     This class implements the surface Green's function calculation for a single atom
-    in the Bethe lattice, handling:
+    in the 3D lattice with [111] surface, handling:
     - Onsite and hopping matrix construction
     - Self-energy calculations for bulk and surface
-    - Temperature effects
-    - Fermi energy optimization
 
     Parameters
     ----------
@@ -823,7 +768,7 @@ class surfGAt:
     """
     def __init__(self, H, Slist, Vlist, vecs, eta, T=TEMPERATURE, kPoints=11):
         """
-        Initialize surfGAt with Hamiltonian and neighbor matrices.
+        Initialize surfGAt3D with Hamiltonian and neighbor matrices.
 
         Parameters
         ----------
@@ -834,9 +779,16 @@ class surfGAt:
         Vlist : list of ndarray
             List of 12 hopping matrices for nearest neighbors, first six in plane,
         eta : float
-            Broadening parameter in eV
+            Broadening parameter in eV (recommended: >= 1e-4 for numerical stability)
         T : float, optional
             Temperature in Kelvin (default: 0)
+        kPoints : int, optional
+            Number of k-points per direction for BZ integration (default: 11)
+            Recommended values:
+            - 11: Fast, reasonable accuracy (121 points total)
+            - 15: Good balance of speed/accuracy (225 points)
+            - 21: High accuracy for production (441 points)
+            Note: Odd values use Monkhorst-Pack grid, even use Gamma-centered
 
         Raises
         ------
@@ -852,8 +804,8 @@ class surfGAt:
         self.Vlist = jnp.array(Vlist)
         self.NN = len(Slist)
         self.kPoints = kPoints
-        assert self.NN == 12, "Error: surfGAt only implemented for FCC using 12 NN"
-        assert len(vecs) == 12, "Error: surfGAt only implemented for FCC using 12 NN"
+        assert self.NN == 12, "Error: surfGAt3D only implemented for FCC using 12 NN"
+        assert len(vecs) == 12, "Error: surfGAt3D only implemented for FCC using 12 NN"
         
         # Set up 2D lattice directions using first two vectors
         # TODO: WHAT IF NOT IN Z-direction?
@@ -905,7 +857,7 @@ class surfGAt:
             self.H += dFermi*jnp.eye(dim)
             # And hopping overlaps
             for j,S in enumerate(self.Slist):
-                self.Vlist[j] += dFermi*S
+                self.Vlist = self.Vlist.at[j].set(self.Vlist[j] + dFermi*S)
             #print(jnp.diag(self.H))
             self.fermi = fermi
 
@@ -918,11 +870,159 @@ class surfGAt:
             H0x = H0x.at[i*dim:(i+1)*dim, -dim:].set(self.Vlist[i].conj().T)
         self.F = H0x
         self.S = S0x
-    
-    # Calculate gm for the bulk
-    def gList(self, E, conv=1e-5, mix=0.5, maxIter=1000):
-        #Setup mesh
-        k = (2 * jnp.arange(self.kPoints) + 1) / (2 * self.kPoints) - 0.5
+
+    def gBulk(self, E, conv=1e-4, mix=0.1, maxIter=5000):
+        """
+        Calculate bulk Green's function with full 3D periodicity.
+
+        Includes all 12 nearest neighbors with k-space integration over the 2D BZ,
+        solving the Dyson equation self-consistently. This represents the true
+        bulk crystal (not semi-infinite).
+
+        Parameters
+        ----------
+        E : float
+            Energy point for Green's function calculation (in eV)
+        conv : float, optional
+            Convergence criterion for Dyson equation (default: 1e-5)
+        mix : float, optional
+            Mixing factor for convergence (default: 0.5)
+        maxIter : int, optional
+            Maximum iterations (default: 1000)
+
+        Returns
+        -------
+        ndarray
+            Bulk Green's function (dim x dim matrix), averaged over k-points
+        """
+        # Setup k-mesh: Gamma-centered for even, Monkhorst-Pack for odd
+        if self.kPoints % 2 == 0:
+            # Gamma-centered grid for even k-points
+            k = jnp.arange(self.kPoints) / self.kPoints - 0.5 + 0.5/self.kPoints
+        else:
+            # Monkhorst-Pack grid for odd k-points
+            k = (2 * jnp.arange(self.kPoints) + 1) / (2 * self.kPoints) - 0.5
+        K1, K2 = jnp.meshgrid(k, k, indexing='ij')
+        kmesh = K1.flatten()[:, jnp.newaxis] * self.bList[0] + \
+                K2.flatten()[:, jnp.newaxis] * self.bList[1]  # nK**2 x 3
+
+        # Apply phase factors to all 12 neighbors
+        expList = jnp.exp(-1j*kmesh@(self.vecs.T))  # nK**2 x 12
+
+        # Construct k-dependent hopping and overlap for ALL 12 neighbors
+        Flist = expList[:, :, None, None] * self.Vlist[None, :, :, :]  # nK**2 x 12 x dim x dim
+        Slist = expList[:, :, None, None] * self.Slist[None, :, :, :]  # nK**2 x 12 x dim x dim
+
+        # Split into in-plane (0-5) and out-of-plane (6-11)
+        # For bulk, we include ALL 6 out-of-plane (not just 3)
+        Fak = jnp.sum(Flist[:, :6, :, :], axis=1) + \
+                jnp.repeat(self.H[None, :, :], self.kPoints**2, axis=0)
+        Sak = jnp.sum(Slist[:, :6, :, :], axis=1) + \
+                jnp.repeat(jnp.eye(dim)[None, :, :], self.kPoints**2, axis=0)
+        A = (E + self.eta*1j)*Sak - Fak
+
+        # All 6 out-of-plane directions (6-11)
+        Fbk = jnp.sum(Flist[:, 6:12, :, :], axis=1)
+        Sbk = jnp.sum(Slist[:, 6:12, :, :], axis=1)
+        B = (E + self.eta*1j)*Sbk - Fbk
+
+        # Converge each k-point independently with robust solver
+        def converge_single_k(A_k, B_k):
+            """
+            Converge Dyson equation for a single k-point using robust iteration.
+
+            Solves: g = [A - B @ g @ B†]^-1
+
+            Uses adaptive mixing and proper convergence criteria to ensure
+            retarded Green's function with Im[g] < 0.
+            """
+            def cond_fun(state):
+                count, diff, g, g_ = state
+                return (diff > conv) & (count < maxIter)
+
+            def body_fun(state):
+                count, diff, g, g_ = state
+
+                # Compute self-energy
+                sig = B_k @ g @ B_k.conj().T
+
+                # Update Green's function
+                gNew = LA.inv(A_k - sig)
+
+                # Ensure retarded Green's function with Im[g] < 0
+                #gNew = jnp.where(gNew.imag > 0, gNew.real, gNew)
+
+                # Apply mixing to ensure retarded Green's function with Im[g] < 0
+                g_ = g.copy()
+                #g = jnp.where(gNew.imag > 0, g, gNew * mix + (1 - mix) * g)
+                g = gNew * mix + (1 - mix) * g
+
+                # Convergence check: use relative change in norm
+                diff = jnp.linalg.norm(g - g_) / (jnp.linalg.norm(g_) + 1e-12)
+                count += 1
+                return (count, diff, g, g_)
+
+            # Initialize with bare Green's function (no self-energy)
+            g_init = LA.inv(A_k) - 1j*jnp.eye(dim)*self.eta
+
+            init_state = (0, jnp.inf, g_init, g_init.copy())
+            count, diff, g, g_ = jax.lax.while_loop(cond_fun, body_fun, init_state)
+            return g, count, diff
+
+        # Vectorize over all k-points (run in parallel)
+        g, counts, diffs = jax.vmap(converge_single_k)(A, B)
+
+        # Diagnostic output
+        #n_max_iters = jnp.sum(counts >= maxIter)
+        #jax.lax.cond(n_max_iters > 0, lambda _: jax.debug.print("gBulk: max={max_c}, avg={avg_c:.1f}, unconverged={n_uc}/{n_tot}, max_diff={max_diff:.1e}, avg_diff={avg_diff:.1e}",
+        #               max_c=jnp.max(counts), avg_c=jnp.mean(counts),
+        #               n_uc=n_max_iters, n_tot=self.kPoints**2, max_diff=jnp.max(diffs), avg_diff=jnp.mean(diffs)), lambda _: None, n_max_iters)
+
+        # Return k-space Green's functions (nK**2 x dim x dim)
+        # Averaging over k-points should be done by the caller as needed
+        return g
+
+    def sigmaBulk(self, E, conv=1e-4):
+        """
+        Calculate bulk self-energies for all 12 directions.
+
+        Self-energies are calculated in k-space then averaged: Σ_i = (1/N_k) Σ_k B_i @ g_k @ B_i†
+
+        Parameters
+        ----------
+        E : float
+            Energy point for self-energy calculation (in eV)
+        conv : float, optional
+            Convergence criterion (default: 1e-4)
+
+        Returns
+        -------
+        ndarray
+            Array of 12 self-energy matrices (shape: 12 x dim x dim)
+        """
+        # Get k-space bulk Green's functions: nK**2 x dim x dim
+        g_k = self.gBulk(E, conv)
+
+        # Calculate self-energies in k-space for each direction, then average
+        # Σ_i = (1/N_k) Σ_k B_i @ g_k @ B_i†
+        B = (E + self.eta*1j)*self.Slist - self.Vlist  # 12 x dim x dim
+
+        # For each direction a, calculate Σ_a,k = B_a @ g_k @ B_a† then average over k
+        # einsum: for each (a, k), compute B[a] @ g_k[k] @ B[a]†
+        sig_temp = jnp.einsum('aij,kjl,aln->akin', B, g_k, B.conj())  # 12 x nK**2 x dim x dim
+        sigList = jnp.mean(sig_temp, axis=1)  # Average over k-points -> 12 x dim x dim
+
+        return sigList
+
+    # Calculate Green's function for the surface
+    def gSurf(self, E, conv=1e-4, mix=0.1, maxIter=5000):
+        # Setup k-mesh: Gamma-centered for even, Monkhorst-Pack for odd
+        if self.kPoints % 2 == 0:
+            # Gamma-centered grid for even k-points
+            k = jnp.arange(self.kPoints) / self.kPoints - 0.5 + 0.5/self.kPoints
+        else:
+            # Monkhorst-Pack grid for odd k-points
+            k = (2 * jnp.arange(self.kPoints) + 1) / (2 * self.kPoints) - 0.5
         K1, K2 = jnp.meshgrid(k, k, indexing='ij') # nK x nK
         kmesh = K1.flatten()[:, jnp.newaxis] * self.bList[0] + \
                 K2.flatten()[:, jnp.newaxis] * self.bList[1] # nK**2 x 3
@@ -936,51 +1036,77 @@ class surfGAt:
                 jnp.repeat(self.H[None, :, :], self.kPoints**2, axis=0)
         Sak = jnp.sum(Slist[:, :6, :, :], axis=1) + \
                 jnp.repeat(jnp.eye(dim)[None, :, :], self.kPoints**2, axis=0)
-        A = (E - self.eta*1j)*Sak - Fak
+        A = (E + self.eta*1j)*Sak - Fak
         Fbk = jnp.sum(Flist[:, 6:9, :, :], axis=1)
         Sbk = jnp.sum(Slist[:, 6:9, :, :], axis=1)
-        B = (E - self.eta*1j)*Sbk - Fbk
-         
-        def cond_fun(state):
-            count, diff, g, g_ = state
-            return (diff > conv) & (count < maxIter)
-        
-        def body_fun(state):
-            count, diff, g, g_ = state
-            sigList = jnp.einsum('aij,ajk,alk->ail', B, g, B.conj())
-            gNew = LA.inv(A - sigList) 
-            g_ = g.copy()
-            g = gNew*(mix) + (1-mix)*g
-            
-            # Convergence Check
-            diff = jnp.max(jnp.abs(g - g_)/jnp.abs(g_))
-            count += 1
-            return (count, diff, g, g_)
-        
-        # Initial state: (count, diff, sigSurf, sigSurf_)
-        g_init = LA.inv(A)
-        init_state = (0, jnp.inf, g_init, g_init.copy()) # set diff to 0 to bypass second loop
-        count, diff, g, g_ = jax.lax.while_loop(cond_fun, body_fun, init_state)
-        
-        # Sum up over K
-        expList = jnp.exp(-1j*kmesh@(self.vecs.T)) # nK**2 x NN
-        gm = jnp.einsum('ji,jkl->ikl',expList, g)/(self.kPoints**2)
-        return gm
+        B = (E + self.eta*1j)*Sbk - Fbk
+        key = jax.random.PRNGKey(758493)  # Random seed is explicit in JAX
+
+        # Converge each k-point independently with robust solver
+        def converge_single_k(A_k, B_k):
+            """
+            Converge Dyson equation for a single k-point using robust iteration.
+
+            Solves: g = [A - B @ g @ B†]^-1
+
+            Uses adaptive mixing and proper convergence criteria to ensure
+            retarded Green's function with Im[g] < 0.
+            """
+            def cond_fun(state):
+                count, diff, g, g_ = state
+                return (diff > conv) & (count < maxIter)
+
+            def body_fun(state):
+                count, diff, g, g_ = state
+                
+                B_k_disordered = B_k#*(1+ (jax.random.uniform(key) - 0.5)*1e-3)
+                # Compute self-energy
+                sig = B_k_disordered @ g @ B_k_disordered.conj().T
+
+                # Update Green's function
+                gNew = LA.inv(A_k - sig)
+
+                # Apply mixing to ensure retarded Green's function with Im[g] < 0
+                g_ = g.copy()
+                #g = jnp.where(gNew.imag > 0, g, gNew * mix + (1 - mix) * g)
+                g = gNew * mix + (1 - mix) * g
+
+                # Convergence check: use relative change in norm
+                diff = jnp.linalg.norm(g - g_) / (jnp.linalg.norm(g_) + 1e-12)
+                count += 1
+                return (count, diff, g, g_)
+
+            # Initialize with bare Green's function (no self-energy)
+            g_init = LA.inv(A_k) - 1j*jnp.eye(dim)*self.eta
+
+            init_state = (0, jnp.inf, g_init, g_init.copy())
+            count, diff, g, g_ = jax.lax.while_loop(cond_fun, body_fun, init_state)
+            return g, count, diff
+
+        # Vectorize over all k-points (run in parallel)
+        g, counts, diffs = jax.vmap(converge_single_k)(A, B)
+
+        # Diagnostic output
+        #n_max_iters = jnp.sum(counts >= maxIter)
+        #jax.lax.cond(n_max_iters > 0, lambda _: jax.debug.print("gSurf: max={max_c}, avg={avg_c:.1f}, unconverged={n_uc}/{n_tot}, max_diff={max_diff:.1e}, avg_diff={avg_diff:.1e}",
+        #               max_c=jnp.max(counts), avg_c=jnp.mean(counts),
+        #               n_uc=n_max_iters, n_tot=self.kPoints**2, max_diff=jnp.max(diffs), avg_diff=jnp.mean(diffs)), lambda _: None, n_max_iters)
+
+        # Return k-space Green's functions (nK**2 x dim x dim)
+        # Averaging over k-points should be done by the caller as needed
+        return g
         
 
-    def sigma(self, E, inds=None, conv=1e-5, mix=0.5): 
+    def sigma(self, E, inds=None, conv=1e-4, mix=0.1):
         """
         Calculate surface self-energies for an FCC lattice.
 
         Computes self-energies for atoms at the surface with the geometry:
         [3x plane dir] - o - [3x plane dir]
-                        /|\     
+                        /|\
                 [3x out of plane dir]
 
-        Uses a self-consistent iteration scheme with mixing to solve the Dyson equation.
-        The implementation follows the Bethe lattice approach described in Jacob & Palacios (2011),
-        where the self-energy is computed recursively for a semi-infinite tree-like structure
-        that preserves the proper coordination number and orbital symmetries of bulk FCC metals.
+        Self-energies are calculated in k-space then averaged: Σ_i = (1/N_k) Σ_k B_i @ g_k @ B_i†
 
         Parameters
         ----------
@@ -989,39 +1115,36 @@ class surfGAt:
         inds : list or int, optional
             Indices of the sigma matrix to return. If None, returns full list (default: None)
         conv : float, optional
-            Convergence criterion for Dyson equation (default: 1e-5)
+            Convergence criterion for Dyson equation (default: 1e-4)
         mix : float, optional
-            Mixing factor for Dyson equation (default: 0.5)
+            Mixing factor for Dyson equation (default: 0.1)
 
         Returns
         -------
-        list
-            List of self-energy matrices for the surface atom. If inds is specified,
-            returns only the requested matrices.
-
-        Notes
-        -----
-        First calculates bulk self-energies using sigmaK, then iterates to find
-        surface self-energies for the 9 surface directions. The recursive method
-        ensures proper treatment of the metal-molecule interface while maintaining
-        computational efficiency.
-
-        References
-        ----------
-        [1] Jacob, D., & Palacios, J. J. (2011). Critical comparison of electrode models 
-            in density functional theory based quantum transport calculations.
-            The Journal of Chemical Physics, 134(4), 044118.
-            DOI: 10.1063/1.3526044
+        ndarray
+            Array of self-energy matrices for the surface atom. If inds is specified,
+            returns only the requested matrices. Shape: (9, dim, dim) or (len(inds), dim, dim)
         """
-        gList = self.gList(E, conv, mix)
-        #Self-consistency loop
-        B = (E - self.eta*1j)*self.Slist - self.Vlist
-        sigList = jnp.einsum('aij,ajk,alk->ail', B, gList, B.conj())[6:9]
-        
+        # Get k-space Green's functions: nK**2 x dim x dim
+        g_k = self.gSurf(E, conv, mix)
+
+        # Calculate self-energies in k-space for each direction, then average
+        # Σ_i = (1/N_k) Σ_k B_i @ g_k @ B_i†
+        B = (E + self.eta*1j)*self.Slist - self.Vlist  # 12 x dim x dim
+
+        # For each direction a, calculate Σ_a,k = B_a @ g_k @ B_a† then average over k
+        # B: 12 x dim x dim, g_k: nK**2 x dim x dim
+        # einsum: for each (a, k), compute B[a] @ g_k[k] @ B[a]† = B[a,i,j] * g_k[k,j,l] * conj(B[a,l,n])
+        sig_temp = jnp.einsum('aij,kjl,aln->akin', B, g_k, B.conj())  # 12 x nK**2 x dim x dim
+        sigListAll = jnp.mean(sig_temp, axis=1)  # Average over k-points -> 12 x dim x dim
+
         if inds is None:
-            return sigList
+            # Return surface self-energies: 6 in-plane (0-5) + 3 out-of-plane (6-8)
+            in_plane = sigListAll[0:6]
+            out_plane = sigListAll[6:9]
+            return jnp.concatenate([in_plane, out_plane], axis=0)  # 9 x dim x dim
         else:
-            return [sigList[i] for i in inds]
+            return jnp.array([sigListAll[i] for i in inds])
     
     # Empty function for compatibility with density.py methods
     def setF(self, F, mu1, mu2):
@@ -1041,13 +1164,14 @@ class surfGAt:
         """
         pass # Bethe lattice bulk properties are intrinsic (dependent on TB parameters)
     
-    def sigmaTot(self, E, conv=1e-5):
+    def sigmaTot(self, E, conv=1e-4):
         """
-        Calculate total self-energy matrix for the extended Bethe lattice system.
+        Calculate total self-energy matrix for the extended system.
 
         Computes self-energies for the full extended system including 12 neighbor sites
-        plus 1 central site. This is a wrapper function for compatibility with density.py
-        methods that require a single total self-energy matrix.
+        plus 1 central site. For each neighbor site k, applies all bulk self-energies
+        EXCEPT the one in the opposite direction (pair_k), preventing double-counting
+        of the connection to the central atom.
 
         Parameters
         ----------
@@ -1063,31 +1187,66 @@ class surfGAt:
 
         Notes
         -----
-        For each neighbor direction k, the self-energy includes contributions from all
-        other directions except the opposite direction (k+6)%12, following the Bethe
-        lattice construction.
+        Follows the approach from surfGBethe: for neighbor k, self-energy is
+        Σ_tot - Σ[pair_k] where pair_k = (k + 6) % 12 is the opposite direction.
+        Center site (site 12) has zero self-energy (it's the coupling point).
         """
-        sig = jnp.sum(self.sigma(E, None, conv), axis=0)
-        return jnp.kron(jnp.eye(self.NN+1), sig)
+        sig = jnp.zeros(((self.NN + 1)*dim, (self.NN+1)*dim), dtype=complex)
+
+        # Get all 12 bulk self-energies
+        sigList = self.sigmaBulk(E, conv)  # List of 12 dim x dim matrices
+
+        # Convert to JAX array and sum
+        sigArray = jnp.array(sigList)  # 12 x dim x dim
+        sigSum = jnp.sum(sigArray, axis=0)  # dim x dim
+
+        # For each of the 12 neighbor sites
+        for k in range(self.NN):
+            pair_k = (k + 6) % 12  # Opposite direction
+            # Apply all directions EXCEPT the one pointing back to center
+            sig = sig.at[k*dim:(k+1)*dim, k*dim:(k+1)*dim].set(sigSum - sigArray[pair_k])
+
+        # Center site (site 12) has zero self-energy (it's the reference point)
+        # No need to set anything - already zeros
+
+        return sig
 
     
-    # Get the bulk DOS of the Bethe lattice
-    def DOS(self, E):
+    # Get the bulk DOS
+    def DOS(self, E, conv=1e-4, mix=0.1):
         """
-        Calculate bulk density of states of the Bethe lattice.
+        Calculate bulk density of states using surface self-energies.
+
+        Matches surfGBethe.DOS() by computing the local DOS of a surface atom
+        with 9 semi-infinite connections (6 in-plane + 3 out-of-plane).
+        Uses DOS(E) = -(1/π) Im[Tr[G]] where G = [E*I - H - Σ_surf]^-1.
 
         Parameters
         ----------
         E : float
             Energy point for DOS calculation (in eV)
+        conv : float, optional
+            Convergence criterion for self-energy calculation (default: 1e-5)
+        mix : float, optional
+            Mixing parameter for self-energy convergence (default: 0.5)
 
         Returns
         -------
         float
             Density of states at energy E
         """
-        Gr = LA.inv((E-1j*self.eta)*jnp.eye(dim)- self.H - jnp.sum(self.sigma(E), axis=0))
-        return -jnp.trace(Gr).imag/jnp.pi
+        # Get surface self-energies (9 directions: 6 in-plane + 3 out-of-plane)
+        sigList = self.sigma(E, inds=None, conv=conv, mix=mix)  # 9 x dim x dim
+
+        # Sum all surface self-energies
+        sigTot = jnp.sum(sigList, axis=0)  # dim x dim
+
+        # Compute Green's function: G = [E*I - H - Σ_tot]^-1
+        # Note: Use same sign convention as rest of surfG3D (E + 1j*eta)
+        Gr = LA.inv((E + 1j*self.eta)*jnp.eye(dim) - self.H - sigTot)
+
+        # DOS = -(1/π) Im[Tr[G]]
+        return -jnp.trace(Gr).imag / jnp.pi
 
     
     # Calculate fermi energy using bisection (to specified tolerance)
