@@ -3,6 +3,9 @@ Test script for surfGAt3D class from surfG3D.py
 Tests the atomic-level 3D Green's function calculator without requiring BinAr object.
 """
 
+import sys
+sys.path.insert(0, '..')
+
 import jax
 import jax.numpy as jnp
 from jax.numpy import linalg as LA
@@ -15,7 +18,8 @@ from gauNEGF.surfGBethe import surfGBAt
 # Constants
 dim = 9  # size of single atom matrix: 1s + 3p + 5d
 har_to_eV = 27.211386  # eV/Hartree
-eta = 1e-4  # broadening parameter
+eta = 1e-6  # broadening parameter
+kpoints = 7
 
 def read_bethe_params(filename):
     """Read Slater-Koster parameters from a .bethe file."""
@@ -197,16 +201,346 @@ def gen_fcc_111_neighbors():
     return all_vectors
 
 
+def test_reciprocal_lattice(g_atom_3d):
+    """
+    Test 2D reciprocal lattice vectors against Damle's gold standard values.
+    Damle uses: K1 = 2*pi*[1, -0.5774, 0], K2 = 2*pi*[0, 1.1547, 0]
+    where -0.5774 approx -1/sqrt(3) and 1.1547 approx 2/sqrt(3)
+
+    Note: We now compute separate 2D (surface) and 3D (bulk) reciprocal vectors.
+    This test compares our 2D vectors to Damle's surface reciprocal vectors.
+    """
+    print("\n" + "="*60)
+    print("DIAGNOSTIC TEST: 2D Reciprocal Lattice vs Damle")
+    print("="*60)
+
+    # Extract 2D reciprocal lattice vectors (for surface)
+    b1_2D = g_atom_3d.b1_2D
+    b2_2D = g_atom_3d.b2_2D
+
+    # Damle's values (gold standard for FCC 111 surface)
+    K1_damle = 2*jnp.pi * jnp.array([1.0, -1.0/jnp.sqrt(3), 0.0])
+    K2_damle = 2*jnp.pi * jnp.array([0.0, 2.0/jnp.sqrt(3), 0.0])
+
+    print(f"\nsurfG3D computed (2D surface):")
+    print(f"  b1_2D = [{b1_2D[0]:.6f}, {b1_2D[1]:.6f}, {b1_2D[2]:.6f}]")
+    print(f"  b2_2D = [{b2_2D[0]:.6f}, {b2_2D[1]:.6f}, {b2_2D[2]:.6f}]")
+
+    print(f"\nDamle's gold standard (2D surface):")
+    print(f"  K1 = [{K1_damle[0]:.6f}, {K1_damle[1]:.6f}, {K1_damle[2]:.6f}]")
+    print(f"  K2 = [{K2_damle[0]:.6f}, {K2_damle[1]:.6f}, {K2_damle[2]:.6f}]")
+
+    # Normalized (divided by 2*pi) for easier comparison
+    print(f"\nNormalized (divided by 2*pi):")
+    print(f"  b1_2D/(2*pi) = [{b1_2D[0]/(2*jnp.pi):.6f}, {b1_2D[1]/(2*jnp.pi):.6f}, {b1_2D[2]/(2*jnp.pi):.6f}]")
+    print(f"  Expected:      [1.000000, -0.577350, 0.000000]")
+    print(f"  b2_2D/(2*pi) = [{b2_2D[0]/(2*jnp.pi):.6f}, {b2_2D[1]/(2*jnp.pi):.6f}, {b2_2D[2]/(2*jnp.pi):.6f}]")
+    print(f"  Expected:      [0.000000,  1.154701, 0.000000]")
+
+    # Calculate differences
+    diff_b1 = jnp.linalg.norm(b1_2D - K1_damle)
+    diff_b2 = jnp.linalg.norm(b2_2D - K2_damle)
+
+    print(f"\nDifference from Damle's values:")
+    print(f"  ||b1_2D - K1|| = {diff_b1:.6e}")
+    print(f"  ||b2_2D - K2|| = {diff_b2:.6e}")
+
+    # Check orthogonality with real-space lattice
+    a1 = g_atom_3d.a1
+    a2 = g_atom_3d.a2
+
+    print(f"\nOrthogonality check (should be 2*pi * identity):")
+    print(f"  a1.b1_2D = {jnp.dot(a1, b1_2D):.6f} (expect {2*jnp.pi:.6f})")
+    print(f"  a1.b2_2D = {jnp.dot(a1, b2_2D):.6f} (expect 0.000000)")
+    print(f"  a2.b1_2D = {jnp.dot(a2, b1_2D):.6f} (expect 0.000000)")
+    print(f"  a2.b2_2D = {jnp.dot(a2, b2_2D):.6f} (expect {2*jnp.pi:.6f})")
+
+    # Test result
+    tolerance = 1e-6
+    if diff_b1 < tolerance and diff_b2 < tolerance:
+        print(f"\n[PASS] 2D reciprocal lattice matches Damle's values (tol={tolerance})")
+        return True
+    else:
+        print(f"\n[FAIL] 2D reciprocal lattice differs from Damle's values")
+        return False
+
+
+def test_neighbor_ordering():
+    """Verify FCC [111] neighbor vectors match expected structure."""
+    print("\n" + "="*60)
+    print("VALIDATION TEST: Neighbor Vector Ordering")
+    print("="*60)
+
+    vecs = gen_fcc_111_neighbors()
+
+    # Check in-plane (z approx 0)
+    print("\nChecking in-plane vectors (should have z approx 0):")
+    for i in [0, 1, 2, 6, 7, 8]:
+        z_component = abs(vecs[i][2])
+        print(f"  vec[{i}]: z = {vecs[i][2]:7.4f}, |z| = {z_component:.6e}")
+        assert z_component < 1e-10, f"vec[{i}] should be in-plane but z={vecs[i][2]}"
+
+    # Check out-of-plane up (+z)
+    print("\nChecking out-of-plane upward vectors (should have z > 0.8):")
+    for i in [3, 4, 5]:
+        z_component = vecs[i][2]
+        print(f"  vec[{i}]: z = {z_component:7.4f}")
+        assert z_component > 0.8, f"vec[{i}] should point upward but z={z_component}"
+
+    # Check out-of-plane down (-z)
+    print("\nChecking out-of-plane downward vectors (should have z < -0.8):")
+    for i in [9, 10, 11]:
+        z_component = vecs[i][2]
+        print(f"  vec[{i}]: z = {z_component:7.4f}")
+        assert z_component < -0.8, f"vec[{i}] should point downward but z={z_component}"
+
+    # Check opposite pairs
+    print("\nChecking opposite vector pairs:")
+    for i in range(6):
+        diff = vecs[i] + vecs[i+6]
+        norm = jnp.linalg.norm(diff)
+        print(f"  vec[{i}] + vec[{i+6}]: ||sum|| = {norm:.6e}")
+        assert norm < 1e-10, f"vec[{i}] and vec[{i+6}] should be opposite"
+
+    print("\n[PASS] Neighbor vector ordering correct")
+    return True
+
+
+def test_3d_reciprocal_lattice(g_atom_3d):
+    """Verify 3D reciprocal lattice satisfies a_i . b_j = 2pi delta_ij."""
+    print("\n" + "="*60)
+    print("VALIDATION TEST: 3D Reciprocal Lattice")
+    print("="*60)
+
+    # Check if attributes exist
+    try:
+        a_vecs = [g_atom_3d.a1, g_atom_3d.a2, g_atom_3d.a3]
+        b_vecs = [g_atom_3d.b1_3D, g_atom_3d.b2_3D, g_atom_3d.b3_3D]
+    except AttributeError as e:
+        print(f"\n[SKIP] 3D reciprocal lattice attributes not yet implemented: {e}")
+        return False
+
+    print("\nReal-space lattice vectors:")
+    for i, a in enumerate(a_vecs):
+        print(f"  a{i+1} = [{a[0]:7.4f}, {a[1]:7.4f}, {a[2]:7.4f}]")
+
+    print("\n3D Reciprocal lattice vectors (for bulk):")
+    for i, b in enumerate(b_vecs):
+        print(f"  b{i+1}_3D = [{b[0]:7.4f}, {b[1]:7.4f}, {b[2]:7.4f}]")
+
+    print("\nOrthogonality check (a_i . b_j should equal 2pi delta_ij):")
+    all_pass = True
+    for i in range(3):
+        for j in range(3):
+            dot_product = jnp.dot(a_vecs[i], b_vecs[j])
+            expected = 2*jnp.pi if i == j else 0.0
+            diff = abs(dot_product - expected)
+            status = "PASS" if diff < 1e-6 else "FAIL"
+            print(f"  a{i+1}.b{j+1}_3D = {dot_product:8.5f}, expect {expected:8.5f}, diff = {diff:.2e} [{status}]")
+            if diff >= 1e-6:
+                all_pass = False
+
+    # Also check 2D reciprocal vectors
+    print("\n2D Reciprocal lattice vectors (for surface):")
+    b1_2D = g_atom_3d.b1_2D
+    b2_2D = g_atom_3d.b2_2D
+    print(f"  b1_2D = [{b1_2D[0]:7.4f}, {b1_2D[1]:7.4f}, {b1_2D[2]:7.4f}]")
+    print(f"  b2_2D = [{b2_2D[0]:7.4f}, {b2_2D[1]:7.4f}, {b2_2D[2]:7.4f}]")
+
+    print("\n2D Orthogonality check:")
+    for i, (a, label) in enumerate([(g_atom_3d.a1, "a1"), (g_atom_3d.a2, "a2")]):
+        for j, (b, blabel) in enumerate([(b1_2D, "b1_2D"), (b2_2D, "b2_2D")]):
+            dot_product = jnp.dot(a, b)
+            expected = 2*jnp.pi if i == j else 0.0
+            diff = abs(dot_product - expected)
+            status = "PASS" if diff < 1e-6 else "FAIL"
+            print(f"  {label}.{blabel} = {dot_product:8.5f}, expect {expected:8.5f}, diff = {diff:.2e} [{status}]")
+            if diff >= 1e-6:
+                all_pass = False
+
+    # Check that 2D vectors have z=0
+    print("\nCheck that 2D reciprocal vectors lie in surface plane (z=0):")
+    max_z = max(abs(b1_2D[2]), abs(b2_2D[2]))
+    print(f"  max|z-component| = {max_z:.2e}")
+    if max_z < 1e-10:
+        print("  [PASS] 2D vectors have z=0")
+    else:
+        print(f"  [FAIL] 2D vectors have non-zero z = {max_z}")
+        all_pass = False
+
+    if all_pass:
+        print("\n[PASS] Reciprocal lattice orthogonality and 2D constraint checks")
+        return True
+    else:
+        print("\n[FAIL] Reciprocal lattice checks failed")
+        return False
+
+
+def test_kmesh_dimensions(g_atom_3d):
+    """Check that 2D and 3D k-meshes have correct shapes."""
+    print("\n" + "="*60)
+    print("VALIDATION TEST: K-mesh Dimensions")
+    print("="*60)
+
+    nK = g_atom_3d.kPoints
+
+    # Check for 2D mesh attributes
+    try:
+        kmesh_2D_shape = g_atom_3d.kmesh_2D.shape
+        expList_2D_shape = g_atom_3d.expList_2D.shape
+
+        print(f"\n2D k-mesh (for surface):")
+        print(f"  kmesh_2D shape:  {kmesh_2D_shape} (expect {nK**2} x 3)")
+        print(f"  expList_2D shape: {expList_2D_shape} (expect {nK**2} x 12)")
+
+        assert kmesh_2D_shape == (nK**2, 3), \
+            f"2D k-mesh should be {nK**2}x3, got {kmesh_2D_shape}"
+        assert expList_2D_shape == (nK**2, 12), \
+            f"2D expList should be {nK**2}x12, got {expList_2D_shape}"
+        print("  [PASS] 2D mesh dimensions correct")
+        has_2D = True
+    except AttributeError as e:
+        print(f"\n[SKIP] 2D k-mesh attributes not yet implemented: {e}")
+        has_2D = False
+
+    # Check for 3D mesh attributes
+    try:
+        kmesh_3D_shape = g_atom_3d.kmesh_3D.shape
+        expList_3D_shape = g_atom_3d.expList_3D.shape
+
+        print(f"\n3D k-mesh (for bulk):")
+        print(f"  kmesh_3D shape:  {kmesh_3D_shape} (expect {nK**3} x 3)")
+        print(f"  expList_3D shape: {expList_3D_shape} (expect {nK**3} x 12)")
+
+        assert kmesh_3D_shape == (nK**3, 3), \
+            f"3D k-mesh should be {nK**3}x3, got {kmesh_3D_shape}"
+        assert expList_3D_shape == (nK**3, 12), \
+            f"3D expList should be {nK**3}x12, got {expList_3D_shape}"
+        print("  [PASS] 3D mesh dimensions correct")
+        has_3D = True
+    except AttributeError as e:
+        print(f"\n[SKIP] 3D k-mesh attributes not yet implemented: {e}")
+        has_3D = False
+
+    if has_2D and has_3D:
+        print(f"\n[PASS] K-mesh dimensions: 2D={nK**2}, 3D={nK**3}")
+        return True
+    else:
+        return False
+
+
+def test_gSurf_shapes(g_atom_3d):
+    """Check gSurf returns correct tuple shapes."""
+    print("\n" + "="*60)
+    print("VALIDATION TEST: gSurf Return Shapes")
+    print("="*60)
+
+    E = 0.0  # Use arbitrary energy (will update after calcFermi)
+    try:
+        result = g_atom_3d.gSurf(E, conv=1e-3, mix=0.1)
+
+        # Check if returns tuple
+        if not isinstance(result, tuple) or len(result) != 2:
+            print(f"\n[FAIL] gSurf should return tuple (g_k, G_real), got {type(result)}")
+            return False
+
+        g_k, G_real = result
+        nK = g_atom_3d.kPoints
+
+        print(f"\nReturn value shapes:")
+        print(f"  g_k shape:    {g_k.shape} (expect {nK**2} x {dim} x {dim})")
+        print(f"  G_real shape: {G_real.shape} (expect 12 x {dim} x {dim})")
+
+        assert g_k.shape == (nK**2, dim, dim), \
+            f"gSurf g_k should be {nK**2}x{dim}x{dim}, got {g_k.shape}"
+        assert G_real.shape == (12, dim, dim), \
+            f"gSurf G_real should be 12x{dim}x{dim}, got {G_real.shape}"
+
+        print(f"\n[PASS] gSurf returns correct shapes")
+        return True
+    except Exception as e:
+        print(f"\n[FAIL] gSurf raised exception: {e}")
+        return False
+
+
+def test_gBulk_shapes(g_atom_3d):
+    """Check gBulk returns correct tuple shapes with 3D k-mesh."""
+    print("\n" + "="*60)
+    print("VALIDATION TEST: gBulk Return Shapes")
+    print("="*60)
+
+    E = 0.0  # Use arbitrary energy
+    try:
+        result = g_atom_3d.gBulk(E)
+
+        # Check if returns tuple
+        if not isinstance(result, tuple) or len(result) != 2:
+            print(f"\n[FAIL] gBulk should return tuple (g_k, G_real), got {type(result)}")
+            return False
+
+        g_k, G_real = result
+        nK = g_atom_3d.kPoints
+
+        print(f"\nReturn value shapes:")
+        print(f"  g_k shape:    {g_k.shape} (expect {nK**3} x {dim} x {dim})")
+        print(f"  G_real shape: {G_real.shape} (expect 12 x {dim} x {dim})")
+
+        # After fix, should use 3D k-mesh
+        assert g_k.shape == (nK**3, dim, dim), \
+            f"gBulk g_k should be {nK**3}x{dim}x{dim} for 3D mesh, got {g_k.shape}"
+        assert G_real.shape == (12, dim, dim), \
+            f"gBulk G_real should be 12x{dim}x{dim}, got {G_real.shape}"
+
+        print(f"\n[PASS] gBulk returns correct shapes with 3D k-mesh")
+        return True
+    except AssertionError as e:
+        # If still using 2D mesh, show what we got
+        if g_k.shape == (nK**2, dim, dim):
+            print(f"\n[FAIL] gBulk still using 2D k-mesh ({nK**2} points) instead of 3D ({nK**3} points)")
+            print(f"  This is the bug we're fixing!")
+        else:
+            print(f"\n[FAIL] {e}")
+        return False
+    except Exception as e:
+        print(f"\n[FAIL] gBulk raised exception: {e}")
+        return False
+
+
+def test_sigma_count(g_atom_3d):
+    """Verify sigma returns 9 self-energies (6 in-plane + 3 out-of-plane)."""
+    print("\n" + "="*60)
+    print("VALIDATION TEST: Sigma Self-Energy Count")
+    print("="*60)
+
+    E = 0.0  # Use arbitrary energy
+    try:
+        sig = g_atom_3d.sigma(E, conv=1e-3, mix=0.1)
+
+        print(f"\nReturn value shape:")
+        print(f"  sigma shape: {sig.shape} (expect 9 x {dim} x {dim})")
+        print(f"    - 6 in-plane self-energies (vecs 0,1,2,6,7,8)")
+        print(f"    - 3 out-of-plane self-energies (vecs 3,4,5)")
+
+        assert sig.shape == (9, dim, dim), \
+            f"sigma should return 9x{dim}x{dim}, got {sig.shape}"
+
+        print(f"\n[PASS] sigma returns 9 self-energies")
+        return True
+    except Exception as e:
+        print(f"\n[FAIL] sigma raised exception: {e}")
+        return False
+
+
 def main():
-    """Main test function comparing surfGAt3D and surfGBAt."""
+    """Main test function with Damle validation diagnostics."""
 
     print("="*60)
-    print("Comparing surfGAt3D (k-space) vs surfGBAt (Bethe lattice)")
+    print("VALIDATION: surfGAt3D vs Damle's Gold Standard")
     print("="*60)
 
     # Read Bethe parameters
     print("\n1. Reading Bethe parameters from Au.bethe...")
-    ne, H0, Sdict, Vdict = read_bethe_params('Au')
+    ne, H0, Sdict, Vdict = read_bethe_params('../Au')
     print(f"   Number of electrons: {ne}")
     print(f"   H0 diagonal: {jnp.diag(H0)}")
 
@@ -228,11 +562,34 @@ def main():
     # Initialize both implementations
     print("\n4. Initializing both surfGAt3D and surfGBAt objects...")
     T = 0  # Temperature in Kelvin
-    g_atom_3d = surfGAt3D(H0, Slist, Vlist, vecs, eta, T=T, kPoints=3)
+    g_atom_3d = surfGAt3D(H0, Slist, Vlist, vecs, eta, T=T, kPoints=kpoints)
     g_atom_bethe = surfGBAt(H0.copy(), Slist, Vlist, eta, T=T)
-    print(f"   surfGAt3D: eta={eta}, T={T}K, kPoints=5")
+    print(f"   surfGAt3D: eta={eta}, T={T}K, kPoints={kpoints}")
     print(f"   surfGBAt: eta={eta}, T={T}K")
     print(f"   Number of neighbors: {g_atom_3d.NN}")
+
+    # Run NEW validation tests
+    print("\n" + "="*60)
+    print("VALIDATION TESTS (Phase 1)")
+    print("="*60)
+
+    test_neighbor_ordering()
+    test_3d_reciprocal_lattice(g_atom_3d)
+    test_kmesh_dimensions(g_atom_3d)
+    test_gSurf_shapes(g_atom_3d)
+    test_gBulk_shapes(g_atom_3d)
+    test_sigma_count(g_atom_3d)
+
+    # Run OLD diagnostic test against Damle's gold standard
+    print("\n" + "="*60)
+    print("DIAGNOSTIC: Reciprocal Lattice vs Damle")
+    print("="*60)
+
+    test_reciprocal_lattice(g_atom_3d)
+
+    print("\n" + "="*60)
+    print("CONTINUING WITH STANDARD TESTS")
+    print("="*60)
 
     # Calculate Fermi energy for both
     print("\n5. Calculating Fermi energy...")
@@ -253,7 +610,7 @@ def main():
 
     # Compare bulk self-energies
     print("\n7. Comparing bulk self-energy calculations...")
-    sig_list_3d = g_atom_3d.sigmaBulk(fermi_3d, conv=1e-5)
+    sig_list_3d = g_atom_3d.sigmaBulk(fermi_3d)
     sig_list_bethe = g_atom_bethe.sigmaK(fermi_bethe, conv=1e-5)
     print(f"   surfGAt3D: calculated {len(sig_list_3d)} self-energy matrices")
     print(f"   surfGBAt: calculated {len(sig_list_bethe)} self-energy matrices")
@@ -276,20 +633,19 @@ def main():
 
     # Plot DOS comparison
     print("\n9. Plotting DOS comparison...")
-    E_range = jnp.linspace(fermi_3d - 5, fermi_3d + 5, 500)
-    dos_values_3d = jax.vmap(g_atom_3d.DOS)(E_range)
-    E_range_bethe = jnp.linspace(fermi_bethe - 5, fermi_bethe + 5, 500)
-    dos_values_bethe = jax.vmap(g_atom_bethe.DOS)(E_range_bethe)
+    E_range = jnp.linspace(-5, 5, 500)
+    dos_values_3d = jax.vmap(g_atom_3d.DOS)(E_range + fermi_3d)
+    dos_values_bethe = jax.vmap(g_atom_bethe.DOS)(E_range + fermi_bethe)
 
     plt.figure(figsize=(12, 8))
 
     # Main comparison plot
     plt.subplot(2, 1, 1)
     plt.plot(E_range, dos_values_3d, 'b-', linewidth=2, label='surfGAt3D (k-space)')
-    plt.plot(E_range_bethe, dos_values_bethe, 'r--', linewidth=2, label='surfGBAt (Bethe)')
-    plt.axvline(fermi_3d, color='blue', linestyle=':', alpha=0.7)
-    plt.axvline(fermi_bethe, color='red', linestyle=':', alpha=0.7)
-    plt.xlabel('Energy (eV)', fontsize=12)
+    plt.plot(E_range, dos_values_bethe, 'r--', linewidth=2, label='surfGBAt (Bethe)')
+    #plt.axvline(fermi_3d, color='blue', linestyle=':', alpha=0.7)
+    #plt.axvline(fermi_bethe, color='red', linestyle=':', alpha=0.7)
+    plt.xlabel(r'$E - E_F$ (eV)', fontsize=12)
     plt.ylabel('DOS (states/eV)', fontsize=12)
     plt.title('Density of States Comparison: surfGAt3D vs surfGBAt', fontsize=14)
     plt.grid(True, alpha=0.3)
