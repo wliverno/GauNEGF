@@ -6,24 +6,23 @@ Supports both retarded (Gr) and lesser (G<) Green's functions.
 Author: William Livernois
 """
 
-import jax
-import jax.numpy as jnp
 import numpy as np
 import os
 import time
 import socket
 import tempfile
 import logging
-from jax import jit
 
-# Enable double precision for accurate comparisons with NumPy
-jax.config.update("jax_enable_x64", True)
+# IMPORTANT: Import config BEFORE jax to set up JAX environment
+from gauNEGF.config import LOG_LEVEL, LOG_PERFORMANCE, shard_array
+
+import jax
+import jax.numpy as jnp
+from jax import jit
 
 # Setup node-specific logging for integration operations
 hostname = socket.gethostname()
 pid = os.getpid()
-
-from gauNEGF.config import LOG_LEVEL, LOG_PERFORMANCE
 
 if LOG_PERFORMANCE:
     log_file = f'integrate_performance_{hostname}_{pid}.log'
@@ -140,7 +139,10 @@ def _GInt(weighted_func, F, S, g, Elist, weights, ind=None):
 
     if num_energies * matrix_size_gb < MAX_VMAP_MEMORY_GB:
         parallel_logger.info(f"GInt using vmap: {matrix_size}x{matrix_size} matrix, {num_energies} energies, {num_energies*matrix_size_gb:.2f}GB")
-        result = jax.vmap(weighted_func, in_axes=(0, 0, None, None, None))(Elist_jax, weights_jax, F_jax, S_jax, g)
+        # Shard energy points across devices for parallel computation
+        Elist_sharded = shard_array(Elist_jax, axis=0)
+        weights_sharded = shard_array(weights_jax, axis=0)
+        result = jax.vmap(weighted_func, in_axes=(0, 0, None, None, None))(Elist_sharded, weights_sharded, F_jax, S_jax, g)
         integrated = jnp.sum(result, axis=0)
         if FORCE_SYNCHRONOUS:
             jax.block_until_ready(integrated)
@@ -154,7 +156,10 @@ def _GInt(weighted_func, F, S, g, Elist, weights, ind=None):
         start_time = time.time()
         def scan_fn(carry, inputs):
             E_batch, w_batch = inputs
-            result = jax.vmap(weighted_func, in_axes=(0, 0, None, None, None))(E_batch, w_batch, F_jax, S_jax, g)
+            # Shard batch across devices for parallel computation
+            E_batch_sharded = shard_array(E_batch, axis=0)
+            w_batch_sharded = shard_array(w_batch, axis=0)
+            result = jax.vmap(weighted_func, in_axes=(0, 0, None, None, None))(E_batch_sharded, w_batch_sharded, F_jax, S_jax, g)
             carry += jnp.sum(result, axis=0)
             count = jnp.ones(result.shape[0])
             return carry, count

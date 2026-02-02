@@ -23,18 +23,18 @@ References
     DOI: 10.1063/1.3526044
 """
 
-# Python packages
-import jax.numpy as jnp
-import jax.numpy.linalg as LA 
-from jax import jit
-import jax.lax as lax
-import jax
-
-# Developed packages
+# Developed packages (import config BEFORE jax)
 from gauNEGF.density import getFermiContact
 from gauNEGF.config import (ETA, TEMPERATURE, SURFACE_GREEN_CONVERGENCE,
                             FERMI_CALCULATION_TOL, ENERGY_MIN)
 from gauNEGF.utils import fractional_matrix_power
+
+# Python packages
+import jax
+import jax.numpy as jnp
+import jax.numpy.linalg as LA
+from jax import jit
+import jax.lax as lax
 
 #Constants
 kB = 8.617e-5           # eV/Kelvin
@@ -1183,7 +1183,7 @@ class surfGBAt:
         Previous implementation used ANT.Gaussian approach with complex contour
         integration. Current version uses simpler bisection method from density.py.
         """
-        self.fermi = getFermiContact(self, ne, tol, ENERGY_MIN, 1000, T=self.T, nOrbs=dim)
+        self.fermi = getFermiContact(self, ne, conv=tol, maxcycles=1000, T=self.T, nOrbs=dim)
         return self.fermi
 
 
