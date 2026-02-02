@@ -1,12 +1,12 @@
-# Python packages
-import jax
-import jax.numpy as np
-from jax.numpy import linalg as LA
-
 # Developed packages
 from gauNEGF.density import *
-from gauNEGF.config import (ETA, TEMPERATURE, ENERGY_MIN)
-from gauNEGF.utils import fractional_matrix_power
+from gauNEGF.config import (ETA, TEMPERATURE, ENERGY_MIN, FERMI_DEBUG,shard_array)
+from gauNEGF.utils import fractional_matrix_power, eig
+
+# Python packages
+import jax
+import jax.numpy as jnp
+from jax.numpy import linalg as LA
 
 #Constants
 kB = 8.617e-5           # eV/Kelvin
@@ -989,9 +989,13 @@ class surfGAt3D:
         Hk = jnp.sum(Flist, axis=1) + jnp.repeat(self.H[None, :, :], self.kPoints**3, axis=0)
         Sk = jnp.sum(Slist, axis=1) + jnp.repeat(jnp.eye(dim)[None, :, :], self.kPoints**3, axis=0)
 
+        # Shard k-point data across devices for parallel computation
+        Hk_sharded = shard_array(Hk, axis=0)
+        Sk_sharded = shard_array(Sk, axis=0)
+
         # Direct inversion: g(k) = [(E + iη)S(k) - H(k)]^-1
-        # Vectorized over all k-points
-        g_k = jax.vmap(lambda H, S: LA.inv((E + self.eta*1j)*S - H))(Hk, Sk)
+        # Vectorized over all k-points, automatically parallelized across devices
+        g_k = jax.vmap(lambda H, S: LA.inv((E + self.eta*1j)*S - H))(Hk_sharded, Sk_sharded)
 
         # Inverse FT: G(R_i) = (1/N_k) Σ_k g(k) * exp(-ik·R_i)
         G_real = jnp.zeros((self.NN, dim, dim), dtype=complex)
@@ -1056,7 +1060,6 @@ class surfGAt3D:
         Fbk = jnp.sum(Flist[:, out_plane_indices, :, :], axis=1)
         Sbk = jnp.sum(Slist[:, out_plane_indices, :, :], axis=1)
         B = (E + self.eta*1j)*Sbk - Fbk
-        key = jax.random.PRNGKey(758493)  # Random seed is explicit in JAX
 
         # Converge each k-point independently with robust solver
         def converge_single_k(A_k, B_k):
@@ -1075,9 +1078,8 @@ class surfGAt3D:
             def body_fun(state):
                 count, diff, g, g_ = state
                 
-                B_k_disordered = B_k#*(1+ (jax.random.uniform(key) - 0.5)*1e-3)
                 # Compute self-energy
-                sig = B_k_disordered @ g @ B_k_disordered.conj().T
+                sig = B_k@ g @ B_k.conj().T
 
                 # Update Green's function
                 gNew = LA.inv(A_k - sig)
@@ -1099,8 +1101,12 @@ class surfGAt3D:
             count, diff, g, g_ = jax.lax.while_loop(cond_fun, body_fun, init_state)
             return g, count, diff
 
-        # Vectorize over all k-points (run in parallel)
-        g_k, counts, diffs = jax.vmap(converge_single_k)(A, B)
+        # Shard k-point data across devices for parallel computation
+        A_sharded = shard_array(A, axis=0)
+        B_sharded = shard_array(B, axis=0)
+
+        # Vectorize over all k-points, automatically parallelized across devices
+        g_k, counts, diffs = jax.vmap(converge_single_k)(A_sharded, B_sharded)
 
         # Diagnostic output - always print to check convergence
         n_max_iters = jnp.sum(counts >= maxIter)
@@ -1295,6 +1301,6 @@ class surfGAt3D:
         Previous implementation used ANT.Gaussian approach with complex contour
         integration. Current version uses simpler bisection method from density.py.
         """
-        self.fermi = getFermiContact(self, ne, tol, Eminf, 1000, T=self.T, nOrbs=dim)
+        self.fermi = getFermiContact(self, ne, conv=tol, maxcycles=1000, T=self.T, nOrbs=dim)
         return self.fermi
 

@@ -27,7 +27,7 @@ from jax import jit
 jax.config.update("jax_enable_x64", True)
 
 # Configuration
-from gauNEGF.config import (TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, 
+from gauNEGF.config import (TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, FERMI_DEBUG, 
                             FERMI_SEARCH_CYCLES, N_KT, ENERGY_MIN, MAX_CYCLES, MAX_GRID_POINTS)
 from scipy.special import roots_legendre
 from scipy.special import roots_chebyu
@@ -53,9 +53,6 @@ def _compute_dos_at_energy(E, F, S, sigma_total):
     Gr = inv(mat)
     return -jnp.imag(jnp.trace(Gr)) / jnp.pi
 
-
-# Debugging for fermi search functions
-FERMI_DEBUG=False
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
@@ -968,12 +965,13 @@ def integralFitNEGF(F, S, g, fermi, qV, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_
     return N
 
 
-def getFermiContact(g, ne, tol=FERMI_CALCULATION_TOL, Eminf=ENERGY_MIN, maxcycles=MAX_CYCLES, T=TEMPERATURE, nOrbs=0):
+def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATION_TOL,
+                   conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE, nOrbs=0):
     """
-    Calculate Fermi energy for a contact.
+    Calculate Fermi energy for a contact using adaptive integration.
 
     Determines the Fermi energy for a contact system (Bethe lattice or 1D chain)
-    by matching the electron count.
+    by matching the electron count using bisection with adaptive complex contour integration.
 
     Parameters
     ----------
@@ -981,12 +979,20 @@ def getFermiContact(g, ne, tol=FERMI_CALCULATION_TOL, Eminf=ENERGY_MIN, maxcycle
         Surface Green's function calculator
     ne : float
         Target number of electrons
+    Emin : float, optional
+        Lower bound for complex contour integration in eV. If None, calculated from DOS.
+    lBound : float, optional
+        Lower bound for bisection search in eV. If None, estimated from eigenvalues.
+    uBound : float, optional
+        Upper bound for bisection search in eV. If None, estimated from eigenvalues.
     tol : float, optional
-        Convergence tolerance (default: 1e-4)
-    Eminf : float, optional
-        Lower bound for integration (default: -1e6)
+        Tolerance for adaptive integration (default: ADAPTIVE_INTEGRATION_TOL)
+    conv : float, optional
+        Convergence tolerance for electron count (default: FERMI_CALCULATION_TOL)
     maxcycles : int, optional
-        Maximum number of iterations (default: 1000)
+        Maximum number of iterations (default: FERMI_SEARCH_CYCLES)
+    T : float, optional
+        Temperature in Kelvin (default: TEMPERATURE)
     nOrbs : int, optional
         Number of orbitals to consider (0 for all) (default: 0)
 
@@ -995,16 +1001,27 @@ def getFermiContact(g, ne, tol=FERMI_CALCULATION_TOL, Eminf=ENERGY_MIN, maxcycle
     float
         Fermi energy in eV
     """
-    # Set up infinite system from contact
+    # Set up initial guess from eigenvalues
     S = g.S
     F = g.F
     orbs, _ = eig(inv(S)@F)
     orbs = np.sort(np.real(orbs))
-    fermi = (orbs[int(ne)-1] + orbs[int(ne)])/2
-    Emin, N1, N2 = integralFit(F, S, g, fermi, Eminf, tol, T, maxN=maxcycles)
-    Emax = max(orbs)
-    return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, 
-                        Eminf, T, tol, maxcycles, nOrbs)[0]
+
+    # Calculate Emin from DOS if not provided
+    if Emin is None:
+        Emin = calcEmin(F, S, g, tol=conv, maxN=maxcycles)
+
+    # Set bounds from eigenvalues if not provided
+    if lBound is None:
+        lBound = min(orbs)
+    if uBound is None:
+        uBound = max(orbs)
+
+    # Initial guess for Fermi energy
+    Ef = (orbs[int(ne)-1] + orbs[int(ne)])/2
+
+    return calcFermi(g, ne, Emin, Ef, lBound=lBound, uBound=uBound,
+                    tol=tol, conv=conv, maxcycles=maxcycles, T=T, nOrbs=nOrbs)
 
 def getFermi1DContact(gSys, ne, ind=0, tol=FERMI_CALCULATION_TOL, Eminf=ENERGY_MIN, T=TEMPERATURE, maxcycles=MAX_CYCLES):
     """
@@ -1057,9 +1074,10 @@ def getFermi1DContact(gSys, ne, ind=0, tol=FERMI_CALCULATION_TOL, Eminf=ENERGY_M
     return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, Eminf, T, tol, maxcycles)
 
 # Calculate the fermi energy of the surface Green's Function object
-def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=ENERGY_MIN, T=TEMPERATURE, tol=FERMI_CALCULATION_TOL, maxcycles=MAX_CYCLES, nOrbs=0):
+def calcFermi(g, ne, Emin, Ef, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATION_TOL,
+              conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE, nOrbs=0):
     """
-    Calculate Fermi energy using bisection method.
+    Calculate Fermi energy using bisection method with adaptive integration.
 
     Parameters
     ----------
@@ -1068,83 +1086,102 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=ENERGY_MIN, 
     ne : float
         Target number of electrons
     Emin : float
-        Lower bound for complex contour in eV
-    Emax : float
-        Upper bound for search in eV
-    fermiGuess : float, optional
-        Initial guess for Fermi energy in eV (default: 0)
-    N1 : int, optional
-        Number of complex contour points (default: 100)
-    N2 : int, optional
-        Number of real axis points (default: 50)
-    Eminf : float, optional
-        Lower bound for real axis integration in eV (default: -1e6)
+        Lower bound for complex contour integration in eV
+    Ef : float
+        Initial guess for Fermi energy in eV
+    lBound : float, optional
+        Lower bound for bisection search in eV. If None, determined dynamically.
+    uBound : float, optional
+        Upper bound for bisection search in eV. If None, determined dynamically.
     tol : float, optional
-        Convergence tolerance (default: 1e-4)
+        Tolerance for adaptive integration (default: ADAPTIVE_INTEGRATION_TOL)
+    conv : float, optional
+        Convergence criterion for electron count (default: FERMI_CALCULATION_TOL)
     maxcycles : int, optional
-        Maximum number of iterations (default: 20)
+        Maximum number of iterations (default: FERMI_SEARCH_CYCLES)
+    T : float, optional
+        Temperature in Kelvin (default: TEMPERATURE)
     nOrbs : int, optional
         Number of orbitals to consider, 0 for all (default: 0)
 
     Returns
     -------
-    tuple
-        (fermi, Emin, N1, N2) - Optimized parameters:
-        - fermi: Calculated Fermi energy in eV
-        - Emin: Lower bound for complex contour
-        - N1: Number of complex contour points
-        - N2: Number of real axis points
+    float
+        Calculated Fermi energy in eV
     """
-    # Fermi Energy search using full contact
-    dos_eminf = _compute_dos_at_energy(Eminf, g.F, g.S, g.sigmaTot(Eminf))
-    print(f'Eminf DOS = {dos_eminf}')
-    fermi = fermiGuess
-    if N2 is None:
-        pLow = densityReal(g.F, g.S, g, Eminf, Emin, tol, T, showText=False)
+    assert ne <= len(g.F), "Number of electrons cannot exceed number of basis functions!"
+
+    # Use adaptive complex contour integration
+    pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, tol, T)
+
+    E = Ef
+    counter = 0
+    dE = tol
+
+    # Initial calculation
+    g.setF(g.F, E, E)
+    P = pMu(E)
+    if nOrbs == 0:
+        Ncurr = np.trace(P@g.S).real
     else:
-        pLow = densityRealN(g.F, g.S, g, Eminf, Emin, N2, T, showText=False)
-    if nOrbs==0:
-        nELow = np.trace(pLow@g.S)
-    else:
-        nELow = np.trace((pLow@g.S)[-nOrbs:, -nOrbs:])
-    print(f'Electrons below lowest onsite energy: {nELow}')
-    if nELow >= ne:
-        raise Exception('Calculated Fermi energy is below lowest orbital energy!')
-    if N1 is None:
-        pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, tol, T, showText=False, method='legendre')
-    else:
-        pMu = lambda E: densityComplexN(g.F, g.S, g, Emin, E, N1, T, showText=False, method='legendre')
-    
-    # Fermi search using bisection method (F not changing, highly stable)
-    Ncurr = -1
-    counter = 0 
-    lBound = Emin
-    uBound = Emax
-    print('Calculating Fermi energy using bisection:')
-    while abs(ne - Ncurr) > tol and uBound-lBound > tol/10 and counter < maxcycles:
-        g.setF(g.F, fermi, fermi)
-        if N2 is None:
-            pLow = densityReal(g.F, g.S, g, Eminf, Emin, tol, T=0, showText=False)
-        else:
-            pLow = densityRealN(g.F, g.S, g, Eminf, Emin, N2, T=0, showText=False)
-        p_ = np.real(pLow+pMu(fermi))
-        if nOrbs==0:
-            Ncurr = np.trace(p_@g.S)
-        else:
-            Ncurr = np.trace((p_@g.S)[-nOrbs:, -nOrbs:])
-        dN = ne-Ncurr
-        if dN > 0 and fermi > lBound:
-            lBound = fermi
-        elif dN < 0 and fermi < uBound:
-            uBound = fermi
-        if abs(ne-Ncurr)>tol:
-            fermi = (uBound + lBound)/2
-        print("DN:",dN, "Fermi:", fermi, "Bounds:", lBound, uBound)
+        Ncurr = np.trace((P@g.S)[-nOrbs:, -nOrbs:]).real
+
+    # Establish bounds if not provided
+    while None in [uBound, lBound] and counter < maxcycles:
+        if counter == maxcycles - 1:
+            dE = 1e3
+        if Ncurr > ne:
+            uBound = E
+            Ef = uBound
+            E -= dE
+        if Ncurr < ne:
+            lBound = E
+            Ef = lBound
+            E += dE
+        if FERMI_DEBUG:
+            print(f"DEBUG: Ef={Ef:.2f}, dN={ne-Ncurr:.2E}, dE={dE:.2E}")
+
+        # Estimate step size using DOS
+        dos = _compute_dos_at_energy(E, g.F, g.S, g.sigmaTot(E))
+        dE = max(2*abs(Ncurr-ne)/dos, dE)
         counter += 1
-    if abs(ne - Ncurr) > tol and counter > maxcycles:
-        print(f'Warning: Fermi energy still not within tolerance! Ef = {fermi:.2f} eV, N = {Ncurr:.2f})')
-    print(f'Finished after {counter} iterations, Ef = {fermi:.2f}')
-    return fermi, Emin, N1, N2
+
+        g.setF(g.F, E, E)
+        P = pMu(E)
+        if nOrbs == 0:
+            Ncurr = np.trace(P@g.S).real
+        else:
+            Ncurr = np.trace((P@g.S)[-nOrbs:, -nOrbs:]).real
+
+    # Bisection search
+    print('Calculating Fermi energy using bisection with adaptive integration:')
+    while abs(ne - Ncurr) > conv and counter < maxcycles and uBound != lBound:
+        dN = ne - Ncurr
+        if dN > 0 and Ef > lBound:
+            lBound = Ef
+        elif dN < 0 and Ef < uBound:
+            uBound = Ef
+        Ef = (uBound + lBound) / 2
+        dE = uBound - lBound
+        if FERMI_DEBUG:
+            print(f"DEBUG: Ef={Ef:.2f}, dN={dN:.2E}, dE={dE:.2E}")
+        counter += 1
+        if abs(dN) > conv:
+            g.setF(g.F, Ef, Ef)
+            P = pMu(Ef)
+            if nOrbs == 0:
+                Ncurr = np.trace(P@g.S).real
+            else:
+                Ncurr = np.trace((P@g.S)[-nOrbs:, -nOrbs:]).real
+
+    if counter == maxcycles:
+        print(f'Warning: Max cycles reached, convergence = {abs(Ncurr-ne):.2E}')
+    elif uBound == lBound:
+        print(f'Warning: Bisection failed, convergence = {abs(Ncurr-ne):.2E}')
+    else:
+        print(f'Finished after {counter} iterations, Ef = {Ef:.2f}')
+
+    return Ef
 
 def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI_CALCULATION_TOL, 
                     maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE, uBound=None, lBound=None):

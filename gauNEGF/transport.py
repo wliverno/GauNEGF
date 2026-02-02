@@ -19,16 +19,16 @@ References
 
 import numpy as np
 import os
+import scipy.io as io
+from scipy.integrate import trapezoid
+
+# IMPORTANT: Import config BEFORE jax to set up JAX environment
+from gauNEGF.config import ENERGY_STEP, N_KT, TEMPERATURE, shard_array
+from gauNEGF.utils import inv
+
 import jax
 import jax.numpy as jnp
 from jax import jit
-import scipy.io as io
-from scipy.integrate import trapezoid
-from gauNEGF.utils import inv
-from gauNEGF.config import ENERGY_STEP, N_KT, TEMPERATURE
-
-# Enable double precision for accurate comparisons with NumPy
-jax.config.update("jax_enable_x64", True)
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
