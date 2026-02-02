@@ -993,7 +993,7 @@ class surfGBAt:
         #    sigmaK = self.sigmaKprev.copy()
         #else:
         sigmaK = jnp.array([jnp.eye(dim)*-1j for k in range(self.NN)], dtype=complex)
-        A = (E - self.eta*1j)*jnp.eye(dim) - self.H
+        A = (E + self.eta*1j)*jnp.eye(dim) - self.H
         
         #Self-consistency loop using jax.lax.while_loop
         maxIter = 1000
@@ -1010,7 +1010,7 @@ class surfGBAt:
             for k in range(self.NN):
                 pair_k = (k + 6)%12 # Opposite direction vector
                 gK = LA.inv(A - sigTot + sigmaK[pair_k]) # subtracted from sigTot
-                B = (E - self.eta*1j)*self.Slist[k] - self.Vlist[k]
+                B = (E + self.eta*1j)*self.Slist[k] - self.Vlist[k]
                 sigmaK = sigmaK.at[k].set(mix*(B@gK@B.conj().T) + (1-mix)*sigmaK_[k])
             
             # Convergence Check
@@ -1077,7 +1077,7 @@ class surfGBAt:
         
         #Self-consistency loop using jax.lax.while_loop
         maxIter = 1000
-        A = (E - self.eta*1j)*jnp.eye(dim) - self.H
+        A = (E + self.eta*1j)*jnp.eye(dim) - self.H
         planeVec = [0,1,2,6,7,8] # Location of vectors in plane
         
         def cond_fun(state):
@@ -1091,7 +1091,7 @@ class surfGBAt:
             g = LA.inv(A - sigTot) # subtracted from sigTot
             for k in planeVec:
                 pair_k = (k + 6)%12 # Opposite direction vector
-                B = (E - self.eta*1j)*self.Slist[k] - self.Vlist[k]
+                B = (E + self.eta*1j)*self.Slist[k] - self.Vlist[k]
                 sigSurf = sigSurf.at[k].set(mix*(B@g@B.conj().T) + (1-mix)*sigSurf_[k])
             
             # Convergence Check

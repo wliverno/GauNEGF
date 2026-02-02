@@ -1,3 +1,5 @@
+import sys
+sys.path.insert(0, '..')
 import numpy as np
 import matplotlib.pyplot as plt
 from gauNEGF.surfG3D import surfGAt3D
@@ -5,7 +7,7 @@ import jax.numpy as jnp
 
 # Read Bethe lattice parameters for Au
 params = {}
-with open('Au.bethe', 'r') as f:
+with open('../Au.bethe', 'r') as f:
     for line in f:
         if not line.strip():
             continue
@@ -139,11 +141,11 @@ Slist = [constructMat(Sdict, v) for v in vecs]
 Vlist = [constructMat(Vdict, v) for v in vecs]
 
 # Test parameters
-eta = 1e-4
+eta = 1e-6
 T = 0
-test_energy = 3.249851  # eV (near Fermi level for Au)
+test_energy = 1.5  # eV (near Fermi level for Au)
 energy_samples = test_energy + np.linspace(-0.1, 0.1, 5)  # Sample around test energy
-kpoint_values = [1, 3, 4, 5, 6, 7]
+kpoint_values = [1, 3, 5, 7, 11, 15, 19, 23]
 
 print(f"Testing k-point convergence for DOS near E = {test_energy} eV")
 print(f"Energy samples: {energy_samples}")
