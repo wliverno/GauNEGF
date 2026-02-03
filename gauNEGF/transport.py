@@ -166,20 +166,21 @@ def _transmission_kernel_spin_block(E, F, S, sigma_total, gamma1, gamma2):
     """JIT-compiled kernel for spin-resolved block transmission calculation."""
     mat = E * S - F - sigma_total
     Gr = inv(mat)
-    Ga = jnp.conj(Gr).T
 
     # Compute N from matrix dimensions (matrices are 2N x 2N)
     N = F.shape[0] // 2
 
     # Extract spin blocks efficiently
+    # T_ab = Tr[ gamma1_aa @ Gr_ab @ gamma2_bb @ (Gr_ab)^dag ]
+    # Index ordering: 0=uu, 1=ud, 2=du, 3=dd
     Gr_blocks = jnp.array([Gr[:N, :N], Gr[:N, N:], Gr[N:, :N], Gr[N:, N:]])
-    Ga_blocks = jnp.array([Ga[:N, :N], Ga[:N, N:], Ga[N:, :N], Ga[N:, N:]])
     gamma1_blocks = jnp.array([gamma1[:N, :N], gamma1[:N, :N], gamma1[N:, N:], gamma1[N:, N:]])
     gamma2_blocks = jnp.array([gamma2[:N, :N], gamma2[N:, N:], gamma2[:N, :N], gamma2[N:, N:]])
 
     def compute_transmission_component(i):
+        # (Gr_ab)^dag = Ga_ba -- using conj().T on the block is exact
         temp = gamma1_blocks[i] @ Gr_blocks[i] @ gamma2_blocks[i]
-        return jnp.real(jnp.trace(temp @ Ga_blocks[i]))
+        return jnp.real(jnp.trace(temp @ jnp.conj(Gr_blocks[i]).T))
 
     # Vectorized computation over spin components
     T_spin = jax.vmap(compute_transmission_component)(jnp.arange(4))
