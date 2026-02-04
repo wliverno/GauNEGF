@@ -143,8 +143,17 @@ class SigmaCalculator:
     def get_gamma(self, E, contact_index, spin=None, matrix_size=None):
         """Get gamma matrix (coupling) at energy E for specified contact."""
         sigma = self.get_sigma(E, contact_index, spin, matrix_size)
-        return 1j * (sigma - np.conj(sigma).T)
+        
+        gamma = 1j * (sigma - np.conj(sigma).T)
 
+        # Diagnostic: gamma must be PSD for physical leads. A negative
+        # eigenvalue means Im(Sigma) flipped sign -- likely a bad self-energy.
+        min_eig = np.min(np.linalg.eigvalsh(gamma))
+        if min_eig < -1e-10:
+            print(f"Warning: non-PSD gamma at E={E:.6f} eV, contact={contact_index}, "
+                  f"min_eig={min_eig:.6e}. Transmission may go negative.")
+
+        return gamma
 
 # JIT-compiled computational kernels for performance
 @jit

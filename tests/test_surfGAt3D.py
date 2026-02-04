@@ -19,7 +19,7 @@ from gauNEGF.surfGBethe import surfGBAt
 dim = 9  # size of single atom matrix: 1s + 3p + 5d
 har_to_eV = 27.211386  # eV/Hartree
 eta = 1e-6  # broadening parameter
-kpoints = 11
+kpoints = 31
 
 def read_bethe_params(filename):
     """Read Slater-Koster parameters from a .bethe file."""
@@ -540,7 +540,7 @@ def main():
 
     # Read Bethe parameters
     print("\n1. Reading Bethe parameters from Au.bethe...")
-    ne, H0, Sdict, Vdict = read_bethe_params('../Au')
+    ne, H0, Sdict, Vdict = read_bethe_params('Au')
     print(f"   Number of electrons: {ne}")
     print(f"   H0 diagonal: {jnp.diag(H0)}")
 

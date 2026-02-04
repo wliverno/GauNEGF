@@ -128,8 +128,10 @@ class surfG3:
         for Slist, Vlist, vecs in zip(self.Slists, self.Vlists, self.dirLists):
             self.gList.append(surfGAt3D(self.H0.copy(), Slist, Vlist,vecs, eta, T))
         
+        # Calculate fermi level 
+        fermi = self.gList[0].calcFermi(self.ne/2)
         for g in self.gList:
-            g.calcFermi(self.ne/2)
+            g.fermi = fermi
 
         # Store variables
         self.cList = cList #first contact coords, used for testing
@@ -431,7 +433,7 @@ class surfG3:
         sigSurf = self.gList[i].sigma(E, None, conv)
         # Apply self energies in first 9 directions that aren't attached to atom
         for nInds, Finds in zip(self.nIndLists[i], self.indsLists[i]):
-            sigInds = list(set(range(9)) - set(nInds))
+            sigInds = list(set(range(9)) - {int(x) for x in nInds})
             sigAtom = sum([sigSurf[j] for j in sigInds])
             sig = sig.at[jnp.ix_(Finds, Finds)].set(sigAtom)
         # Apply de-orthonormalization technique from ANT.Gaussian if orthonormal
@@ -1034,7 +1036,8 @@ class surfGAt3D:
         B = (E + self.eta*1j)*self.Slist - self.Vlist  # 12 x dim x dim
 
         # For each direction i: Σ_i = B_i @ G(R_i) @ B_i†
-        sigList = jnp.einsum('aij,ajl,aln->ain', B, G_real, B.conj())  # 12 x dim x dim
+        # Note: B† = conj(B)^T, so contract the row index of conj(B): 'anl'
+        sigList = jnp.einsum('aij,ajl,anl->ain', B, G_real, B.conj())  # 12 x dim x dim
 
         return sigList
 
@@ -1161,7 +1164,8 @@ class surfGAt3D:
         B = (E + self.eta*1j)*self.Slist - self.Vlist  # 12 x dim x dim
 
         # For each direction i: Σ_i = B_i @ G(R_i) @ B_i†
-        sigListAll = jnp.einsum('aij,ajl,aln->ain', B, G_real, B.conj())  # 12 x dim x dim
+        # Note: B† = conj(B)^T, so contract the row index of conj(B): 'anl'
+        sigListAll = jnp.einsum('aij,ajl,anl->ain', B, G_real, B.conj())  # 12 x dim x dim
 
         if inds is None:
             # Return surface self-energies: 6 in-plane + 3 out-of-plane = 9 total
@@ -1301,6 +1305,7 @@ class surfGAt3D:
         Previous implementation used ANT.Gaussian approach with complex contour
         integration. Current version uses simpler bisection method from density.py.
         """
+        print('Calculating Bulk Lattice Fermi Energy...')
         self.fermi = getFermiContact(self, ne, conv=tol, maxcycles=1000, T=self.T, nOrbs=dim)
         return self.fermi
 

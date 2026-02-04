@@ -518,12 +518,8 @@ class surfGB:
 
         # Apply self energies in first 9 directions that aren't attached to atom
         for nInds, Finds in zip(nIndLists_i, indsLists_i):
-            # Sum contributions from all 9 directions, then subtract connected ones
-            sigAtom = jnp.sum(sigSurf[:9], axis=0)
-            for neighbor_idx in nInds:
-                sigAtom = sigAtom - sigSurf[neighbor_idx]# Compute indices not connected to device (JAX-compatible)
-
-            # Update sigma matrix
+            sigInds = list(set(range(9)) - {int(x) for x in nInds})
+            sigAtom = sum(sigSurf[j] for j in sigInds)
             sig = sig.at[jnp.ix_(Finds, Finds)].set(sigAtom)
 
         # Apply de-orthonormalization technique from ANT.Gaussian if orthonormal
@@ -1152,7 +1148,7 @@ class surfGBAt:
         float
             Density of states at energy E
         """
-        Gr = LA.inv((E-1j*self.eta)*jnp.eye(dim)- self.H - jnp.sum(self.sigma(E), axis=0))
+        Gr = LA.inv((E+1j*self.eta)*jnp.eye(dim)- self.H - jnp.sum(self.sigma(E), axis=0))
         return -jnp.trace(Gr).imag/jnp.pi
 
     
@@ -1183,6 +1179,7 @@ class surfGBAt:
         Previous implementation used ANT.Gaussian approach with complex contour
         integration. Current version uses simpler bisection method from density.py.
         """
+        print('Calculating Bulk Bethe Lattice Fermi level...')
         self.fermi = getFermiContact(self, ne, conv=tol, maxcycles=1000, T=self.T, nOrbs=dim)
         return self.fermi
 
