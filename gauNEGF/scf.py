@@ -53,6 +53,7 @@ from gauopen import QCBinAr as qcb
 # Developed packages
 from gauNEGF.matTools import *
 from gauNEGF.density import *
+from gauNEGF.spinTools import spinorTF
 
 # Use JAX functions directly
 from gauNEGF.config import (SCF_CONVERGENCE_TOL, SCF_DAMPING, SCF_MAX_CYCLES,
@@ -689,7 +690,7 @@ class NEGF(object):
                     trace_current = np.trace(block_current)
                     trace_locked = np.trace(block_locked)
                     if abs(trace_current) > 1e-10 and abs(trace_locked) > 1e-10:
-                        U_i = self._spinorTF(block_current, block_locked)
+                        U_i = spinorTF(block_current, block_locked)
                     else:
                         U_i = np.eye(2) #identity
                     
@@ -938,66 +939,4 @@ class NEGF(object):
                   "spin": self.spin, "den": self.P, "conv": self.convLevel}
         io.savemat(matfile, matdict)
         return self.X @ self.F @ self.X
-
-    def _spinorTF(self, rho_initial, rho_target):
-        """
-        Find unitary transformation U such that U @ rho_initial @ U.conj().T = rho_target using Bloch sphere rotation.
-
-        Parameters
-        ----------
-        rho_initial : ndarray
-            Initial density matrix
-        rho_target : ndarray
-            Target density matrix
-
-        Returns
-        -------
-        ndarray
-            Unitary transformation matrix U
-        """
-        # Pauli matrices
-        sigma_x = np.array([[0, 1], [1, 0]], dtype=complex)
-        sigma_y = np.array([[0, -1j], [1j, 0]], dtype=complex)
-        sigma_z = np.array([[1, 0], [0, -1]], dtype=complex)
-        
-        # Extract Bloch vectors
-        def get_bloch_vector(rho):
-            x = np.trace(rho @ sigma_x).real
-            y = np.trace(rho @ sigma_y).real
-            z = np.trace(rho @ sigma_z).real
-            return np.array([x, y, z])
-        
-        r_init = get_bloch_vector(rho_initial)
-        r_targ = get_bloch_vector(rho_target)
-        
-        # Normalize to unit vectors
-        r_init_norm = LA.norm(r_init)
-        r_targ_norm = LA.norm(r_targ)
-        
-        if r_init_norm < 1e-12 or r_targ_norm < 1e-12:
-            return np.eye(2, dtype=complex)  # One is maximally mixed
-        
-        n_init = r_init / r_init_norm
-        n_targ = r_targ / r_targ_norm
-        
-        # Find rotation axis and angle
-        cross = np.cross(n_init, n_targ)
-        dot = np.dot(n_init, n_targ)
-        
-        if LA.norm(cross) < 1e-12:
-            return np.eye(2, dtype=complex)  # Already aligned
-        
-        axis = cross / LA.norm(cross)
-        angle = np.arccos(np.clip(dot, -1, 1))
-        
-        # U = exp(-i * angle/2 * axis · sigma) = exp (A)
-        # Construct A = -i * angle/2 * axis · sigma
-        A = -1j * angle/2 * (axis[0]*sigma_x + axis[1]*sigma_y + axis[2]*sigma_z)
-        
-        # Eigendecomposition: A = V @ D @ V^(-1)
-        # For anti-Hermitian A, eigenvalues are purely imaginary
-        D, V = np.linalg.eig(A)
-        
-        # exp(A) = V @ diag(exp(D)) @ V^(-1)
-        return V @ np.diag(np.exp(D)) @ np.linalg.inv(V)
 
