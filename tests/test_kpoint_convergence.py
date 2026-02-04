@@ -7,7 +7,7 @@ import jax.numpy as jnp
 
 # Read Bethe lattice parameters for Au
 params = {}
-with open('../Au.bethe', 'r') as f:
+with open('Au.bethe', 'r') as f:
     for line in f:
         if not line.strip():
             continue
@@ -145,7 +145,7 @@ eta = 1e-6
 T = 0
 test_energy = 1.5  # eV (near Fermi level for Au)
 energy_samples = test_energy + np.linspace(-0.1, 0.1, 5)  # Sample around test energy
-kpoint_values = [1, 3, 5, 7, 11, 15, 19, 23]
+kpoint_values = [4*n+1 for n in range(21)]
 
 print(f"Testing k-point convergence for DOS near E = {test_energy} eV")
 print(f"Energy samples: {energy_samples}")
