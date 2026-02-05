@@ -1022,14 +1022,13 @@ class surfGAt3D:
         ndarray
             Array of 12 self-energy matrices (shape: 12 x dim x dim)
         """
-        # Get real-space bulk Green's functions via inverse Fourier transform
-        g_k, G_real = self.gBulk(E)  # 12 x dim x dim
+        # Get bulk Green's function via 3D k-mesh inversion
+        g_k, G_real = self.gBulk(E)  # G_real = G_bulk(R=0) = mean_k[g_bulk(k)]
 
-        # For reach direction: B = (E + i\eta)*S - V
+        # For each direction: B = (E + i*eta)*S - V
         B = (E + self.eta*1j)*self.Slist - self.Vlist  # 12 x dim x dim
 
-        # For each direction i: sig_i = B_i @ G(R_i) @ B_^\dagger
-        # Note: B^\dagger = conj(B)^T, so contract the row index of conj(B): 'anl'
+        # sig_i = B_i @ G_bulk(R=0) @ B_i†
         sigList = jnp.einsum('aij,jl,anl->ain', B, G_real, B.conj())  # 12 x dim x dim
 
         return sigList
@@ -1110,35 +1109,34 @@ class surfGAt3D:
         #               max_c=jnp.max(counts), avg_c=jnp.mean(counts),
         #               n_uc=n_max_iters, n_tot=self.kPoints**2, max_diff=jnp.max(diffs), avg_diff=jnp.mean(diffs))
 
-        # Compute real-space via inverse FT: G(R_i) = (1/N_k) Σ_k g(k) * exp(-ik·R_i)
-        G_real = jnp.zeros((self.NN, dim, dim), dtype=complex)
-        for i in range(self.NN):
-            # Phase factors: exp(-ik·R_i) = conj(exp(+ik·R_i))
-            phase = jnp.conj(self.expList_2D[:, i])  # nK^2
-            G_i = jnp.mean(g_k * phase[:, None, None], axis=0)  # dim × dim
-            G_real = G_real.at[i].set(G_i)
-
-        # Return both k-space and real-space Green's functions
-        return g_k, G_real
+        return g_k
 
     def sigma(self, E, inds=None, conv=1e-4, mix=0.1):
         """
-        Calculate surface self-energies for an FCC lattice.
+        Calculate surface self-energies for an FCC lattice using Damle's approach.
 
-        Computes self-energies for atoms at the surface with the geometry:
-        [3x plane dir] - o - [3x plane dir]
-                        /|\
-                [3x out of plane dir]
+        Implements sig = coup * G_real * coup' from Damle's sigma.m, expressed
+        in k-space. The per-direction decomposition is the row decomposition of
+        that quadratic form:
+            sigma_a = sum_b B_a @ G(R_a - R_b) @ B_b†
+        where G(R_a - R_b) = (1/Nk) sum_k g_surf(k) * exp(ik*(R_a - R_b))
+        is exactly what Damle computes in gR.m.
 
-        Uses inverse Fourier transform approach matching Damle:
-        Σ_i = B_i @ G(R_i) @ B_i† where G(R_i) = (1/N_k) Σ_k g(k)*exp(+ik·R_i)
+        The k-space equivalent (numerically identical, no explicit G matrix needed):
+            sigma_a = (1/Nk) sum_k B_a(k) @ g_surf(k) @ B_tot†(k)
+        where B_a(k) = exp(ik·R_a)*B_a_bare and B_tot(k) = sum_b B_b(k).
+        The BZ average IS the inverse FT -- the phases in B encode R_a - R_b.
+
+        The TOTAL sigma (sum over directions) is guaranteed retarded because
+        it equals B_tot(k) @ g(k) @ B_tot†(k) averaged over k -- a quadratic
+        form on a retarded matrix.
 
         Parameters
         ----------
         E : float
             Energy point for Green's function calculation (in eV)
         inds : list or int, optional
-            Indices of the sigma matrix to return. If None, returns full list (default: None)
+            Indices of the sigma matrix to return. If None, returns all 9 (default: None)
         conv : float, optional
             Convergence criterion for Dyson equation (default: 1e-4)
         mix : float, optional
@@ -1147,21 +1145,30 @@ class surfGAt3D:
         Returns
         -------
         ndarray
-            Array of self-energy matrices for the surface atom. If inds is specified,
-            returns only the requested matrices. Shape: (9, dim, dim) or (len(inds), dim, dim)
+            Array of self-energy matrices. Shape: (9, dim, dim) if inds is None,
+            otherwise (len(inds), dim, dim).
         """
-        # Get real-space Green's functions via inverse Fourier transform
-        g_k, G_real = self.gSurf(E, conv, mix)  # 12 x dim x dim
+        g_k = self.gSurf(E, conv, mix)  # nK^2 x dim x dim
 
-        # For reach direction: B = (E + i\eta)*S - V
-        B = (E + self.eta*1j)*self.Slist - self.Vlist  # 12 x dim x dim
+        # Bloch-phased coupling: B_a(k) = exp(ik·R_a) * [(E+i*eta)*S_a - V_a]
+        # Same phase construction as Damle's gK.m: P(kp)*f(:,:,i)
+        Flist = self.expList_2D[:, :, None, None] * self.Vlist[None, :, :, :]  # nK^2 x NN x dim x dim
+        Slist = self.expList_2D[:, :, None, None] * self.Slist[None, :, :, :]  # nK^2 x NN x dim x dim
+        B = (E + self.eta*1j)*Slist - Flist  # nK^2 x NN x dim x dim
 
-        # For each direction i: sig_i = B_i @ G(R_i) @ B_^\dagger
-        # Note: B^\dagger = conj(B)^T, so contract the row index of conj(B): 'anl'
-        sigListAll = jnp.einsum('aij,ajl,anl->ain', B, G_real, B.conj())  # 12 x dim x dim
+        # Total coupling over 9 surface directions: B_tot(k) = sum_{a=0..8} B_a(k)
+        # This is Damle's coup_tot(k) = sum_i coup_i * exp(ik*R_i)
+        B_tot = jnp.sum(B[:, :9, :, :], axis=1)  # nK^2 x dim x dim
+
+        # Per-direction sigma: sigma_a(k) = B_a(k) @ g(k) @ B_tot†(k)
+        # einsum: i=kpoint, a=direction, jk=matrix row/col of B, kl=g, nl=B_tot†
+        sigma_k = jnp.einsum('iajk,ikl,inl->iajn', B[:, :9, :, :], g_k, B_tot.conj())  # nK^2 x 9 x dim x dim
+
+        # BZ average -- phases already in B, so plain mean IS the inverse FT
+        sigListAll = jnp.mean(sigma_k, axis=0)  # 9 x dim x dim
 
         if inds is None:
-            return sigListAll[:9]
+            return sigListAll
         else:
             return jnp.array([sigListAll[i] for i in inds])
     
@@ -1232,11 +1239,7 @@ class surfGAt3D:
 
     def DOS(self, E, conv=1e-4, mix=0.1):
         """
-        Calculate bulk density of states using surface self-energies.
-
-        Matches surfGBethe.DOS() by computing the local DOS of a surface atom
-        with 9 semi-infinite connections (6 in-plane + 3 out-of-plane).
-        Uses DOS(E) = -(1/π) Im[Tr[G]] where G = [E*I - H - Σ_surf]^-1.
+        Use surface Green's function to calculate density of states.
 
         Parameters
         ----------
@@ -1252,17 +1255,8 @@ class surfGAt3D:
         float
             Density of states at energy E
         """
-        # Get surface self-energies (9 directions: 6 in-plane + 3 out-of-plane)
-        sigList = self.sigma(E, inds=None, conv=conv, mix=mix)  # 9 x dim x dim
-
-        # Sum all surface self-energies
-        sigTot = jnp.sum(sigList, axis=0)  # dim x dim
-
-        # Compute Green's function: G = [E*I - H - Σ_tot]^-1
-        # Note: Use same sign convention as rest of surfG3D (E + 1j*eta)
-        Gr = LA.inv((E + 1j*self.eta)*jnp.eye(dim) - self.H - sigTot)
-
-        # DOS = -(1/π) Im[Tr[G]]
+        sig = self.sigma(E, conv=conv, mix=mix)  # 9 x dim x dim
+        Gr = LA.inv((E + self.eta*1j)*jnp.eye(dim) - self.H - jnp.sum(sig, axis=0))
         return -jnp.trace(Gr).imag / jnp.pi
 
     
