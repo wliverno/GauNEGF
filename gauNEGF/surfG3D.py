@@ -183,7 +183,7 @@ class surfG3:
             in_plane_vectors.append(rotated_vector / jnp.linalg.norm(rotated_vector))
         
         # Generate out-of-plane vectors
-        out_of_plane_angle = jnp.arccos(1/np.sqrt(3)) # ~54.74
+        out_of_plane_angle = jnp.arccos(1/jnp.sqrt(3)) # ~54.74
         
         out_of_plane_vectors = []
         # Add 30° = pi/6 rotation to base vector before going out of plane
@@ -191,7 +191,7 @@ class surfG3:
         K = jnp.array([[0, -plane_normal[2], plane_normal[1]],
                       [plane_normal[2], 0, -plane_normal[0]],
                       [-plane_normal[1], plane_normal[0], 0]])
-        R = jnp.eye(3) + jnp.sin(rot_angle) * K + (1 - jnp.cos(rot_angle)) * np.matmul(K, K)
+        R = jnp.eye(3) + jnp.sin(rot_angle) * K + (1 - jnp.cos(rot_angle)) * jnp.matmul(K, K)
         rotated_first = jnp.dot(R, first_neighbor)
         out_of_plane_base = jnp.cos(out_of_plane_angle) * rotated_first + \
                       jnp.sin(out_of_plane_angle) * plane_normal
@@ -350,9 +350,9 @@ class surfG3:
         # p orbitals (3x3) at positions [1:4,1:4]
         # [px,py,pz] block - describes how p orbitals transform under rotation
         tr = tr.at[1:4,1:4].set(jnp.array([
-            [np.cos(theta) * jnp.cos(phi), -np.sin(phi)  , jnp.sin(theta)*np.cos(phi)],
-            [np.cos(theta) * jnp.sin(phi),  jnp.cos(phi)  , np.sin(theta)*np.sin(phi)], 
-            [-np.sin(theta)             ,  0            , jnp.cos(theta)]
+            [jnp.cos(theta) * jnp.cos(phi), -jnp.sin(phi)  , jnp.sin(theta)*jnp.cos(phi)],
+            [jnp.cos(theta) * jnp.sin(phi),  jnp.cos(phi)  , jnp.sin(theta)*jnp.sin(phi)], 
+            [-jnp.sin(theta)             ,  0            , jnp.cos(theta)]
         ]))
         
         # d orbitals (5x5) at positions [4:9,4:9]
@@ -361,22 +361,22 @@ class surfG3:
         
         # Copying formula from ANT.Gaussian directly
         d_block = d_block.at[0,0].set((3 * z**2 - 1) / 2)
-        d_block = d_block.at[0,1].set(-np.sqrt(3) * jnp.sin(2*theta) / 2)
+        d_block = d_block.at[0,1].set(-jnp.sqrt(3) * jnp.sin(2*theta) / 2)
         d_block = d_block.at[0,3].set(jnp.sqrt(3) * jnp.sin(theta)**2 / 2)
         
-        d_10 = jnp.sqrt(3) * jnp.sin(2*theta) * np.cos(phi) / 2
+        d_10 = jnp.sqrt(3) * jnp.sin(2*theta) * jnp.cos(phi) / 2
         d_block = d_block.at[1,0].set(d_10)
         d_block = d_block.at[1,1].set(jnp.cos(2*theta) * jnp.cos(phi))
-        d_block = d_block.at[1,2].set(-np.cos(theta) * jnp.sin(phi))
+        d_block = d_block.at[1,2].set(-jnp.cos(theta) * jnp.sin(phi))
         d_block = d_block.at[1,3].set(-d_10 / jnp.sqrt(3))
         d_block = d_block.at[1,4].set(jnp.sin(theta) * jnp.sin(phi))
         
-        d_20 = jnp.sqrt(3) * jnp.sin(2*theta) * np.sin(phi) / 2
+        d_20 = jnp.sqrt(3) * jnp.sin(2*theta) * jnp.sin(phi) / 2
         d_block = d_block.at[2,0].set(d_20)
         d_block = d_block.at[2,1].set(jnp.cos(2*theta) * jnp.sin(phi))
         d_block = d_block.at[2,2].set(jnp.cos(theta) * jnp.cos(phi))
         d_block = d_block.at[2,3].set(-d_20 / jnp.sqrt(3))
-        d_block = d_block.at[2,4].set(-np.sin(theta) * jnp.cos(phi))
+        d_block = d_block.at[2,4].set(-jnp.sin(theta) * jnp.cos(phi))
         
         d_block = d_block.at[3,0].set(jnp.sqrt(3) * jnp.sin(theta)**2 * jnp.cos(2*phi) / 2)
         d_block = d_block.at[3,1].set(jnp.sin(2*theta) * jnp.cos(2*phi) / 2)
@@ -982,7 +982,7 @@ class surfGAt3D:
             - g_k: k-space Green's function (nK^3 x dim x dim)
             - G_real: Real-space Green's function for all 12 directions (12 x dim x dim)
         """
-        # Construct H(k) = sum_R V(R)*exp(+ik·R) and S(k) = sum_R S(R)*exp(+ik·R)
+        # Construct H(k) = sum_R V(R)*exp(+ik*R) and S(k) = sum_R S(R)*exp(+ik*R)
         # Use 3D k-mesh
         Flist = self.expList_3D[:, :, None, None] * self.Vlist[None, :, :, :]  # nK^3 x 12 x dim x dim
         Slist = self.expList_3D[:, :, None, None] * self.Slist[None, :, :, :]  # nK^3 x 12 x dim x dim
@@ -995,19 +995,12 @@ class surfGAt3D:
         Hk_sharded = shard_array(Hk, axis=0)
         Sk_sharded = shard_array(Sk, axis=0)
 
-        # Direct inversion: g(k) = [(E + iη)S(k) - H(k)]^-1
+        # Direct inversion: g(k) = [(E + i*eta)S(k) - H(k)]^-1
         # Vectorized over all k-points, automatically parallelized across devices
         g_k = jax.vmap(lambda H, S: LA.inv((E + self.eta*1j)*S - H))(Hk_sharded, Sk_sharded)
 
-        # Inverse FT: G(R_i) = (1/N_k) Σ_k g(k) * exp(-ik·R_i)
-        G_real = jnp.zeros((self.NN, dim, dim), dtype=complex)
-
-        for i in range(self.NN):
-            # Phase factors for all k-points: exp(-ik·R_i) = conj(exp(+ik·R_i))
-            phase = jnp.conj(self.expList_3D[:, i])  # nK^3
-            # Sum over k: (1/N_k) Σ_k g(k) * phase(k)
-            G_i = jnp.mean(g_k * phase[:, None, None], axis=0)  # dim × dim
-            G_real = G_real.at[i].set(G_i)
+        # Inverse FT: G(R_i=0) = (1/N_k) \sum_k g(k) * exp(-i*0) = (1/N_k) \sum_k g(k)
+        G_real = jnp.mean(g_k, axis=0)
 
         # Return both k-space and real-space Green's functions
         return g_k, G_real
@@ -1032,12 +1025,12 @@ class surfGAt3D:
         # Get real-space bulk Green's functions via inverse Fourier transform
         g_k, G_real = self.gBulk(E)  # 12 x dim x dim
 
-        # Calculate self-energies: Σ_i = B_i @ G(R_i) @ B_i†
+        # For reach direction: B = (E + i\eta)*S - V
         B = (E + self.eta*1j)*self.Slist - self.Vlist  # 12 x dim x dim
 
-        # For each direction i: Σ_i = B_i @ G(R_i) @ B_i†
-        # Note: B† = conj(B)^T, so contract the row index of conj(B): 'anl'
-        sigList = jnp.einsum('aij,ajl,anl->ain', B, G_real, B.conj())  # 12 x dim x dim
+        # For each direction i: sig_i = B_i @ G(R_i) @ B_^\dagger
+        # Note: B^\dagger = conj(B)^T, so contract the row index of conj(B): 'anl'
+        sigList = jnp.einsum('aij,jl,anl->ain', B, G_real, B.conj())  # 12 x dim x dim
 
         return sigList
 
@@ -1160,22 +1153,15 @@ class surfGAt3D:
         # Get real-space Green's functions via inverse Fourier transform
         g_k, G_real = self.gSurf(E, conv, mix)  # 12 x dim x dim
 
-        # Calculate self-energies: Σ_i = B_i @ G(R_i) @ B_i†
+        # For reach direction: B = (E + i\eta)*S - V
         B = (E + self.eta*1j)*self.Slist - self.Vlist  # 12 x dim x dim
 
-        # For each direction i: Σ_i = B_i @ G(R_i) @ B_i†
-        # Note: B† = conj(B)^T, so contract the row index of conj(B): 'anl'
+        # For each direction i: sig_i = B_i @ G(R_i) @ B_^\dagger
+        # Note: B^\dagger = conj(B)^T, so contract the row index of conj(B): 'anl'
         sigListAll = jnp.einsum('aij,ajl,anl->ain', B, G_real, B.conj())  # 12 x dim x dim
 
         if inds is None:
-            # Return surface self-energies: 6 in-plane + 3 out-of-plane = 9 total
-            # In-plane: vecs [0,1,2,6,7,8]
-            # Out-of-plane: vecs [3,4,5]
-            in_plane_indices = jnp.array([0, 1, 2, 6, 7, 8])
-            out_plane_indices = jnp.array([3, 4, 5])
-            in_plane = sigListAll[in_plane_indices]  # 6 x dim x dim
-            out_plane = sigListAll[out_plane_indices]  # 3 x dim x dim
-            return jnp.concatenate([in_plane, out_plane], axis=0)  # 9 x dim x dim
+            return sigListAll[:9]
         else:
             return jnp.array([sigListAll[i] for i in inds])
     

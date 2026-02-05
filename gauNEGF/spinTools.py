@@ -14,6 +14,7 @@ the rotation axis unit vector and sigma are the Pauli matrices.
 """
 
 import numpy as np
+import numpy.linalg as LA
 import re
 from scipy.linalg import expm
 
@@ -69,6 +70,63 @@ def get_hirshfeld_data(filename):
             break
 
     return np.array(charges), np.array(mag_moments)
+
+def spinorTF(rho_initial, rho_target):
+        """
+        Find unitary transformation U such that U @ rho_initial @ U.conj().T = rho_target using Bloch sphere rotation.
+
+        Parameters
+        ----------
+        rho_initial : ndarray
+            Initial density matrix
+        rho_target : ndarray
+            Target density matrix
+
+        Returns
+        -------
+        ndarray
+            Unitary transformation matrix U
+        """
+        # Extract Bloch vectors
+        def get_bloch_vector(rho):
+            x = np.trace(rho @ sigx).real
+            y = np.trace(rho @ sigy).real
+            z = np.trace(rho @ sigz).real
+            return np.array([x, y, z])
+        
+        r_init = get_bloch_vector(rho_initial)
+        r_targ = get_bloch_vector(rho_target)
+        
+        # Normalize to unit vectors
+        r_init_norm = LA.norm(r_init)
+        r_targ_norm = LA.norm(r_targ)
+        
+        if r_init_norm < 1e-12 or r_targ_norm < 1e-12:
+            return np.eye(2, dtype=complex)  # One is maximally mixed
+        
+        n_init = r_init / r_init_norm
+        n_targ = r_targ / r_targ_norm
+        
+        # Find rotation axis and angle
+        cross = np.cross(n_init, n_targ)
+        dot = np.dot(n_init, n_targ)
+        
+        if LA.norm(cross) < 1e-12:
+            return np.eye(2, dtype=complex)  # Already aligned
+        
+        axis = cross / LA.norm(cross)
+        angle = np.arccos(np.clip(dot, -1, 1))
+        
+        # U = exp(-i * angle/2 * axis · sigma) = exp (A)
+        # Construct A = -i * angle/2 * axis · sigma
+        A = -1j * angle/2 * (axis[0]*sigx + axis[1]*sigy + axis[2]*sigz)
+        
+        # Eigendecomposition: A = V @ D @ V^(-1)
+        # For anti-Hermitian A, eigenvalues are purely imaginary
+        D, V = LA.eig(A)
+        
+        # exp(A) = V @ diag(exp(D)) @ V^(-1)
+        return V @ np.diag(np.exp(D)) @ LA.inv(V)
 
 
 def genRot(n, omega):
@@ -133,7 +191,7 @@ def genOrthRots(spinVec):
     (vec1 and vec2 respectively). 
     """
     unitVec = np.array(spinVec, dtype=float)
-    unitVec = unitVec / np.linalg.norm(unitVec)
+    unitVec = unitVec / LA.norm(unitVec)
 
     # Robust orthogonal vector construction -- avoids degeneracy when
     # unitVec is aligned with the y-axis
@@ -142,7 +200,7 @@ def genOrthRots(spinVec):
     else:
         vec1 = np.array([0, unitVec[2], -unitVec[1]])
 
-    vec1 = vec1 / np.linalg.norm(vec1)
+    vec1 = vec1 / LA.norm(vec1)
     vec2 = np.cross(unitVec, vec1)
 
     # Verify orthogonality
@@ -190,7 +248,7 @@ def genOrthRotFile(filename):
     if hirsh_res is None:
         raise ValueError(f"No Hirshfeld data found in file: {filename}")
     _, mag_moments = hirsh_res
-    max_moment_index = np.argmax(np.linalg.norm(mag_moments, axis=1))
+    max_moment_index = np.argmax(LA.norm(mag_moments, axis=1))
     max_moment_direction = mag_moments[max_moment_index]
     rotations, directions = genOrthRots(max_moment_direction)
     return rotations, directions, max_moment_index
