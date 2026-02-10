@@ -965,7 +965,7 @@ def integralFitNEGF(F, S, g, fermi, qV, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_
     return N
 
 
-def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATION_TOL,
+def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATION_TOL, Eminf=ENERGY_MIN,
                    conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE, nOrbs=0):
     """
     Calculate Fermi energy for a contact using adaptive integration.
@@ -987,6 +987,8 @@ def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INT
         Upper bound for bisection search in eV. If None, estimated from eigenvalues.
     tol : float, optional
         Tolerance for adaptive integration (default: ADAPTIVE_INTEGRATION_TOL)
+    Eminf : float, optional
+        Lower bound for integration (default: -1e6)
     conv : float, optional
         Convergence tolerance for electron count (default: FERMI_CALCULATION_TOL)
     maxcycles : int, optional
@@ -1010,6 +1012,12 @@ def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INT
     # Calculate Emin from DOS if not provided
     if Emin is None:
         Emin = calcEmin(F, S, g, tol=conv, maxN=maxcycles)
+    
+    P = densityComplex(F, S, g, Eminf, Emin, tol, T=0)
+    nLower = np.trace(S@P).real
+    assert nLower < ne, "ne ({ne}) exceeds mininum number of electrons ({nLower:.2f})"
+    print(f"{nLower:.2f} electrons below Emin.")
+    ne -= nLower # Subtract from total
 
     # Set bounds from eigenvalues if not provided
     if lBound is None:
