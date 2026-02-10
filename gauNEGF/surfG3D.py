@@ -1259,7 +1259,162 @@ class surfGAt3D:
         Gr = LA.inv((E + self.eta*1j)*jnp.eye(dim) - self.H - jnp.sum(sig, axis=0))
         return -jnp.trace(Gr).imag / jnp.pi
 
-    
+    def generate_band_plot(self, E_fermi=0.0, n_points=40, plot=True, save_path=None):
+        """
+        Generate band structure plot along high-symmetry path for FCC.
+
+        Uses the pre-computed reciprocal lattice vectors (b1_3D, b2_3D, b3_3D)
+        to convert fractional k-coordinates to Cartesian k-space.
+
+        Parameters
+        ----------
+        E_fermi : float, optional
+            Fermi energy to shift bands relative to (default: 0.0)
+        n_points : int, optional
+            Number of points between each high-symmetry point (default: 40)
+        plot : bool, optional
+            Whether to generate matplotlib plot (default: True)
+        save_path : str, optional
+            Path to save plot (default: None, display only)
+
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - 'distances': 1D array of k-path distances
+            - 'bands': 2D array (n_kpoints x n_bands) of eigenvalues
+            - 'k_labels': List of high-symmetry point labels
+            - 'k_positions': Positions of high-symmetry points along path
+        """
+        # High-symmetry path for FCC: Gamma-X-W-L-Gamma-K (fractional coordinates)
+        k_points_special = {
+            'G': jnp.array([0.0, 0.0, 0.0]),
+            'X': jnp.array([0.0, 0.5, 0.0]),
+            'W': jnp.array([0.25, 0.5, 0.25]),
+            'L': jnp.array([0.5, 0.5, 0.5]),
+            'K': jnp.array([0.375, 0.375, 0.0]),
+        }
+
+        path = ['G', 'X', 'W', 'L', 'G', 'K']
+
+        # Generate k-path
+        k_path_frac = []
+        k_labels = []
+        k_positions = []
+        distance = 0.0
+
+        for i in range(len(path) - 1):
+            k_start = k_points_special[path[i]]
+            k_end = k_points_special[path[i+1]]
+
+            if i > 0:
+                k_labels.append('')
+                k_positions.append(distance)
+
+            k_labels.append(path[i])
+            k_positions.append(distance)
+
+            for j in range(n_points):
+                t = j / (n_points - 1)
+                k_frac = k_start + t * (k_end - k_start)
+                k_path_frac.append(k_frac)
+
+                if j > 0 and len(k_path_frac) > 1:
+                    # Convert to Cartesian k-space for distance calculation
+                    k_cart_prev = (k_path_frac[-2][0] * self.b1_3D +
+                                   k_path_frac[-2][1] * self.b2_3D +
+                                   k_path_frac[-2][2] * self.b3_3D)
+                    k_cart = (k_frac[0] * self.b1_3D +
+                              k_frac[1] * self.b2_3D +
+                              k_frac[2] * self.b3_3D)
+                    dk = jnp.linalg.norm(k_cart - k_cart_prev)
+                    distance += dk
+
+        k_labels.append(path[-1])
+        k_positions.append(distance)
+
+        # Calculate band structure
+        bands = []
+        distances = jnp.zeros(len(k_path_frac))
+
+        for idx, k_frac in enumerate(k_path_frac):
+            # Convert fractional to Cartesian k-space
+            k_cart = (k_frac[0] * self.b1_3D +
+                      k_frac[1] * self.b2_3D +
+                      k_frac[2] * self.b3_3D)
+
+            # Build H(k) and S(k) using Bloch sum
+            H_k = jnp.array(self.H, dtype=complex)
+            S_k = jnp.eye(dim, dtype=complex)
+
+            for i, vec in enumerate(self.vecs):
+                phase = jnp.exp(1j * jnp.dot(k_cart, vec))
+                H_k += phase * self.Vlist[i]
+                S_k += phase * self.Slist[i]
+
+            # Solve generalized eigenvalue problem: H|psi> = E S|psi>
+            # First transform to standard eigenvalue problem: S^(-1/2) H S^(-1/2) |phi> = E |phi>
+            S_inv = LA.inv(S_k)
+            H_transformed = S_inv @ H_k
+            evals, _ = LA.eigh(H_transformed)
+            bands.append(jnp.sort(jnp.real(evals)) - E_fermi)
+
+            # Calculate cumulative distance
+            if idx > 0:
+                k_cart_prev = (k_path_frac[idx-1][0] * self.b1_3D +
+                               k_path_frac[idx-1][1] * self.b2_3D +
+                               k_path_frac[idx-1][2] * self.b3_3D)
+                dk = jnp.linalg.norm(k_cart - k_cart_prev)
+                distances = distances.at[idx].set(distances[idx-1] + dk)
+
+        bands = jnp.array(bands)  # Shape: (n_kpoints, n_bands)
+
+        # Generate plot if requested
+        if plot:
+            try:
+                import matplotlib.pyplot as plt
+
+                fig, ax = plt.subplots(figsize=(10, 6))
+
+                # Plot all bands
+                for i in range(dim):
+                    ax.plot(distances, bands[:, i], 'b-', linewidth=1.5)
+
+                # Fermi level
+                ax.axhline(0, color='r', linestyle='--', linewidth=2, label='E_F')
+
+                # High-symmetry point labels
+                ax.set_xticks(k_positions)
+                ax.set_xticklabels(k_labels, fontsize=12)
+
+                # Vertical lines at high-symmetry points
+                for pos in k_positions:
+                    ax.axvline(pos, color='k', linestyle='-', linewidth=0.5, alpha=0.3)
+
+                ax.set_ylabel('Energy - E$_F$ (eV)', fontsize=12)
+                ax.set_title('Band Structure (surfGAt3D)', fontsize=14, fontweight='bold')
+                ax.set_ylim([-8, 5])
+                ax.grid(True, alpha=0.3, axis='y')
+                ax.legend(fontsize=10)
+
+                plt.tight_layout()
+
+                if save_path:
+                    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+                    print(f"Band structure plot saved to: {save_path}")
+                else:
+                    plt.show()
+
+            except ImportError:
+                print("Warning: matplotlib not available, skipping plot generation")
+
+        return {
+            'distances': distances,
+            'bands': bands,
+            'k_labels': k_labels,
+            'k_positions': k_positions,
+        }
+
     # Calculate fermi energy using bisection (to specified tolerance)
     def calcFermi(self, ne, tol=1e-5):
         """
