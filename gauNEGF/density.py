@@ -1012,9 +1012,14 @@ def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INT
     # Calculate Emin from DOS if not provided
     if Emin is None:
         Emin = calcEmin(F, S, g, tol=conv, maxN=maxcycles)
-    
+   
+    # Count electrons below Emin 
     P = densityComplex(F, S, g, Eminf, Emin, tol, T=0)
-    nLower = np.trace(S@P).real
+    nLower = 0
+    if nOrbs==0:
+        nLower = np.trace(P@g.S).real
+    else:
+        nLower = np.trace((P@g.S)[-nOrbs:, -nOrbs:]).real
     assert nLower < ne, "ne ({ne}) exceeds mininum number of electrons ({nLower:.2f})"
     print(f"{nLower:.2f} electrons below Emin.")
     ne -= nLower # Subtract from total
