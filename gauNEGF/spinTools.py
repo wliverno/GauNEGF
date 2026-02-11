@@ -290,3 +290,68 @@ def genOrthRotGrids(spinVec=None, filename=None, dphi=np.pi/4):
         rotations_grids.append(rot_grid)
         angles_grids.append(ang_grid)
     return rotations_grids, angles_grids
+
+def constructSOCterm(lambdas):
+    """
+    Construct spin-orbit coupling term for p and d orbitals.
+
+    Parameters
+    ----------
+    lambdas : list
+        List of spin-orbit coupling parameters for p and d orbitals
+
+    Returns
+    -------
+    ndarray
+        18x18 matrix containing spin-orbit coupling terms
+    """
+
+    # s (l=0): L·S is always zero, but need 2x2 for (s_up, s_down)
+    LdotS_s = np.zeros((2, 2), dtype=complex)
+
+    # p (l=1): L·S in the (px, py, pz) ⊗ (up, down) basis (6x6)
+    # Lx, Ly, Lz for real basis (px, py, pz)
+    Lx = np.array([[0, 0, 0], [0, 0, -1j], [0, 1j, 0]], dtype=complex)
+    Ly = np.array([[0, 0, 1j], [0, 0, 0], [-1j, 0, 0]], dtype=complex)
+    Lz = np.array([[0, -1j, 0], [1j, 0, 0], [0, 0, 0]], dtype=complex)
+    # Construct full 6x6
+    LdotS_p = (
+        np.kron(Lx, sigx) +
+        np.kron(Ly, sigy) +
+        np.kron(Lz, sigz)
+    )
+
+    # d (l=2): L·S in the (d3z2-r2, dxz, dyz, dx2-y2, dxy) ⊗ (up, down) basis (10x10)
+    Lx_d = np.array([
+        [ 0,  0,         0,           0,           0 ],
+        [ 0,  0,         0,      -1j,        0 ],
+        [ 0,  0,         0,           0,       1j ],
+        [ 0,  1j,        0,           0,       0 ],
+        [ 0,  0,     -1j,             0,       0 ]
+    ], dtype=complex)
+    Ly_d = np.array([
+        [ 0,     0,       0,             0,           0],
+        [ 0,     0,       0,             0,     1j ],
+        [ 0,     0,       0,         -1j,        0 ],
+        [ 0,     0,     1j,             0,       0 ],
+        [ 0,  -1j,       0,             0,       0 ]
+    ], dtype=complex)
+    Lz_d = np.array([
+        [ 0,     0,      2j,           0,          0 ],
+        [ 0,     0,      0,           -1j,         0 ],
+        [ -2j,   0,      0,            0,          1j ],
+        [ 0,     1j,     0,            0,          0 ],
+        [ 0,     0,    -1j,            0,          0 ]
+    ], dtype=complex)
+    
+    # Construct L·S for d orbitals (10x10)
+    LdotS_d = (
+        np.kron(Lx_d, sigx) +
+        np.kron(Ly_d, sigy) +
+        np.kron(Lz_d, sigz)
+    )
+
+    Hsoc = np.block([[lambdas[0]*LdotS_s, np.zeros((2,6)), np.zeros((2,10))],
+                     [np.zeros((6,2)), lambdas[1]*LdotS_p, np.zeros((6,10))],
+                     [np.zeros((10,2)), np.zeros((10,6)), lambdas[2]*LdotS_d]])
+    return Hsoc

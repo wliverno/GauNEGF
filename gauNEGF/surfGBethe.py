@@ -197,14 +197,14 @@ class surfGB:
             Slist = []
             Vlist = []
             for d in dirList:
-                Slist.append(self.constructMat(self.Sdict, d))
-                Vlist.append(self.constructMat(self.Vdict, d))
+                Slist.append(self.constructMat(self.Sdict, d, self.SOC))
+                Vlist.append(self.constructMat(self.Vdict, d, self.SOC))
             self.Slists.append(Slist)
             self.Vlists.append(Vlist)
         # Use surfGBAt() object to store the atomic Bethe lattice green's function for each contact
-        self.gList = [surfGBAt(self.H0.copy(), Slist, Vlist, eta, T) for Slist, Vlist in zip(self.Slists, self.Vlists)]
+        self.gList = [surfGBAt(self.H0.copy(), Slist, Vlist, eta, T, self.SOC) for Slist, Vlist in zip(self.Slists, self.Vlists)]
        
-        # Calculate fermi level 
+        # Calculate fermi level
         fermi = self.gList[0].calcFermi(self.ne/2)
         for g in self.gList:
             g.fermi = fermi
@@ -343,6 +343,8 @@ class surfGB:
                         'Spps', 'Sppp', 'Ssds', 'Spds', 'Spdp', 'Sdds', 'Sddp', 'Sddd']
         assert len(params.keys()) == len(expected_keys) and set(params.keys()) == set(expected_keys), \
              f"Error reading file: Found Bethe parameters: {list(params.keys())}, expected: {expected_keys}"
+
+        
         
         # sort parameters and convert Hartrees to eV 
         self.ne = params['ne']
@@ -352,7 +354,17 @@ class surfGB:
         # Setup onsite H0 matrix before Fermi level shifting
         hdiag = [self.Edict['s']]+ [self.Edict['p']]*3 + [self.Edict['dd']]+ \
                 [self.Edict['dt']]*2 + [self.Edict['dd'], self.Edict['dt']]
-        self.H0 = jnp.diag(jnp.array(hdiag))
+
+        H0 = jnp.diag(jnp.array(hdiag))
+        if 'soc_p' in params.keys() and 'soc_d' in params.keys():
+            self.SOC = True
+            lambdas = [0.0,params['soc_p'],params['soc_d']]
+            from gauNEGF.spinTools import constructSOCterm
+            Hsoc = constructSOCterm(lambdas)
+            return jnp.kron(H0, jnp.eye(2)) + Hsoc
+        else:
+            self.SOC = False
+            return H0
 
     def constructMat(self, Mdict, dirCosines):
         """
@@ -366,7 +378,7 @@ class surfGB:
         Parameters
         ----------
         Mdict : dict
-            Dictionary of Slater-Koster parameters (ssσ, spσ, ppσ, etc.)
+            Dictionary of Slater-Koster parameters (sss, sps, pps, etc.)
         dirCosines : ndarray
             Array [l,m,n] of direction cosines for the bond
 
@@ -472,7 +484,7 @@ class surfGB:
         d_block = d_block.at[4,4].set(jnp.cos(theta) * jnp.cos(2*phi))
         
         tr = tr.at[4:9,4:9].set(d_block)
-        
+
         # Apply transformation 
         return tr @ M @ tr.T
     
@@ -864,7 +876,7 @@ class surfGBAt:
     S : ndarray
         Extended overlap matrix including neighbors
     """
-    def __init__(self, H, Slist, Vlist, eta, T=TEMPERATURE):
+    def __init__(self, H, Slist, Vlist, eta, T=TEMPERATURE, SOC=False):
         """
         Initialize surfGBAt with Hamiltonian and neighbor matrices.
 
@@ -880,16 +892,18 @@ class surfGBAt:
             Broadening parameter in eV
         T : float, optional
             Temperature in Kelvin (default: 0)
-
+        SOC : bool, optional
+            Whether to include spin-orbit coupling (default: False)
         Raises
         ------
         AssertionError
             If matrix dimensions are incorrect or number of neighbors != 12
         """
-        assert jnp.shape(H) == (dim,dim), f"Error with H dim, should be {dim}x{dim}"
+        self.dim = dim*2 if SOC else dim
+        assert jnp.shape(H) == (self.dim,self.dim), f"Error with H dim, should be {self.dim}x{self.dim}"
         for S,V in zip(Slist, Vlist):
-            assert jnp.shape(S) == (dim,dim), f"Error with S dim, should be {dim}x{dim}"
-            assert jnp.shape(V) == (dim,dim), f"Error with F dim, should be {dim}x{dim}"
+            assert jnp.shape(S) == (self.dim,self.dim), f"Error with S dim, should be {self.dim}x{self.dim}"
+            assert jnp.shape(V) == (self.dim,self.dim), f"Error with F dim, should be {self.dim}x{self.dim}"
         self.H = H
         self.Slist = Slist
         self.Vlist = Vlist
@@ -934,7 +948,7 @@ class surfGBAt:
             fermiPrev = self.fermi
             dFermi =  fermi - fermiPrev
             # Onsite energies
-            self.H = self.H + dFermi*jnp.eye(dim)
+            self.H = self.H + dFermi*jnp.eye(self.dim)
             # And hopping overlaps
             for j,S in enumerate(self.Slist):
                 self.Vlist[j] = self.Vlist[j] + dFermi*S
@@ -942,12 +956,12 @@ class surfGBAt:
             self.fermi = fermi
 
         H0x = jnp.kron(jnp.eye(self.NN+1), self.H)
-        S0x = jnp.eye(dim*(self.NN+1))
+        S0x = jnp.eye(self.dim*(self.NN+1))
         for i in range(self.NN):
-            S0x = S0x.at[-dim:, i*dim:(i+1)*dim].set(self.Slist[i])
-            S0x = S0x.at[i*dim:(i+1)*dim, -dim:].set(self.Slist[i].T)
-            H0x = H0x.at[-dim:, i*dim:(i+1)*dim].set(self.Vlist[i])
-            H0x = H0x.at[i*dim:(i+1)*dim, -dim:].set(self.Vlist[i].conj().T)
+            S0x = S0x.at[-self.dim:, i*self.dim:(i+1)*self.dim].set(self.Slist[i])
+            S0x = S0x.at[i*self.dim:(i+1)*self.dim, -self.dim:].set(self.Slist[i].T)
+            H0x = H0x.at[-self.dim:, i*self.dim:(i+1)*self.dim].set(self.Vlist[i])
+            H0x = H0x.at[i*self.dim:(i+1)*self.dim, -self.dim:].set(self.Vlist[i].conj().T)
         self.F = H0x
         self.S = S0x
 
@@ -988,8 +1002,8 @@ class surfGBAt:
         #if self.sigmaKprev is not None and self.Eprev != Eminf and abs(self.Eprev - E) <1:
         #    sigmaK = self.sigmaKprev.copy()
         #else:
-        sigmaK = jnp.array([jnp.eye(dim)*-1j for k in range(self.NN)], dtype=complex)
-        A = (E + self.eta*1j)*jnp.eye(dim) - self.H
+        sigmaK = jnp.array([jnp.eye(self.dim)*-1j for k in range(self.NN)], dtype=complex)
+        A = (E + self.eta*1j)*jnp.eye(self.dim) - self.H
         
         #Self-consistency loop using jax.lax.while_loop
         maxIter = 1000
@@ -1073,7 +1087,7 @@ class surfGBAt:
         
         #Self-consistency loop using jax.lax.while_loop
         maxIter = 1000
-        A = (E + self.eta*1j)*jnp.eye(dim) - self.H
+        A = (E + self.eta*1j)*jnp.eye(self.dim) - self.H
         planeVec = [0,1,2,6,7,8] # Location of vectors in plane
         
         def cond_fun(state):
@@ -1125,12 +1139,12 @@ class surfGBAt:
     
     # Wrapper function for compatibility with density.py methods
     def sigmaTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
-        sig = jnp.zeros(((self.NN + 1)*dim, (self.NN+1)*dim), dtype=complex)
+        sig = jnp.zeros(((self.NN + 1)*self.dim, (self.NN+1)*self.dim), dtype=complex)
         sigK = self.sigmaK(E, conv)
         sigTot = jnp.sum(sigK, axis=0)
         for k in range(self.NN):
             pair_k = (k + 6)%12 # Opposite direction vector
-            sig = sig.at[k*dim:(k+1)*dim,k*dim:(k+1)*dim].set(sigTot - sigK[pair_k])
+            sig = sig.at[k*self.dim:(k+1)*self.dim,k*self.dim:(k+1)*self.dim].set(sigTot - sigK[pair_k])
         return sig
 
     # Get the surface DOS of the Bethe lattice
@@ -1148,7 +1162,7 @@ class surfGBAt:
         float
             Density of states at energy E
         """
-        Gr = LA.inv((E+1j*self.eta)*jnp.eye(dim)- self.H - jnp.sum(self.sigma(E), axis=0))
+        Gr = LA.inv((E+1j*self.eta)*jnp.eye(self.dim)- self.H - jnp.sum(self.sigma(E), axis=0))
         return -jnp.trace(Gr).imag/jnp.pi
 
     
@@ -1180,7 +1194,7 @@ class surfGBAt:
         integration. Current version uses simpler bisection method from density.py.
         """
         print('Calculating Bulk Bethe Lattice Fermi level...')
-        self.fermi = getFermiContact(self, ne, conv=tol, maxcycles=1000, T=self.T, nOrbs=dim)
+        self.fermi = getFermiContact(self, ne, conv=tol, maxcycles=1000, T=self.T, nOrbs=self.dim)
         return self.fermi
 
 
