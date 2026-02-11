@@ -338,42 +338,44 @@ class surfGB:
         
         # Check to make sure parameters are all specified
         # Note: set up only for minimal basis with single s, p, and d orbital
-        expected_keys = ['ne', 'es', 'ep', 'edd', 'edt', 'sss', 'sps', 'pps', 'ppp',
+        expected_keys = {'ne', 'es', 'ep', 'edd', 'edt', 'sss', 'sps', 'pps', 'ppp',
                         'sds', 'pds', 'pdp', 'dds', 'ddp', 'ddd', 'Ssss', 'Ssps',
-                        'Spps', 'Sppp', 'Ssds', 'Spds', 'Spdp', 'Sdds', 'Sddp', 'Sddd']
-        assert len(params.keys()) == len(expected_keys) and set(params.keys()) == set(expected_keys), \
-             f"Error reading file: Found Bethe parameters: {list(params.keys())}, expected: {expected_keys}"
+                        'Spps', 'Sppp', 'Ssds', 'Spds', 'Spdp', 'Sdds', 'Sddp', 'Sddd'}
+        optional_keys = {'soc_p', 'soc_d'}
+        found_keys = set(params.keys())
+        assert expected_keys.issubset(found_keys) and found_keys.issubset(expected_keys | optional_keys), \
+             f"Error reading file: Found Bethe parameters: {list(params.keys())}, expected: {sorted(expected_keys)}"
 
-        
-        
-        # sort parameters and convert Hartrees to eV 
+        # sort parameters and convert Hartrees to eV
         self.ne = params['ne']
         self.Edict = {k[1:]:params[k]*har_to_eV for k in params if k.startswith('e')}
         self.Sdict = {k[1:]:params[k] for k in params if k.startswith('S')}
-        self.Vdict = {k:params[k]*har_to_eV for k in params if not k.startswith('e') and not k.startswith('S')}
+        self.Vdict = {k:params[k]*har_to_eV for k in params
+                      if not k.startswith('e') and not k.startswith('S')
+                      and not k.startswith('soc') and k != 'ne'}
         # Setup onsite H0 matrix before Fermi level shifting
         hdiag = [self.Edict['s']]+ [self.Edict['p']]*3 + [self.Edict['dd']]+ \
                 [self.Edict['dt']]*2 + [self.Edict['dd'], self.Edict['dt']]
 
         H0 = jnp.diag(jnp.array(hdiag))
-        if 'soc_p' in params.keys() and 'soc_d' in params.keys():
+        if 'soc_p' in params and 'soc_d' in params:
             self.SOC = True
-            lambdas = [0.0,params['soc_p'],params['soc_d']]
+            lambdas = [0.0, params['soc_p'] * har_to_eV, params['soc_d'] * har_to_eV]
             from gauNEGF.spinTools import constructSOCterm
             Hsoc = constructSOCterm(lambdas)
-            return jnp.kron(H0, jnp.eye(2)) + Hsoc
+            self.H0 = jnp.kron(H0, jnp.eye(2)) + jnp.array(Hsoc)
         else:
             self.SOC = False
-            return H0
+            self.H0 = H0
 
-    def constructMat(self, Mdict, dirCosines):
+    def constructMat(self, Mdict, dirCosines, SOC=False):
         """
         Construct hopping/overlap matrix using Slater-Koster formalism.
 
         Builds a 9x9 matrix for s, p, and d orbital interactions based on the
         Slater-Koster two-center approximation. The matrix is first constructed
         assuming a [0,0,1] bond direction, then rotated to the given direction
-        using direction cosines.
+        using direction cosines. When SOC=True, expands to 18x18 via kron(M, I2).
 
         Parameters
         ----------
@@ -485,8 +487,11 @@ class surfGB:
         
         tr = tr.at[4:9,4:9].set(d_block)
 
-        # Apply transformation 
-        return tr @ M @ tr.T
+        # Apply transformation
+        M_rot = tr @ M @ tr.T
+        if SOC:
+            return jnp.kron(M_rot, jnp.eye(2))
+        return M_rot
     
     def sigma(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
         """
