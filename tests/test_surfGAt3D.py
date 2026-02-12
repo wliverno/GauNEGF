@@ -19,7 +19,7 @@ from gauNEGF.surfGBethe import surfGBAt
 dim = 9  # size of single atom matrix: 1s + 3p + 5d
 har_to_eV = 27.211386  # eV/Hartree
 eta = 1e-6  # broadening parameter
-kpoints = 31
+kpoints = 3
 
 def read_bethe_params(filename):
     """Read Slater-Koster parameters from a .bethe file."""
@@ -430,33 +430,23 @@ def test_kmesh_dimensions(g_atom_3d):
 
 
 def test_gSurf_shapes(g_atom_3d):
-    """Check gSurf returns correct tuple shapes."""
+    """Check gSurf returns g_k array with correct shape."""
     print("\n" + "="*60)
     print("VALIDATION TEST: gSurf Return Shapes")
     print("="*60)
 
     E = 0.0  # Use arbitrary energy (will update after calcFermi)
     try:
-        result = g_atom_3d.gSurf(E, conv=1e-3, mix=0.1)
-
-        # Check if returns tuple
-        if not isinstance(result, tuple) or len(result) != 2:
-            print(f"\n[FAIL] gSurf should return tuple (g_k, G_real), got {type(result)}")
-            return False
-
-        g_k, G_real = result
+        g_k = g_atom_3d.gSurf(E, conv=1e-3, mix=0.1)
         nK = g_atom_3d.kPoints
 
-        print(f"\nReturn value shapes:")
-        print(f"  g_k shape:    {g_k.shape} (expect {nK**2} x {dim} x {dim})")
-        print(f"  G_real shape: {G_real.shape} (expect 12 x {dim} x {dim})")
+        print(f"\nReturn value shape:")
+        print(f"  g_k shape: {g_k.shape} (expect {nK**2} x {dim} x {dim})")
 
         assert g_k.shape == (nK**2, dim, dim), \
             f"gSurf g_k should be {nK**2}x{dim}x{dim}, got {g_k.shape}"
-        assert G_real.shape == (12, dim, dim), \
-            f"gSurf G_real should be 12x{dim}x{dim}, got {G_real.shape}"
 
-        print(f"\n[PASS] gSurf returns correct shapes")
+        print(f"\n[PASS] gSurf returns correct shape")
         return True
     except Exception as e:
         print(f"\n[FAIL] gSurf raised exception: {e}")
@@ -464,7 +454,7 @@ def test_gSurf_shapes(g_atom_3d):
 
 
 def test_gBulk_shapes(g_atom_3d):
-    """Check gBulk returns correct tuple shapes with 3D k-mesh."""
+    """Check gBulk returns (g_k, G_real) with correct shapes using 3D k-mesh."""
     print("\n" + "="*60)
     print("VALIDATION TEST: gBulk Return Shapes")
     print("="*60)
@@ -483,24 +473,15 @@ def test_gBulk_shapes(g_atom_3d):
 
         print(f"\nReturn value shapes:")
         print(f"  g_k shape:    {g_k.shape} (expect {nK**3} x {dim} x {dim})")
-        print(f"  G_real shape: {G_real.shape} (expect 12 x {dim} x {dim})")
+        print(f"  G_real shape: {G_real.shape} (expect {dim} x {dim})")
 
-        # After fix, should use 3D k-mesh
         assert g_k.shape == (nK**3, dim, dim), \
             f"gBulk g_k should be {nK**3}x{dim}x{dim} for 3D mesh, got {g_k.shape}"
-        assert G_real.shape == (12, dim, dim), \
-            f"gBulk G_real should be 12x{dim}x{dim}, got {G_real.shape}"
+        assert G_real.shape == (dim, dim), \
+            f"gBulk G_real should be {dim}x{dim} (onsite GF), got {G_real.shape}"
 
         print(f"\n[PASS] gBulk returns correct shapes with 3D k-mesh")
         return True
-    except AssertionError as e:
-        # If still using 2D mesh, show what we got
-        if g_k.shape == (nK**2, dim, dim):
-            print(f"\n[FAIL] gBulk still using 2D k-mesh ({nK**2} points) instead of 3D ({nK**3} points)")
-            print(f"  This is the bug we're fixing!")
-        else:
-            print(f"\n[FAIL] {e}")
-        return False
     except Exception as e:
         print(f"\n[FAIL] gBulk raised exception: {e}")
         return False

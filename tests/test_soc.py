@@ -354,7 +354,7 @@ def test_surfGB_readBetheParams_soc():
 
     # Create a minimal mock object with just what readBetheParams needs
     class MockSurfGB:
-        pass
+        spin = 'g'  # SOC requires non-restricted spin
     obj = MockSurfGB()
     # Call readBetheParams as unbound method
     surfGB.readBetheParams(obj, 'tests/AuSOC')
@@ -368,7 +368,7 @@ def test_surfGB_constructMat_soc():
     from gauNEGF.surfGBethe import surfGB
 
     class MockSurfGB:
-        pass
+        spin = 'g'
     obj = MockSurfGB()
     surfGB.readBetheParams(obj, 'tests/AuSOC')
 
@@ -422,6 +422,124 @@ def test_surfGBAt_soc_h0_eigenvalues():
         f"SOC eigenvalues match doubled non-SOC eigenvalues (max diff={diff}), SOC has no effect"
 
 
+# ========== TEST 7: SOC spin gating ==========
+
+def test_readBetheParams_restricted_disables_soc():
+    """readBetheParams with spin='r' should set SOC=False even with SOC params."""
+    from gauNEGF.surfGBethe import surfGB
+
+    class MockSurfGB:
+        spin = 'r'
+    obj = MockSurfGB()
+    surfGB.readBetheParams(obj, 'tests/AuSOC')
+    assert obj.SOC is False, f"SOC should be False for spin='r', got {obj.SOC}"
+    assert obj.H0.shape == (9, 9), f"H0 should be 9x9 for restricted, got {obj.H0.shape}"
+
+
+def test_readBetheParams_generalized_enables_soc():
+    """readBetheParams with spin='g' should enable SOC when params present."""
+    from gauNEGF.surfGBethe import surfGB
+
+    class MockSurfGB:
+        spin = 'g'
+    obj = MockSurfGB()
+    surfGB.readBetheParams(obj, 'tests/AuSOC')
+    assert obj.SOC is True, f"SOC should be True for spin='g' with SOC params"
+    assert obj.H0.shape == (18, 18), f"H0 should be 18x18 with SOC, got {obj.H0.shape}"
+
+
+def test_readBetheParams_unrestricted_enables_soc():
+    """readBetheParams with spin='u' should enable SOC when params present."""
+    from gauNEGF.surfGBethe import surfGB
+
+    class MockSurfGB:
+        spin = 'u'
+    obj = MockSurfGB()
+    surfGB.readBetheParams(obj, 'tests/AuSOC')
+    assert obj.SOC is True, f"SOC should be True for spin='u' with SOC params"
+    assert obj.H0.shape == (18, 18), f"H0 should be 18x18 with SOC, got {obj.H0.shape}"
+
+
+# ========== TEST 8: surfGB.sigma() with SOC ==========
+
+def build_mock_surfGB_with_soc(spin='g'):
+    """Build a mock surfGB object with SOC for testing sigma()."""
+    from gauNEGF.surfGBethe import surfGB
+
+    g_soc, ne = build_soc_surfGBAt()
+    g_soc.fermi = 0.0
+
+    class MockSurfGB:
+        pass
+    obj = MockSurfGB()
+    obj.N = 9  # single atom, 9 orbitals
+    obj.SOC = True
+    obj.spin = spin
+    obj.gList = [g_soc]
+    # Single atom contact: orbital indices [0..8], no excluded neighbor dirs
+    obj.nIndLists = [[[3, 4, 5]]]  # exclude up directions (connected to device)
+    obj.indsLists = [[jnp.arange(9)]]
+    obj.Sdict = {'sss': 1.0}  # non-zero -> skip Xi transform
+    obj.Xi = jnp.eye(9)
+    return obj
+
+
+def test_surfGB_sigma_soc_shape_generalized():
+    """sigma() with SOC + 'g' spin should return 2N x 2N matrix."""
+    from gauNEGF.surfGBethe import surfGB
+    obj = build_mock_surfGB_with_soc(spin='g')
+    sig = surfGB.sigma(obj, 0.0, 0)
+    expected_size = 2 * obj.N  # 18
+    assert sig.shape == (expected_size, expected_size), \
+        f"Expected ({expected_size},{expected_size}), got {sig.shape}"
+
+
+def test_surfGB_sigma_soc_shape_unrestricted():
+    """sigma() with SOC + 'u' spin should return 2N x 2N matrix."""
+    from gauNEGF.surfGBethe import surfGB
+    obj = build_mock_surfGB_with_soc(spin='u')
+    sig = surfGB.sigma(obj, 0.0, 0)
+    expected_size = 2 * obj.N  # 18
+    assert sig.shape == (expected_size, expected_size), \
+        f"Expected ({expected_size},{expected_size}), got {sig.shape}"
+
+
+def test_surfGB_sigma_soc_no_double_kron():
+    """sigma() with SOC should NOT apply kron expansion (spin already in matrices)."""
+    from gauNEGF.surfGBethe import surfGB
+
+    # Build SOC version
+    obj_soc = build_mock_surfGB_with_soc(spin='g')
+    sig_soc = surfGB.sigma(obj_soc, 0.0, 0)
+
+    # If kron was incorrectly applied, size would be 4N x 4N = 36 x 36
+    assert sig_soc.shape != (4 * obj_soc.N, 4 * obj_soc.N), \
+        "sigma() applied kron on top of SOC -- double counting spin!"
+    assert sig_soc.shape == (2 * obj_soc.N, 2 * obj_soc.N)
+
+
+def test_surfGB_sigma_soc_retarded():
+    """sigma() with SOC should produce retarded self-energy."""
+    from gauNEGF.surfGBethe import surfGB
+    obj = build_mock_surfGB_with_soc(spin='g')
+    sig = surfGB.sigma(obj, 0.0, 0)
+    imag_diag = jnp.diag(sig).imag
+    assert jnp.all(imag_diag <= 1e-10), \
+        f"Sigma not retarded, max Im(diag) = {jnp.max(imag_diag)}"
+
+
+def test_surfGB_sigmaTot_soc_shape():
+    """sigmaTot() with SOC should return 2N x 2N."""
+    from gauNEGF.surfGBethe import surfGB
+    obj = build_mock_surfGB_with_soc(spin='g')
+    # sigmaTot needs sigma to not be JIT-compiled for mock
+    obj.sigma = lambda E, i, conv=1e-5: surfGB.sigma(obj, E, i, conv)
+    sigTot = surfGB.sigmaTot(obj, 0.0)
+    expected_size = 2 * obj.N
+    assert sigTot.shape == (expected_size, expected_size), \
+        f"Expected ({expected_size},{expected_size}), got {sigTot.shape}"
+
+
 # ========== Run tests ==========
 
 if __name__ == '__main__':
@@ -444,6 +562,14 @@ if __name__ == '__main__':
         test_surfGB_constructMat_nosoc,
         test_surfGBAt_soc_h0_eigenvalues,
         test_surfGBAt_soc_fermi_convergence,
+        test_readBetheParams_restricted_disables_soc,
+        test_readBetheParams_generalized_enables_soc,
+        test_readBetheParams_unrestricted_enables_soc,
+        test_surfGB_sigma_soc_shape_generalized,
+        test_surfGB_sigma_soc_shape_unrestricted,
+        test_surfGB_sigma_soc_no_double_kron,
+        test_surfGB_sigma_soc_retarded,
+        test_surfGB_sigmaTot_soc_shape,
     ]
 
     passed = 0
