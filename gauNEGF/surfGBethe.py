@@ -205,7 +205,10 @@ class surfGB:
         self.gList = [surfGBAt(self.H0.copy(), Slist, Vlist, eta, T, self.SOC) for Slist, Vlist in zip(self.Slists, self.Vlists)]
        
         # Calculate fermi level
-        fermi = self.gList[0].calcFermi(self.ne/2)
+        # With SOC, 18x18 basis already includes both spins -> use full ne
+        # Without SOC, spin-restricted -> ne/2 per spin channel
+        ne_fermi = self.ne if self.SOC else self.ne/2
+        fermi = self.gList[0].calcFermi(ne_fermi)
         for g in self.gList:
             g.fermi = fermi
 
@@ -358,7 +361,7 @@ class surfGB:
                 [self.Edict['dt']]*2 + [self.Edict['dd'], self.Edict['dt']]
 
         H0 = jnp.diag(jnp.array(hdiag))
-        if 'soc_p' in params and 'soc_d' in params:
+        if 'soc_p' in params and 'soc_d' in params and self.spin != 'r':
             self.SOC = True
             lambdas = [0.0, params['soc_p'] * har_to_eV, params['soc_d'] * har_to_eV]
             from gauNEGF.spinTools import constructSOCterm
@@ -526,33 +529,49 @@ class surfGB:
             The Journal of Chemical Physics, 134(4), 044118.
             DOI: 10.1063/1.3526044
         """
-        sig = jnp.zeros((self.N, self.N), dtype=complex)
         sigSurf = self.gList[i].sigma(E, conv)
 
         # Get contact-specific data for this static contact index
         nIndLists_i = self.nIndLists[i]
         indsLists_i = self.indsLists[i]
 
-        # Apply self energies in first 9 directions that aren't attached to atom
-        for nInds, Finds in zip(nIndLists_i, indsLists_i):
-            sigInds = list(set(range(9)) - {int(x) for x in nInds})
-            sigAtom = sum(sigSurf[j] for j in sigInds)
-            sig = sig.at[jnp.ix_(Finds, Finds)].set(sigAtom)
+        if self.SOC:
+            # SOC matrices are 18x18 (spin already included, interleaved ordering)
+            sig = jnp.zeros((2*self.N, 2*self.N), dtype=complex)
+            for nInds, Finds in zip(nIndLists_i, indsLists_i):
+                sigInds = list(set(range(9)) - {int(x) for x in nInds})
+                sigAtom = sum(sigSurf[j] for j in sigInds)
+                # Expand orbital indices to spin-orbital: i -> [2*i, 2*i+1]
+                socFinds = jnp.array([idx for i in Finds for idx in (2*i, 2*i+1)])
+                sig = sig.at[jnp.ix_(socFinds, socFinds)].set(sigAtom)
 
-        # Apply de-orthonormalization technique from ANT.Gaussian if orthonormal
-        sig = lax.cond(self.Sdict['sss'] == 0,
-                      lambda s: self.Xi @ s @ self.Xi,
-                      lambda s: s,
-                      sig)
+            # De-orthonormalization with expanded Xi
+            sig = lax.cond(self.Sdict['sss'] == 0,
+                          lambda s: jnp.kron(self.Xi, jnp.eye(2)) @ s @ jnp.kron(self.Xi, jnp.eye(2)),
+                          lambda s: s,
+                          sig)
+            # No kron needed -- spin is already in SOC matrices
+        else:
+            sig = jnp.zeros((self.N, self.N), dtype=complex)
+            for nInds, Finds in zip(nIndLists_i, indsLists_i):
+                sigInds = list(set(range(9)) - {int(x) for x in nInds})
+                sigAtom = sum(sigSurf[j] for j in sigInds)
+                sig = sig.at[jnp.ix_(Finds, Finds)].set(sigAtom)
 
-        # Handle spin - use if/else since spin is static
-        if self.spin == 'u' or self.spin == 'ro':
-            sig = jnp.kron(jnp.eye(2), sig)
-        elif self.spin == 'g':
-            sig = jnp.kron(sig, jnp.eye(2))
-        # else: spin == 'r', keep sig as-is
+            # Apply de-orthonormalization technique from ANT.Gaussian if orthonormal
+            sig = lax.cond(self.Sdict['sss'] == 0,
+                          lambda s: self.Xi @ s @ self.Xi,
+                          lambda s: s,
+                          sig)
 
-        return sig 
+            # Handle spin - use if/else since spin is static
+            if self.spin == 'u' or self.spin == 'ro':
+                sig = jnp.kron(jnp.eye(2), sig)
+            elif self.spin == 'g':
+                sig = jnp.kron(sig, jnp.eye(2))
+            # else: spin == 'r', keep sig as-is
+
+        return sig
     
     def sigmaTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
         """
