@@ -1286,13 +1286,22 @@ class surfGAt3D:
             - 'k_labels': List of high-symmetry point labels
             - 'k_positions': Positions of high-symmetry points along path
         """
-        # High-symmetry path for FCC: Gamma-X-W-L-Gamma-K (fractional coordinates)
+        # Compute correct FCC high-symmetry k-points for the [111]-frame
+        # rhombohedral primitive cell (a1=vecs[0], a2=vecs[1], a3=vecs[3])
+        B_inv = jnp.linalg.inv(jnp.column_stack([self.b1_3D, self.b2_3D, self.b3_3D]))
+        ex = jnp.array([1, -1, 0]) / jnp.sqrt(2)
+        ey = jnp.array([1, 1, -2]) / jnp.sqrt(6)
+        ez = jnp.array([1, 1, 1]) / jnp.sqrt(3)
+        R = jnp.array([ex, ey, ez])
+        scale = 2 * jnp.pi / jnp.sqrt(2)  # nearest-neighbor distance = 1 -> a = sqrt(2)
+        def _kpt(cubic_vec):
+            return B_inv @ (R @ (scale * jnp.array(cubic_vec)))
         k_points_special = {
-            'G': jnp.array([0.0, 0.0, 0.0]),
-            'X': jnp.array([0.0, 0.5, 0.0]),
-            'W': jnp.array([0.25, 0.5, 0.25]),
-            'L': jnp.array([0.5, 0.5, 0.5]),
-            'K': jnp.array([0.375, 0.375, 0.0]),
+            'G': jnp.zeros(3),
+            'X': _kpt([1.0, 0.0, 0.0]),
+            'W': _kpt([1.0, 0.5, 0.0]),
+            'L': _kpt([0.5, 0.5, 0.5]),
+            'K': _kpt([0.75, 0.75, 0.0]),
         }
 
         path = ['G', 'X', 'W', 'L', 'G', 'K']
