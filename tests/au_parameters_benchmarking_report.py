@@ -33,18 +33,59 @@ har_to_eV = 27.211386
 
 
 def compute_reciprocal_vectors(vecs):
-    """Compute 3D reciprocal lattice vectors from real-space vectors."""
-    a1 = vecs[0]  # First in-plane vector
-    a2 = vecs[1]  # Second in-plane vector
-    a3 = vecs[3]  # First out-of-plane vector
+    """Compute 3D reciprocal lattice vectors from real-space primitive vectors.
 
-    # Standard formula for reciprocal lattice: b_i = 2π * (a_j × a_k) / [a_i · (a_j × a_k)]
+    Uses vecs[0], vecs[1], vecs[3] (two in-plane + one out-of-plane) as the
+    rhombohedral primitive cell of the FCC lattice in the [111] frame.
+    """
+    a1, a2, a3 = np.array(vecs[0]), np.array(vecs[1]), np.array(vecs[3])
     vol = np.dot(a1, np.cross(a2, a3))
     b1 = 2 * np.pi * np.cross(a2, a3) / vol
     b2 = 2 * np.pi * np.cross(a3, a1) / vol
     b3 = 2 * np.pi * np.cross(a1, a2) / vol
-
     return b1, b2, b3
+
+
+def compute_kpoints_111(vecs):
+    """Compute FCC high-symmetry k-points in fractional coordinates for the
+    [111]-frame rhombohedral primitive cell (a1=vecs[0], a2=vecs[1], a3=vecs[3]).
+
+    The standard FCC k-points (X, L, W, K) are defined in the conventional
+    cubic frame. We transform them to the [111] rotated frame and express
+    them in the reciprocal basis of the rhombohedral cell.
+    """
+    a1, a2, a3 = np.array(vecs[0]), np.array(vecs[1]), np.array(vecs[3])
+    vol = np.dot(a1, np.cross(a2, a3))
+    b1 = 2 * np.pi * np.cross(a2, a3) / vol
+    b2 = 2 * np.pi * np.cross(a3, a1) / vol
+    b3 = 2 * np.pi * np.cross(a1, a2) / vol
+    B_inv = np.linalg.inv(np.column_stack([b1, b2, b3]))
+
+    # Rotation from cubic to [111] frame
+    ex = np.array([1, -1, 0]) / np.sqrt(2)
+    ey = np.array([1, 1, -2]) / np.sqrt(6)
+    ez = np.array([1, 1, 1]) / np.sqrt(3)
+    R = np.array([ex, ey, ez])
+
+    # FCC with nearest-neighbor distance = 1 -> a = sqrt(2)
+    scale = 2 * np.pi / np.sqrt(2)
+
+    # High-symmetry points in cubic Cartesian k-space
+    cubic_pts = {
+        'G': np.array([0.0, 0.0, 0.0]),
+        'X': scale * np.array([1.0, 0.0, 0.0]),
+        'L': scale * np.array([0.5, 0.5, 0.5]),
+        'W': scale * np.array([1.0, 0.5, 0.0]),
+        'K': scale * np.array([0.75, 0.75, 0.0]),
+    }
+
+    k_special = {}
+    for name, k_cubic in cubic_pts.items():
+        k_111 = R @ k_cubic
+        k_frac = B_inv @ k_111
+        k_special[name] = k_frac
+
+    return k_special
 
 
 def fractional_to_cartesian_k(k_frac, b1, b2, b3):
@@ -88,16 +129,10 @@ def find_fermi_level(H0, Vlist, Slist, vecs, b1, b2, b3, n_electrons=5.5, n_k_sa
     return all_evals[min(fermi_idx, len(all_evals) - 1)]
 
 
-def calculate_band_structure(H0, Vlist, Slist, vecs, b1, b2, b3, E_fermi):
+def calculate_band_structure(H0, Vlist, Slist, vecs, b1, b2, b3, E_fermi, k_points_special=None):
     """Calculate band structure along high-symmetry path."""
-    # High-symmetry path for FCC: Gamma-X-W-L-Gamma-K (fractional coordinates)
-    k_points_special = {
-        'G': np.array([0.0, 0.0, 0.0]),
-        'X': np.array([0.0, 0.5, 0.0]),
-        'W': np.array([0.25, 0.5, 0.25]),
-        'L': np.array([0.5, 0.5, 0.5]),
-        'K': np.array([0.375, 0.375, 0.0]),
-    }
+    if k_points_special is None:
+        k_points_special = compute_kpoints_111(vecs)
 
     path = ['G', 'X', 'W', 'L', 'G', 'K']
     n_points = 40
@@ -180,9 +215,10 @@ def benchmark_parameters(param_file, label):
     Vlist = [construct_mat(Vdict, vec) for vec in vecs]
     Slist = [construct_mat(Sdict, vec) for vec in vecs]
 
-    # Compute reciprocal lattice vectors
+    # Compute reciprocal lattice vectors and correct k-points
     print("  Computing reciprocal lattice vectors...")
     b1, b2, b3 = compute_reciprocal_vectors(vecs)
+    k_special = compute_kpoints_111(vecs)
 
     # Find Fermi level
     print("  Finding Fermi level...")
@@ -190,15 +226,15 @@ def benchmark_parameters(param_file, label):
 
     # Calculate band structure
     print("  Calculating band structure...")
-    dist, bands, labels, positions = calculate_band_structure(H0, Vlist, Slist, vecs, b1, b2, b3, E_fermi)
+    dist, bands, labels, positions = calculate_band_structure(H0, Vlist, Slist, vecs, b1, b2, b3, E_fermi, k_special)
 
     # Calculate DOS
     print("  Calculating DOS...")
     dos_e, dos = calculate_dos(H0, Vlist, Slist, vecs, b1, b2, b3, E_fermi)
 
-    # Get key benchmarks (fractional coordinates)
-    k_G = np.array([0.0, 0.0, 0.0])
-    k_L = np.array([0.5, 0.5, 0.5])
+    # Get key benchmarks using correct k-points
+    k_G = k_special['G']
+    k_L = k_special['L']
 
     evals_G = get_eigenvalues(H0, Vlist, Slist, vecs, k_G, b1, b2, b3) - E_fermi
     evals_L = get_eigenvalues(H0, Vlist, Slist, vecs, k_L, b1, b2, b3) - E_fermi

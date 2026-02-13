@@ -293,64 +293,85 @@ def genOrthRotGrids(spinVec=None, filename=None, dphi=np.pi/4):
 
 def constructSOCterm(lambdas):
     """
-    Construct spin-orbit coupling term for p and d orbitals.
+    Construct spin-orbit coupling term for s, p and d orbitals.
+
+    Uses the correct L·S operator construction via transformation from
+    spherical harmonic basis to real orbital basis, following the verified
+    approach in calcSOCOrbs.py.
 
     Parameters
     ----------
     lambdas : list
-        List of spin-orbit coupling parameters for p and d orbitals
+        List of spin-orbit coupling parameters [lambda_s, lambda_p, lambda_d]
+        for s, p and d orbitals respectively
 
     Returns
     -------
     ndarray
-        18x18 matrix containing spin-orbit coupling terms
+        18x18 matrix containing spin-orbit coupling terms in the basis
+        (s_up, s_dn, px_up, px_dn, py_up, py_dn, pz_up, pz_dn,
+         d3z2r2_up, d3z2r2_dn, dxz_up, dxz_dn, dyz_up, dyz_dn,
+         dx2y2_up, dx2y2_dn, dxy_up, dxy_dn)
     """
 
-    # s (l=0): L·S is always zero, but need 2x2 for (s_up, s_down)
-    LdotS_s = np.zeros((2, 2), dtype=complex)
+    def LOps(l):
+        """Generate angular momentum operators in spherical harmonic basis."""
+        m = np.arange(-l, l+1)
+        Lz = np.diag(m) + 0j
+        Lp = np.zeros((2*l+1, 2*l+1), dtype=complex)
+        for i, mi in enumerate(m):
+            for j, mj in enumerate(m):
+                if mj == mi+1:
+                    Lp[j, i] = np.sqrt((l-mi)*(l+mi+1))
+        Lm = Lp.T
+        Lx = 0.5*(Lp+Lm)
+        Ly = -0.5j*(Lp-Lm)
+        return Lx, Ly, Lz
 
-    # p (l=1): L·S in the (px, py, pz) ⊗ (up, down) basis (6x6)
-    # Lx, Ly, Lz for real basis (px, py, pz)
-    Lx = np.array([[0, 0, 0], [0, 0, -1j], [0, 1j, 0]], dtype=complex)
-    Ly = np.array([[0, 0, 1j], [0, 0, 0], [-1j, 0, 0]], dtype=complex)
-    Lz = np.array([[0, -1j, 0], [1j, 0, 0], [0, 0, 0]], dtype=complex)
-    # Construct full 6x6
-    LdotS_p = (
-        np.kron(Lx, sigx) +
-        np.kron(Ly, sigy) +
-        np.kron(Lz, sigz)
-    )
+    def genOrbList(l):
+        """Generate transformation matrix from spherical to real orbitals."""
+        m = np.zeros(2*l+1, dtype=int)
+        for i in range(2*l+1):
+            if i == 0:
+                m[i] = 0
+            elif i % 2 == 1:
+                m[i] = (i + 1) // 2
+            else:
+                m[i] = -((i + 1) // 2)
+        V = np.zeros((2*l+1, 2*l+1), dtype=complex)
+        for i, mi in enumerate(m):
+            if mi == 0:
+                V[i, l] = 1.0
+            elif mi > 0:
+                V[i, l+mi] = (-1.0**mi)/np.sqrt(2)
+                V[i, l-mi] = 1.0/np.sqrt(2)
+            else:
+                V[i, l+mi] = -(-1.0**mi)*1j/np.sqrt(2)
+                V[i, l-mi] = 1j/np.sqrt(2)
+        return V
 
-    # d (l=2): L·S in the (d3z2-r2, dxz, dyz, dx2-y2, dxy) ⊗ (up, down) basis (10x10)
-    Lx_d = np.array([
-        [ 0,  0,         0,           0,           0 ],
-        [ 0,  0,         0,      -1j,        0 ],
-        [ 0,  0,         0,           0,       1j ],
-        [ 0,  1j,        0,           0,       0 ],
-        [ 0,  0,     -1j,             0,       0 ]
-    ], dtype=complex)
-    Ly_d = np.array([
-        [ 0,     0,       0,             0,           0],
-        [ 0,     0,       0,             0,     1j ],
-        [ 0,     0,       0,         -1j,        0 ],
-        [ 0,     0,     1j,             0,       0 ],
-        [ 0,  -1j,       0,             0,       0 ]
-    ], dtype=complex)
-    Lz_d = np.array([
-        [ 0,     0,      2j,           0,          0 ],
-        [ 0,     0,      0,           -1j,         0 ],
-        [ -2j,   0,      0,            0,          1j ],
-        [ 0,     1j,     0,            0,          0 ],
-        [ 0,     0,    -1j,            0,          0 ]
-    ], dtype=complex)
-    
-    # Construct L·S for d orbitals (10x10)
-    LdotS_d = (
-        np.kron(Lx_d, sigx) +
-        np.kron(Ly_d, sigy) +
-        np.kron(Lz_d, sigz)
-    )
+    def genLSMatrix(l):
+        """Generate L·S matrix for angular momentum l."""
+        Lx, Ly, Lz = LOps(l)
+        orbs = genOrbList(l)
+        # Transform to real orbital basis using Hermitian conjugate (dagger)
+        Lx = orbs.conj().T @ Lx @ orbs
+        Ly = orbs.conj().T @ Ly @ orbs
+        Lz = orbs.conj().T @ Lz @ orbs
+        # Construct L·S = 0.5 * [[Lz, L-], [L+, -Lz]]
+        # where L- = Lx - i*Ly and L+ = Lx + i*Ly
+        return 0.5*np.block([[Lz, Lx-1j*Ly], [Lx+1j*Ly, -Lz]])
 
+    # s (l=0): L·S is always zero
+    LdotS_s = genLSMatrix(0)  # 2x2 zero matrix
+
+    # p (l=1): L·S in real orbital basis
+    LdotS_p = genLSMatrix(1)  # 6x6 matrix
+
+    # d (l=2): L·S in real orbital basis
+    LdotS_d = genLSMatrix(2)  # 10x10 matrix
+
+    # Construct block diagonal 18x18 matrix
     Hsoc = np.block([[lambdas[0]*LdotS_s, np.zeros((2,6)), np.zeros((2,10))],
                      [np.zeros((6,2)), lambdas[1]*LdotS_p, np.zeros((6,10))],
                      [np.zeros((10,2)), np.zeros((10,6)), lambdas[2]*LdotS_d]])
