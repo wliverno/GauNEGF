@@ -137,7 +137,7 @@ class NEGFE(NEGF):
                 tauList = (ind1, ind2)
 
         # Generate surfG() object for the molecule + contacts and initialize variables
-        self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eta, spin)
+        self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eta, self.spin)
         
         if alphas is not None:
             muL = getFermi1DContact(self.g, neList[0], 0)
@@ -284,7 +284,7 @@ class NEGFE(NEGF):
     
     
     # Get left and right contact self-energies at specified energy
-    def getSigma(self, E):
+    def getSigma(self, E, E2=None):
         """
         Get contact self-energies at specified energy.
 
@@ -298,8 +298,30 @@ class NEGFE(NEGF):
         tuple
             (left_sigma, right_sigma) - Contact self-energies
         """
-        return (self.g.sigma(E, 0), self.g.sigma(E, -1))
+        if E2 is None:
+            E2 = E
+        return (self.g.sigma(E, 0), self.g.sigma(E2, -1))
 
+    def spawnNEGF(self, mu1=None, mu2=None):
+        if mu1 is None:
+            mu1 = self.mu1
+        if mu2 is None:
+            mu2 = self.mu2
+        sig1, sig2 = self.getSigma(mu1, mu2)
+        negf = NEGF(self.ifile[:-4], self.basis, self.func, self.spin, False, 
+                    self.otherRoute, self.section,len(self.pB)-1)
+        negf.setSigma(self.lContact, self.rContact, 
+            sig1[np.ix_(self.lInd, self.lInd)], 
+            sig2[np.ix_(self.rInd, self.rInd)])
+        negf.setDen(self.P)
+        qV = mu1-mu2
+        fermi = (mu1+mu2)/2
+        if self.updFermi:
+            negf.setVoltage(qV)
+        else:
+            negf.setVoltage(qV, fermi)
+        return negf
+        
     # Updated to use energy-dependent contour integral from surfG()
     def FockToP(self):
         """
@@ -317,7 +339,7 @@ class NEGFE(NEGF):
         print('Calculating lower density matrix:')
         if self.N2 is None:
             self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g)
-            P = densityReal(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
+            P = densityComplex(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
         else:
             P = densityRealN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
         nLower = np.trace(self.S@P).real
