@@ -890,7 +890,7 @@ class NEGF(object):
             if self.convLevel < minConv and checkpoint:
                 print('Saving density checkpoint...')
                 io.savemat(checkpoint_file, {'den':self.P, 'conv':self.convLevel, 'fermi':self.fermi})
-                #minConv = self.convLevel + 0.0 
+                minConv = self.convLevel + 0.0 
             Niter += 1
 
         if self.convLevel < conv and checkpoint:
