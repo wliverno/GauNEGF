@@ -488,9 +488,9 @@ def test_gBulk_shapes(g_atom_3d):
 
 
 def test_sigma_count(g_atom_3d):
-    """Verify sigma returns 9 self-energies (6 in-plane + 3 out-of-plane)."""
+    """Verify sigma returns a single self-energy matrix (dim x dim)."""
     print("\n" + "="*60)
-    print("VALIDATION TEST: Sigma Self-Energy Count")
+    print("VALIDATION TEST: Sigma Self-Energy Shape")
     print("="*60)
 
     E = 0.0  # Use arbitrary energy
@@ -498,18 +498,83 @@ def test_sigma_count(g_atom_3d):
         sig = g_atom_3d.sigma(E, conv=1e-3, mix=0.1)
 
         print(f"\nReturn value shape:")
-        print(f"  sigma shape: {sig.shape} (expect 9 x {dim} x {dim})")
-        print(f"    - 6 in-plane self-energies (vecs 0,1,2,6,7,8)")
-        print(f"    - 3 out-of-plane self-energies (vecs 3,4,5)")
+        print(f"  sigma shape: {sig.shape} (expect {dim} x {dim})")
 
-        assert sig.shape == (9, dim, dim), \
-            f"sigma should return 9x{dim}x{dim}, got {sig.shape}"
+        assert sig.shape == (dim, dim), \
+            f"sigma should return {dim}x{dim}, got {sig.shape}"
 
-        print(f"\n[PASS] sigma returns 9 self-energies")
+        # Also test with active_dirs subset
+        sig_sub = g_atom_3d.sigma(E, active_dirs=[3, 4, 5], conv=1e-3, mix=0.1)
+        print(f"  sigma([3,4,5]) shape: {sig_sub.shape} (expect {dim} x {dim})")
+
+        assert sig_sub.shape == (dim, dim), \
+            f"sigma with active_dirs should return {dim}x{dim}, got {sig_sub.shape}"
+
+        print(f"\n[PASS] sigma returns correct shape")
         return True
     except Exception as e:
         print(f"\n[FAIL] sigma raised exception: {e}")
         return False
+
+
+def test_subset_sigma_psd_gamma(g_atom_3d):
+    """
+    Test that partial-direction sigma produces PSD gamma matrices.
+
+    When a contact atom only uses a subset of the 9 surface directions
+    (because some directions point toward neighboring contact atoms),
+    the resulting gamma = i*(sigma - sigma^dag) must still be positive
+    semidefinite (PSD) for physical transmission.
+
+    Uses the active_dirs parameter of sigma() which computes the subset
+    quadratic form: Sigma_S = (1/Nk) sum_k B_S(k) @ g_surf(k) @ B_S^dag(k)
+    where B_S(k) = sum_{a in S} exp(ik*R_a) * B_a_bare.
+    """
+    print("\n" + "="*60)
+    print("VALIDATION TEST: Subset Sigma -> PSD Gamma")
+    print("="*60)
+
+    # Test several subsets that arise in practice:
+    # [3,4,5] = out-of-plane UP only (common: atom with all in-plane neighbors removed)
+    # [0,1,2,3,4,5] = forward + up (atom with backward in-plane removed)
+    # [0,1,2,6,7,8] = all in-plane (atom with all out-of-plane removed)
+    subsets = {
+        'out-of-plane UP [3,4,5]': [3, 4, 5],
+        'forward + UP [0,1,2,3,4,5]': [0, 1, 2, 3, 4, 5],
+        'all in-plane [0,1,2,6,7,8]': [0, 1, 2, 6, 7, 8],
+        'all 9 [0..8]': list(range(9)),
+    }
+
+    test_energies = [-3.2, 0.0, 2.0]  # band edge, mid-band, upper band
+    all_passed = True
+    psd_tol = -1e-10  # eigenvalue tolerance for PSD check
+
+    for E in test_energies:
+        print(f"\n  E = {E:.1f} eV:")
+
+        # Pre-compute gSurf once, reuse for all subsets at this energy
+        g_k = g_atom_3d.gSurf(E, conv=1e-3, mix=0.1)
+
+        for name, dirs in subsets.items():
+            # Call sigma with active_dirs -- returns single (dim, dim) matrix
+            sigma_sub = g_atom_3d.sigma(E, active_dirs=dirs, g_k=g_k)
+            gamma = 1j * (sigma_sub - sigma_sub.conj().T)
+            eigs = jnp.linalg.eigvalsh(gamma)
+            min_eig = float(jnp.min(eigs))
+            is_psd = min_eig >= psd_tol
+
+            status = "PASS" if is_psd else "FAIL"
+            print(f"    {name}: min(eig(gamma)) = {min_eig:.6e} [{status}]")
+
+            if not is_psd:
+                all_passed = False
+
+    if all_passed:
+        print(f"\n[PASS] All subset gammas are PSD")
+    else:
+        print(f"\n[FAIL] Some subset gammas have negative eigenvalues (non-PSD)")
+
+    return all_passed
 
 
 def main():
@@ -560,6 +625,7 @@ def main():
     test_gSurf_shapes(g_atom_3d)
     test_gBulk_shapes(g_atom_3d)
     test_sigma_count(g_atom_3d)
+    test_subset_sigma_psd_gamma(g_atom_3d)
 
     # Run OLD diagnostic test against Damle's gold standard
     print("\n" + "="*60)
