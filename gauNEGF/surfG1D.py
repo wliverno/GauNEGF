@@ -1,6 +1,6 @@
 # Python packages
 import jax
-import jax.numpy as np
+import jax.numpy as jnp
 import jax.lax as lax
 from jax import jit
 
@@ -25,10 +25,13 @@ class surfG:
     b) Fock matrix with custom coupling:
        - Provide contact indices and coupling matrices
        - Onsite contact parameters from F/S, coupling specified manually
-       Example: surfG1D(F, S, [[c1], [c2]], [tau1, tau2], [stau1, stau2])
+       - If staus=None (default), assumes orthonormal coupling
+       Example: surfG1D(F, S, [[c1], [c2]], [tau1, tau2])
 
     c) Fully specified contacts:
        - All contact parameters provided manually
+       - If aOverlaps=None, onsite overlap defaults to identity (orthonormal)
+       - If bOverlaps=None, hopping overlap defaults to zeros (orthonormal)
        Example: surfG1D(F, S, [[c1], [c2]], [tau1, tau2], [stau1, stau2],
                 [alpha1, alpha2], [salpha1, salpha2], [beta1, beta2], [sbeta1, sbeta2])
 
@@ -45,15 +48,16 @@ class surfG:
         - If indices: [[contact1connection], [contact2connection]]
         - If matrices: [tau1, tau2]
     staus : list or None, optional
-        Overlap matrices for coupling, required if taus are matrices (default: None)
+        Overlap matrices for coupling (default: None = orthonormal coupling)
+        None entries trigger de-orthonormalization in sigma()
     alphas : list of ndarray or None, optional
         On-site energies for contacts, required for pattern (c) (default: None)
     aOverlaps : list of ndarray or None, optional
-        On-site overlap matrices for contacts, required for pattern (c) (default: None)
+        On-site overlap matrices; defaults to identity when None (orthonormal)
     betas : list of ndarray or None, optional
         Hopping matrices between contact unit cells, required for pattern (c) (default: None)
     bOverlaps : list of ndarray or None, optional
-        Overlap matrices between contact unit cells, required for pattern (c) (default: None)
+        Overlap matrices between contact unit cells; defaults to zeros when None
     eta : float, optional
         Broadening parameter in eV (default: 1e-9)
 
@@ -64,11 +68,13 @@ class surfG:
     S : ndarray
         Overlap matrix
     X : ndarray
-        Inverse square root of overlap matrix for orthogonalization
+        Inverse square root of overlap matrix for orthogonalization (S^-0.5)
+    Xi : ndarray
+        Square root of overlap matrix for de-orthonormalization (S^+0.5 = inv(X))
     tauList : list
         Contact coupling matrices
     stauList : list
-        Contact coupling overlap matrices
+        Contact coupling overlap matrices (None entries -> orthonormal coupling)
     aList : list
         On-site energy matrices for contacts
     aSList : list
@@ -86,8 +92,11 @@ class surfG:
 
         The initialization follows one of three patterns:
         a) Fully automatic: Only provide Fock, Overlap, indsList, and connection indices in taus
-        b) Custom coupling: Provide Fock, Overlap, indsList, coupling matrices in taus, and staus
+        b) Custom coupling: Provide Fock, Overlap, indsList, coupling matrices in taus
+           - staus=None (default) means orthonormal coupling -> de-ortho applied in sigma()
         c) Fully specified: Provide all parameters including alphas, aOverlaps, betas, bOverlaps
+           - aOverlaps=None defaults to identity (orthonormal onsite)
+           - bOverlaps=None defaults to zeros (orthonormal hopping)
 
         Parameters
         ----------
@@ -102,47 +111,41 @@ class surfG:
             - If indices: [[contact1connection], [contact2connection]]
             - If matrices: [tau1, tau2]
         staus : list or None, optional
-            Overlap matrices for coupling, required if taus are matrices (default: None)
+            Overlap matrices for coupling (default: None = orthonormal)
         alphas : list of ndarray or None, optional
             On-site energies for contacts, required for pattern (c) (default: None)
         aOverlaps : list of ndarray or None, optional
-            On-site overlap matrices for contacts, required for pattern (c) (default: None)
+            On-site overlap matrices for contacts (default: None = identity)
         betas : list of ndarray or None, optional
             Hopping matrices between contact unit cells, required for pattern (c) (default: None)
         bOverlaps : list of ndarray or None, optional
-            Overlap matrices between contact unit cells, required for pattern (c) (default: None)
+            Overlap matrices between contact unit cells (default: None = zeros)
         eta : float, optional
             Broadening parameter in eV (default: 1e-9)
-
-        Notes
-        -----
-        The initialization will raise an error if:
-        - The parameters don't match one of the three usage patterns
-        - taus contains matrices but staus is None
-        - alphas is provided but aOverlaps is None
-        - betas is provided but bOverlaps is None
         """
         # Set up system
-        self.F = np.array(Fock)
-        self.S = np.array(Overlap)
+        self.F = jnp.array(Fock)
+        self.S = jnp.array(Overlap)
         self.spin = spin
-        self.X = np.array(fractional_matrix_power(Overlap, -0.5))
+        self.X = jnp.array(fractional_matrix_power(Overlap, -0.5))
+        self.Xi = jnp.linalg.inv(self.X)
         # Keep indsList as Python list - loop unrolls with concrete indices
-        self.indsList = [np.array(inds) for inds in indsList]
+        self.indsList = [jnp.array(inds) for inds in indsList]
 
         # Set Contact Coupling
         if taus is None:
             taus = [self.indsList[-1], self.indsList[0]]
-        taus = [np.array(tau) for tau in taus]
-        if len(np.shape(taus[0])) == 1:
+        taus = [jnp.array(tau) for tau in taus]
+        if len(jnp.shape(taus[0])) == 1:
            self.tauFromFock = True
            self.tauInds = taus
-           self.tauList = [self.F[np.ix_(taus[0],self.indsList[0])], self.F[np.ix_(taus[1],self.indsList[-1])]]
-           self.stauList = [self.S[np.ix_(taus[0],self.indsList[0])], self.S[np.ix_(taus[1],self.indsList[-1])]]
+           self.tauList = [self.F[jnp.ix_(taus[0],self.indsList[0])], self.F[jnp.ix_(taus[1],self.indsList[-1])]]
+           self.stauList = [self.S[jnp.ix_(taus[0],self.indsList[0])], self.S[jnp.ix_(taus[1],self.indsList[-1])]]
         else:
            self.tauFromFock = False
-           self.tauList = [np.array(tau) for tau in taus]
-           self.stauList = [np.array(stau) for stau in staus]
+           self.tauList = [jnp.array(tau) for tau in taus]
+           self.stauList = ([None] * len(taus) if staus is None
+                            else [None if stau is None else jnp.array(stau) for stau in staus])
 
         # Set up contact information
         if alphas is None:
@@ -178,48 +181,47 @@ class surfG:
            - Any provided parameters are ignored
 
         b) If self.contactFromFock is False (pattern c):
-           - All parameters must be provided together
-           - Partial updates are not supported
+           - alphas and betas must be provided
+           - aOverlaps=None defaults to identity (orthonormal onsite)
+           - bOverlaps=None defaults to zeros (orthonormal hopping)
 
         Parameters
         ----------
         alphas : list of ndarray or None, optional
             On-site energies for contacts (default: None)
         aOverlaps : list of ndarray or None, optional
-            On-site overlap matrices for contacts (default: None)
+            On-site overlap matrices; defaults to identity when None
         betas : list of ndarray or None, optional
             Hopping matrices between contact unit cells (default: None)
         bOverlaps : list of ndarray or None, optional
-            Overlap matrices between contact unit cells (default: None)
-
-        Notes
-        -----
-        When using pattern (c), all parameters must be provided together.
-        Partial updates (providing some parameters but not others) are not
-        supported and will raise an error.
+            Overlap matrices between contact unit cells; defaults to zeros when None
         """
         if self.contactFromFock:
             # Build lists first, then stack into JAX arrays
             aList_temp = []
             aSList_temp = []
             for inds in self.indsList:
-                aList_temp.append(self.F[np.ix_(inds, inds)])
-                aSList_temp.append(self.S[np.ix_(inds, inds)])
-            # Stack into JAX arrays for traced indexing
-            self.aList = [np.array(a) for a in aList_temp]
-            self.aSList = [np.array(aS) for aS in aSList_temp]
+                aList_temp.append(self.F[jnp.ix_(inds, inds)])
+                aSList_temp.append(self.S[jnp.ix_(inds, inds)])
+            self.aList = [jnp.array(a) for a in aList_temp]
+            self.aSList = [jnp.array(aS) for aS in aSList_temp]
         else:
-            # Stack provided matrices into JAX arrays
-            self.aList = [np.array(alpha) for alpha in alphas]
-            self.aSList = [np.array(aOverlap) for aOverlap in aOverlaps]
+            self.aList = [jnp.array(alpha) for alpha in alphas]
+            # Default None aOverlaps to identity (orthonormal onsite overlap)
+            self.aSList = ([jnp.eye(len(alpha)) for alpha in alphas] if aOverlaps is None
+                           else [jnp.array(aOverlap) for aOverlap in aOverlaps])
 
         if self.contactFromFock:
-            # tauList and stauList should already be lists from initialization
-            self.bList = [np.array(tau) for tau in self.tauList]
-            self.bSList = [np.array(stau) for stau in self.stauList]
+            self.bList = [jnp.array(tau) for tau in self.tauList]
+            # Handle None entries in stauList (orthonormal coupling -> zero hopping overlap)
+            self.bSList = [jnp.zeros_like(tau) if stau is None else jnp.array(stau)
+                           for tau, stau in zip(self.tauList, self.stauList)]
         else:
-            self.bList = [np.array(beta) for beta in betas]
-            self.bSList = [np.array(bOverlap) for bOverlap in bOverlaps]
+            self.bList = [jnp.array(beta) for beta in betas]
+            # Default None bOverlaps to zeros (orthonormal hopping overlap)
+            self.bSList = ([jnp.zeros_like(beta) for beta in betas] if bOverlaps is None
+                           else [jnp.zeros_like(beta) if bOverlap is None else jnp.array(bOverlap)
+                                 for beta, bOverlap in zip(betas, bOverlaps)])
 
     def g(self, E, i, conv=SURFACE_GREEN_CONVERGENCE, relFactor=SURFACE_RELAXATION_FACTOR):
         """
@@ -244,13 +246,6 @@ class surfG:
         -------
         ndarray
             Surface Green's function matrix for contact i
-
-        Notes
-        -----
-        The method uses the previous solution as an initial guess to improve
-        convergence. For the first calculation at a given energy, it uses
-        zeros as the initial guess. The relaxation factor controls mixing
-        between iterations to help convergence.
         """
         alpha = self.aList[i]
         Salpha = self.aSList[i]
@@ -276,22 +271,17 @@ class surfG:
             g_new = inv(A - B @ g @ B_dag)
 
             # Compute convergence metric
-            dg = np.abs(g_new - g) / np.maximum(np.abs(g_new), 1e-12)
-            diff = np.max(dg)
+            dg = jnp.abs(g_new - g) / jnp.maximum(jnp.abs(g_new), 1e-12)
+            diff = jnp.max(dg)
 
             # Apply relaxation mixing
             g = g_new * relFactor + g * (1 - relFactor)
             count += 1
             return (count, diff, g)
 
-        # Initial state: (count, diff, g, g_prev)
-        init_state = (0, np.inf, inv(A))
+        # Initial state: (count, diff, g)
+        init_state = (0, jnp.inf, inv(A))
         count, diff, g = lax.while_loop(cond_fun, body_fun, init_state)
-
-        # Check convergence and warn if needed
-        #if diff>conv:
-        #    jax.debug.print('Warning: exceeded max iterations! E: {E}, Conv: {diff}',
-        #                     E=E, diff=diff, ordered=True)
 
         return g
 
@@ -311,23 +301,18 @@ class surfG:
             Chemical potential for first contact in eV (default: None)
         mu2 : float or None, optional
             Chemical potential for second contact in eV (default: None)
-
-        Notes
-        -----
-        If chemical potentials are provided, the corresponding contact
-        parameters are shifted to align with the new potentials.
         """
-        self.F = np.array(F)
+        self.F = jnp.array(F)
         if self.tauFromFock:
             taus = self.tauInds
             indsList = self.indsList  # Python list
-            self.F = self.F.at[np.ix_(indsList[0], indsList[0])].set(self.F[np.ix_(taus[0], taus[0])].copy())
-            self.F = self.F.at[np.ix_(indsList[-1], indsList[-1])].set(self.F[np.ix_(taus[1], taus[1])].copy())
+            self.F = self.F.at[jnp.ix_(indsList[0], indsList[0])].set(self.F[jnp.ix_(taus[0], taus[0])].copy())
+            self.F = self.F.at[jnp.ix_(indsList[-1], indsList[-1])].set(self.F[jnp.ix_(taus[1], taus[1])].copy())
             # Rebuild stacked arrays from new F
-            tau_temp = [self.F[np.ix_(taus[0],indsList[0])], self.F[np.ix_(taus[1],indsList[-1])]]
-            stau_temp = [self.S[np.ix_(taus[0],indsList[0])], self.S[np.ix_(taus[1],indsList[-1])]]
-            self.tauList = [np.array(tau) for tau in tau_temp]
-            self.stauList = [np.array(stau) for stau in stau_temp]
+            tau_temp = [self.F[jnp.ix_(taus[0],indsList[0])], self.F[jnp.ix_(taus[1],indsList[-1])]]
+            stau_temp = [self.S[jnp.ix_(taus[0],indsList[0])], self.S[jnp.ix_(taus[1],indsList[-1])]]
+            self.tauList = [jnp.array(tau) for tau in tau_temp]
+            self.stauList = [jnp.array(stau) for stau in stau_temp]
         if not self.contactFromFock:
             if self.fermiList[0] == None:
                 self.fermiList[0] = mu1
@@ -337,9 +322,8 @@ class surfG:
                     fermi = self.fermiList[i]
                     if fermi is not None and mu is not None and fermi != mu:
                         dFermi = mu - fermi
-                        # Use JAX immutable updates
-                        self.aList = self.aList.at[i].set(self.aList[i] + dFermi*np.eye(len(self.aList[i])))
-                        self.bList = self.bList.at[i].set(self.bList[i] + dFermi*self.bSList[i])
+                        self.aList[i] = self.aList[i] + dFermi*jnp.eye(len(self.aList[i]))
+                        self.bList[i] = self.bList[i] + dFermi*self.bSList[i]
                         self.fermiList[i] = mu
 
     def sigma(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
@@ -350,11 +334,14 @@ class surfG:
         the surface Green's function. The self-energy represents the
         effect of the semi-infinite contact on the device region.
 
+        When stauList[i] is None (orthonormal coupling), applies de-orthonormalization:
+        sig -> Xi[inds,inds] @ sig @ Xi[inds,inds] where Xi = S^+0.5 = inv(X).
+
         Parameters
         ----------
         E : float
             Energy point in eV
-        i : int (can be traced)
+        i : int (static)
             Contact index
         conv : float, optional
             Convergence criterion for surface Green's function (default: 1e-5)
@@ -364,13 +351,16 @@ class surfG:
         ndarray
             Self-energy matrix for contact i
         """
-        sigma = np.zeros(self.F.shape, dtype=complex)
+        sigma = jnp.zeros(self.F.shape, dtype=complex)
         inds = self.indsList[i]
         stau = self.stauList[i]
         tau = self.tauList[i]
-        t = E*stau - tau
+        t = (-tau) if stau is None else (E*stau - tau)
         sig = t @ self.g(E, i, conv) @ t.conj().T
-        sigma = sigma.at[np.ix_(inds, inds)].add(sig)
+        if stau is None:
+            Xi_i = self.Xi[jnp.ix_(inds, inds)]
+            sig = Xi_i @ sig @ Xi_i
+        sigma = sigma.at[jnp.ix_(inds, inds)].add(sig)
         return sigma
 
     def sigmaTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
@@ -394,9 +384,7 @@ class surfG:
             Total self-energy matrix from all contacts
         """
         # Use Python for loop - JAX unrolls it with concrete indices
-        sigma = np.zeros(self.F.shape, dtype=complex)
+        sigma = jnp.zeros(self.F.shape, dtype=complex)
         for i in range(self.num_contacts):
             sigma = sigma + self.sigma(E, i, conv)
         return sigma
-
-
