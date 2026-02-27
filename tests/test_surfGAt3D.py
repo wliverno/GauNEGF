@@ -453,33 +453,22 @@ def test_gSurf_shapes(g_atom_3d):
 
 
 def test_gBulk_shapes(g_atom_3d):
-    """Check gBulk returns (g_k, G_real) with correct shapes using 3D k-mesh."""
+    """Check gBulk returns G_AB propagator with correct shape (108x108)."""
     print("\n" + "="*60)
-    print("VALIDATION TEST: gBulk Return Shapes")
+    print("VALIDATION TEST: gBulk Return Shape (G_AB Propagator)")
     print("="*60)
 
-    E = 0.0  # Use arbitrary energy
+    E = 0.0
     try:
-        result = g_atom_3d.gBulk(E)
+        G_AB = g_atom_3d.gBulk(E)
 
-        # Check if returns tuple
-        if not isinstance(result, tuple) or len(result) != 2:
-            print(f"\n[FAIL] gBulk should return tuple (g_k, G_real), got {type(result)}")
-            return False
+        print(f"\nReturn value shape:")
+        print(f"  G_AB shape: {G_AB.shape} (expect {12*dim} x {12*dim})")
 
-        g_k, G_real = result
-        nK = g_atom_3d.kPoints
+        assert G_AB.shape == (12*dim, 12*dim), \
+            f"gBulk G_AB should be {12*dim}x{12*dim}, got {G_AB.shape}"
 
-        print(f"\nReturn value shapes:")
-        print(f"  g_k shape:    {g_k.shape} (expect {nK**3} x {dim} x {dim})")
-        print(f"  G_real shape: {G_real.shape} (expect {dim} x {dim})")
-
-        assert g_k.shape == (nK**3, dim, dim), \
-            f"gBulk g_k should be {nK**3}x{dim}x{dim} for 3D mesh, got {g_k.shape}"
-        assert G_real.shape == (dim, dim), \
-            f"gBulk G_real should be {dim}x{dim} (onsite GF), got {G_real.shape}"
-
-        print(f"\n[PASS] gBulk returns correct shapes with 3D k-mesh")
+        print(f"\n[PASS] gBulk returns correct G_AB shape")
         return True
     except Exception as e:
         print(f"\n[FAIL] gBulk raised exception: {e}")
