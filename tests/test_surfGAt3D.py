@@ -430,23 +430,22 @@ def test_kmesh_dimensions(g_atom_3d):
 
 
 def test_gSurf_shapes(g_atom_3d):
-    """Check gSurf returns g_k array with correct shape."""
+    """Check gSurf returns G_AB propagator with correct shape (81x81)."""
     print("\n" + "="*60)
-    print("VALIDATION TEST: gSurf Return Shapes")
+    print("VALIDATION TEST: gSurf Return Shape (G_AB Propagator)")
     print("="*60)
 
-    E = 0.0  # Use arbitrary energy (will update after calcFermi)
+    E = 0.0
     try:
-        g_k = g_atom_3d.gSurf(E, conv=1e-3, mix=0.1)
-        nK = g_atom_3d.kPoints
+        G_AB = g_atom_3d.gSurf(E, conv=1e-3, mix=0.1)
 
         print(f"\nReturn value shape:")
-        print(f"  g_k shape: {g_k.shape} (expect {nK**2} x {dim} x {dim})")
+        print(f"  G_AB shape: {G_AB.shape} (expect 81 x 81)")
 
-        assert g_k.shape == (nK**2, dim, dim), \
-            f"gSurf g_k should be {nK**2}x{dim}x{dim}, got {g_k.shape}"
+        assert G_AB.shape == (9*dim, 9*dim), \
+            f"gSurf G_AB should be {9*dim}x{9*dim}, got {G_AB.shape}"
 
-        print(f"\n[PASS] gSurf returns correct shape")
+        print(f"\n[PASS] gSurf returns correct G_AB shape")
         return True
     except Exception as e:
         print(f"\n[FAIL] gSurf raised exception: {e}")
@@ -553,11 +552,11 @@ def test_subset_sigma_psd_gamma(g_atom_3d):
         print(f"\n  E = {E:.1f} eV:")
 
         # Pre-compute gSurf once, reuse for all subsets at this energy
-        g_k = g_atom_3d.gSurf(E, conv=1e-3, mix=0.1)
+        G_AB = g_atom_3d.gSurf(E, conv=1e-3, mix=0.1)
 
         for name, dirs in subsets.items():
             # Call sigma with active_dirs -- returns single (dim, dim) matrix
-            sigma_sub = g_atom_3d.sigma(E, active_dirs=dirs, g_k=g_k)
+            sigma_sub = g_atom_3d.sigma(E, active_dirs=dirs, G_AB=G_AB)
             gamma = 1j * (sigma_sub - sigma_sub.conj().T)
             eigs = jnp.linalg.eigvalsh(gamma)
             min_eig = float(jnp.min(eigs))

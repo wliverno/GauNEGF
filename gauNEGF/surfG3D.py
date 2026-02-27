@@ -430,11 +430,11 @@ class surfG3:
             DOI: 10.1063/1.3526044  
         """
         sig = jnp.zeros((self.N, self.N), dtype=complex)
-        g_k = self.gList[i].gSurf(E, conv)
+        G_AB = self.gList[i].gSurf(E, conv)
         # Apply self energies in first 9 directions that aren't attached to atom
         for nInds, Finds in zip(self.nIndLists[i], self.indsLists[i]):
             sigInds = list(set(range(9)) - {int(x) for x in nInds})
-            sigAtom = self.gList[i].sigma(E, active_dirs=sigInds, g_k=g_k)
+            sigAtom = self.gList[i].sigma(E, active_dirs=sigInds, G_AB=G_AB)
             sig = sig.at[jnp.ix_(Finds, Finds)].set(sigAtom)
         # Apply de-orthonormalization technique from ANT.Gaussian if orthonormal
         if self.Sdict['sss'] == 0:
@@ -1103,42 +1103,40 @@ class surfGAt3D:
         # Vectorize over all k-points, automatically parallelized across devices
         g_k, counts, diffs = jax.vmap(converge_single_k)(A_sharded, B_sharded)
 
-        # Diagnostic output - always print to check convergence
-        n_max_iters = jnp.sum(counts >= maxIter)
-        #jax.debug.print("gSurf: max={max_c}, avg={avg_c:.1f}, unconverged={n_uc}/{n_tot}, max_diff={max_diff:.1e}, avg_diff={avg_diff:.1e}",
-        #               max_c=jnp.max(counts), avg_c=jnp.mean(counts),
-        #               n_uc=n_max_iters, n_tot=self.kPoints**2, max_diff=jnp.max(diffs), avg_diff=jnp.mean(diffs))
+        # Inverse Fourier transform: build 81x81 real-space propagator G_AB
+        # G_AB[A*dim:(A+1)*dim, B*dim:(B+1)*dim] = (1/Nk) sum_k exp(+ik*R_A) * g_k * exp(-ik*R_B)
+        # Only surface directions [0..8]
+        surf_dirs = jnp.arange(9)
+        phases = self.expList_2D[:, surf_dirs]  # nK^2 x 9
+        nK2 = self.kPoints**2
+        G_AB_blocks = jnp.einsum('ka,kij,kb->abij', phases, g_k, phases.conj()) / nK2
+        # Reshape from (9, 9, dim, dim) block form to (81, 81) matrix
+        G_AB = G_AB_blocks.transpose(0, 2, 1, 3).reshape(9 * dim, 9 * dim)
+        return G_AB
 
-        return g_k
-
-    def sigma(self, E, active_dirs=None, conv=1e-4, mix=0.1, g_k=None):
+    def sigma(self, E, active_dirs=None, conv=1e-4, mix=0.1, G_AB=None):
         """
-        Calculate surface self-energy using subset quadratic form.
+        Calculate surface self-energy using G_AB propagator.
 
-        Computes Sigma_S = (1/Nk) sum_k B_S(k) @ g_surf(k) @ B_S^dag(k)
-        where B_S(k) = sum_{a in S} exp(ik*R_a) * [(E+i*eta)*S_a - V_a]
-        is the total Bloch-phased coupling over the active directions S.
-
-        This is a proper quadratic form on the retarded surface Green's
-        function, guaranteeing Im(Sigma_S) <= 0 (retarded) and PSD gamma
-        for ANY subset S. When S = all 9 surface directions, this recovers
-        Damle's full formula: sig = coup * G * coup'.
+        Computes Sigma = tau @ G_S @ tau' where:
+        - G_S is the sub-block of G_AB for active directions
+        - tau = [tau_0 | tau_1 | ...] is the horizontal concatenation
+          of phase-free coupling matrices tau_a = (E+i*eta)*S_a - V_a
 
         Parameters
         ----------
         E : float
             Energy point for Green's function calculation (in eV)
         active_dirs : list of int, optional
-            Direction indices to include in the subset. Default None means
-            all 9 surface directions [0..8].
+            Direction indices to include. Default None means all 9
+            surface directions [0..8].
         conv : float, optional
             Convergence criterion for Dyson equation (default: 1e-4)
         mix : float, optional
             Mixing factor for Dyson equation (default: 0.1)
-        g_k : ndarray, optional
-            Pre-computed surface Green's function from gSurf(). If None,
-            gSurf() is called internally. Pass this to avoid recomputation
-            when calling sigma() multiple times at the same energy.
+        G_AB : ndarray, optional
+            Pre-computed G_AB propagator from gSurf(). If None,
+            gSurf() is called internally.
 
         Returns
         -------
@@ -1148,23 +1146,22 @@ class surfGAt3D:
         if active_dirs is None:
             active_dirs = list(range(9))
 
-        if g_k is None:
-            g_k = self.gSurf(E, conv, mix)  # nK^2 x dim x dim
+        if G_AB is None:
+            G_AB = self.gSurf(E, conv, mix)  # 81 x 81
 
-        # Bloch-phased coupling: B_a(k) = exp(ik*R_a) * [(E+i*eta)*S_a - V_a]
-        Flist = self.expList_2D[:, :, None, None] * self.Vlist[None, :, :, :]  # nK^2 x NN x dim x dim
-        Slist = self.expList_2D[:, :, None, None] * self.Slist[None, :, :, :]  # nK^2 x NN x dim x dim
-        B = (E + self.eta*1j)*Slist - Flist  # nK^2 x NN x dim x dim
+        # Build tau: horizontal concat of phase-free coupling matrices
+        # active_dirs must be a static Python list (not a traced JAX value)
+        tau_blocks = [(E + self.eta*1j) * self.Slist[a] - self.Vlist[a] for a in active_dirs]
+        tau = jnp.concatenate(tau_blocks, axis=1)  # dim x (nDirs*dim)
 
-        # Subset coupling: B_S(k) = sum_{a in S} B_a(k)
-        B_S = jnp.sum(B[:, active_dirs, :, :], axis=1)  # nK^2 x dim x dim
+        # Extract sub-block of G_AB for active directions
+        # G_AB is 81x81 with block structure [A*dim:(A+1)*dim, B*dim:(B+1)*dim]
+        row_idx = jnp.concatenate([jnp.arange(a*dim, (a+1)*dim) for a in active_dirs])
+        col_idx = row_idx  # square sub-block
+        G_sub = G_AB[jnp.ix_(row_idx, col_idx)]  # (nDirs*dim) x (nDirs*dim)
 
-        # Quadratic form: sigma_S(k) = B_S(k) @ g_surf(k) @ B_S^dag(k)
-        # einsum: i=kpoint, jk=B_S, kl=g, nl=B_S^dag
-        sigma_k = jnp.einsum('ijk,ikl,inl->ijn', B_S, g_k, B_S.conj())  # nK^2 x dim x dim
-
-        # BZ average -- phases in B_S encode all R_a - R_b cross-terms
-        return jnp.mean(sigma_k, axis=0)  # dim x dim
+        # Self-energy: tau @ G_sub @ tau'
+        return tau @ G_sub @ tau.conj().T  # dim x dim
     
     # Empty function for compatibility with density.py methods
     def setF(self, F, mu1, mu2):
