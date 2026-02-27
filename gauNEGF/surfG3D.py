@@ -977,10 +977,10 @@ class surfGAt3D:
 
         Returns
         -------
-        tuple
-            (g_k, G_real) where:
-            - g_k: k-space Green's function (nK^3 x dim x dim)
-            - G_real: Real-space Green's function for all 12 directions (12 x dim x dim)
+        ndarray
+            Real-space G_AB propagator matrix (12*dim x 12*dim).
+            Block (A,B) at G_AB[A*dim:(A+1)*dim, B*dim:(B+1)*dim] gives
+            the propagator G(R_A - R_B) between directions A and B.
         """
         # Construct H(k) = sum_R V(R)*exp(+ik*R) and S(k) = sum_R S(R)*exp(+ik*R)
         # Use 3D k-mesh
@@ -999,18 +999,23 @@ class surfGAt3D:
         # Vectorized over all k-points, automatically parallelized across devices
         g_k = jax.vmap(lambda H, S: LA.inv((E + self.eta*1j)*S - H))(Hk_sharded, Sk_sharded)
 
-        # Inverse FT: G(R_i=0) = (1/N_k) \sum_k g(k) * exp(-i*0) = (1/N_k) \sum_k g(k)
-        G_real = jnp.mean(g_k, axis=0)
-
-        # Return both k-space and real-space Green's functions
-        return g_k, G_real
+        # Inverse FT: build 108x108 real-space propagator G_AB
+        # G_AB[A,B] = (1/Nk) sum_k exp(+ik*R_A) * g_k * exp(-ik*R_B)
+        phases = self.expList_3D  # nK^3 x 12
+        nK3 = self.kPoints**3
+        G_AB_blocks = jnp.einsum('ka,kij,kb->abij', phases, g_k, phases.conj()) / nK3
+        G_AB = G_AB_blocks.transpose(0, 2, 1, 3).reshape(12 * dim, 12 * dim)
+        return G_AB
 
     def sigmaBulk(self, E):
         """
-        Calculate bulk self-energies for all 12 directions.
+        Calculate bulk self-energies for all 12 directions using G_AB propagator.
 
-        Uses inverse Fourier transform approach matching Damle:
-        Σ_i = B_i @ G(R_i) @ B_i† where G(R_i) = (1/N_k) Σ_k g(k)*exp(+ik·R_i)
+        For each direction k, computes the self-energy from 11 directions
+        (all except the reverse direction pair_k = (k+6)%12):
+            Sigma_k = tau_k @ G_sub_k @ tau_k'
+        where tau_k is the horizontal concat of phase-free coupling matrices
+        and G_sub_k is the sub-block of G_AB for those 11 directions.
 
         Parameters
         ----------
@@ -1022,16 +1027,25 @@ class surfGAt3D:
         ndarray
             Array of 12 self-energy matrices (shape: 12 x dim x dim)
         """
-        # Get bulk Green's function via 3D k-mesh inversion
-        g_k, G_real = self.gBulk(E)  # G_real = G_bulk(R=0) = mean_k[g_bulk(k)]
+        G_AB = self.gBulk(E)  # 108 x 108
 
-        # For each direction: B = (E + i*eta)*S - V
-        B = (E + self.eta*1j)*self.Slist - self.Vlist  # 12 x dim x dim
+        sigList = []
+        for k in range(12):
+            pair_k = (k + 6) % 12  # Reverse direction
+            active_dirs = [d for d in range(12) if d != pair_k]  # 11 dirs
 
-        # sig_i = B_i @ G_bulk(R=0) @ B_i†
-        sigList = jnp.einsum('aij,jl,anl->ain', B, G_real, B.conj())  # 12 x dim x dim
+            # Build tau: horizontal concat of phase-free couplings
+            # active_dirs must be a static Python list (not a traced JAX value)
+            tau_blocks = [(E + self.eta*1j) * self.Slist[a] - self.Vlist[a] for a in active_dirs]
+            tau = jnp.concatenate(tau_blocks, axis=1)  # dim x (11*dim)
 
-        return sigList
+            # Extract sub-block of G_AB for active directions
+            row_idx = jnp.concatenate([jnp.arange(a*dim, (a+1)*dim) for a in active_dirs])
+            G_sub = G_AB[jnp.ix_(row_idx, row_idx)]  # (11*dim) x (11*dim)
+
+            sigList.append(tau @ G_sub @ tau.conj().T)
+
+        return jnp.array(sigList)  # 12 x dim x dim
 
     # Calculate Green's function for the surface
     def gSurf(self, E, conv=1e-4, mix=0.1, maxIter=5000):
@@ -1186,9 +1200,8 @@ class surfGAt3D:
         Calculate total self-energy matrix for the extended system.
 
         Computes self-energies for the full extended system including 12 neighbor sites
-        plus 1 central site. For each neighbor site k, applies all bulk self-energies
-        EXCEPT the one in the opposite direction (pair_k), preventing double-counting
-        of the connection to the central atom.
+        plus 1 central site. For each neighbor site k, applies the bulk self-energy
+        from 11 directions (excluding the direction back to center).
 
         Used for calculating Fermi energy of the bulk system.
 
@@ -1201,31 +1214,17 @@ class surfGAt3D:
         -------
         ndarray
             Total self-energy matrix for the extended system ((NN+1)*dim, (NN+1)*dim)
-
-        Notes
-        -----
-        Follows the approach from surfGBethe: for neighbor k, self-energy is
-        Σ_tot - Σ[pair_k] where pair_k = (k + 6) % 12 is the opposite direction.
-        Center site (site 12) has zero self-energy (it's the coupling point).
         """
         sig = jnp.zeros(((self.NN + 1)*dim, (self.NN+1)*dim), dtype=complex)
 
-        # Get all 12 bulk self-energies
+        # sigmaBulk returns 12 self-energies, each from 11 dirs (excluding reverse)
         sigList = self.sigmaBulk(E)  # 12 x dim x dim
 
-        # Convert to JAX array and sum
-        sigArray = jnp.array(sigList)  # 12 x dim x dim
-        sigSum = jnp.sum(sigArray, axis=0)  # dim x dim
-
-        # For each of the 12 neighbor sites
+        # Place each on the diagonal of the extended system
         for k in range(self.NN):
-            pair_k = (k + 6) % 12  # Opposite direction
-            # Apply all directions EXCEPT the one pointing back to center
-            sig = sig.at[k*dim:(k+1)*dim, k*dim:(k+1)*dim].set(sigSum - sigArray[pair_k])
+            sig = sig.at[k*dim:(k+1)*dim, k*dim:(k+1)*dim].set(sigList[k])
 
-        # Center site (site 12) has zero self-energy (it's the reference point)
-        # No need to set anything - already zeros
-
+        # Center site (site 12) has zero self-energy
         return sig
 
     def DOS(self, E, conv=1e-4, mix=0.1):
