@@ -165,8 +165,7 @@ class surfG:
         # JIT compile g and sigma methods with static contact index
         # This compiles separate versions for each contact (i=0, i=1, etc.)
         # The expensive iterative calculation gets fully optimized
-        self.g = jit(self.g, static_argnums=(1,2,3))
-        self.sigma = jit(self.sigma, static_argnums=(1,2))
+        self._rejit()
 
     
     def setContacts(self, alphas=None, aOverlaps=None, betas=None, bOverlaps=None):
@@ -198,7 +197,6 @@ class surfG:
             Overlap matrices between contact unit cells; defaults to zeros when None
         """
         if self.contactFromFock:
-            # Build lists first, then stack into JAX arrays
             alphas = []
             aOverlaps = []
             for inds in self.indsList:
@@ -206,8 +204,23 @@ class surfG:
                 aOverlaps.append(self.S[jnp.ix_(inds, inds)])
             betas = self.tauList.copy()
             bOverlaps = self.stauList.copy()
-        self.aList, self.aSList = fixHSList(alphas, aOverlaps)
-        self.bList, self.bSList = fixHSList(betas, bOverlaps)
+            self.aList, self.aSList = fixHSList(alphas, aOverlaps)
+            self.bList, self.bSList = fixHSList(betas, bOverlaps, default='zeros')
+        else:
+            self.aList, self.aSList = fixHSList(alphas, aOverlaps, default='identity')
+            self.bList, self.bSList = fixHSList(betas, bOverlaps, default='zeros')
+
+    def _rejit(self):
+        """Recompile g and sigma to pick up updated contact parameters.
+
+        JAX JIT caches compiled functions keyed on shape/dtype of closed-over
+        arrays, not their values. After setF/setContacts change aList/bList,
+        creating fresh JIT wrappers forces a re-trace on next call.
+        self.__class__.g always refers to the original class method regardless
+        of what self.g currently points to (instance vs class attribute).
+        """
+        self.g = jit(self.__class__.g.__get__(self), static_argnums=(1,))
+        self.sigma = jit(self.__class__.sigma.__get__(self), static_argnums=(1,))
 
     def g(self, E, i, conv=SURFACE_GREEN_CONVERGENCE, relFactor=SURFACE_RELAXATION_FACTOR):
         """
@@ -297,12 +310,14 @@ class surfG:
         if self.tauFromFock:
             taus = self.tauInds
             indsList = self.indsList  # Python list
-            #self.F = self.F.at[jnp.ix_(indsList[0], indsList[0])].set(self.F[jnp.ix_(taus[0], taus[0])].copy())
-            #self.F = self.F.at[jnp.ix_(indsList[-1], indsList[-1])].set(self.F[jnp.ix_(taus[1], taus[1])].copy())
-            # Rebuild stacked arrays from new F
+            # Rebuild coupling arrays from new F
             tau_temp = [self.F[jnp.ix_(taus[0],indsList[0])], self.F[jnp.ix_(taus[1],indsList[-1])]]
             stau_temp = [self.S[jnp.ix_(taus[0],indsList[0])], self.S[jnp.ix_(taus[1],indsList[-1])]]
             self.tauList, self.stauList = fixHSList(tau_temp, stau_temp)
+        if self.contactFromFock:
+            # Rebuild aList/bList from new F and re-trace JIT'd functions
+            self.setContacts()
+            self._rejit()
         if not self.contactFromFock:
             if self.fermiList[0] == None:
                 self.fermiList[0] = mu1
