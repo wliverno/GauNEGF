@@ -87,25 +87,40 @@ def correct_hs(H_raw, S_raw, tol_ratio=1e-10):
    
     # If nothing was kept, return original matrices (silent failure)
     H_out = jnp.where(any_kept, H_red, H_raw)
-    S_out = jnp.where(any_kept, H_red, H_raw)
+    S_out = jnp.where(any_kept, S_red, S_raw)
     return H_out, S_out
 
-def fixHSList(Flist, Slist=None):
+def fixHSList(Flist, Slist=None, default='none'):
     """
-    Helper function for correct_HS for lists of F,S matrices
+    Convert F,S lists to jnp arrays with appropriate None handling.
+
+    Parameters
+    ----------
+    Flist : list of arrays
+        Hamiltonian/Fock matrices
+    Slist : list of arrays/None, or None
+        Overlap matrices
+    default : str
+        How to handle None entries in Slist:
+        'none' = preserve None (for stau sentinel in sigma)
+        'identity' = replace with identity matrix
+        'zeros' = replace with zeros_like
     """
-    N = len(Flist)
+    Flist = [jnp.array(f) for f in Flist]
     if Slist is None:
-        dim = len(Flist[0])
-        Slist = [jnp.eye(dim) for i in range(N)]
-        return Flist, Slist
-    Flist_fixed = []
-    Slist_fixed = []
-    for i in range(N):
-        F_, S_ = correct_hs(Flist[i], Slist[i])
-        Flist_fixed.append(F_)
-        Slist_fixed.append(S_)
-    return Flist_fixed, Slist_fixed
+        Slist = [None] * len(Flist)
+    Sout = []
+    for f, s in zip(Flist, Slist):
+        if s is None:
+            if default == 'identity':
+                Sout.append(jnp.eye(len(f)))
+            elif default == 'zeros':
+                Sout.append(jnp.zeros_like(f))
+            else:
+                Sout.append(None)
+        else:
+            Sout.append(jnp.array(s))
+    return Flist, Sout
 
 # Simple numpy operations
 
