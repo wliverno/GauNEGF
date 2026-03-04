@@ -338,7 +338,7 @@ class NEGFE(NEGF):
         """
         print('Calculating lower density matrix:')
         if self.N2 is None:
-            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g)
+            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, Emin=self.Emin)
             P = densityComplex(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
         else:
             P = densityRealN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
