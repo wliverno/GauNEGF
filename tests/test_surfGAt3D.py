@@ -19,7 +19,7 @@ from gauNEGF.surfGBethe import surfGBAt
 dim = 9  # size of single atom matrix: 1s + 3p + 5d
 har_to_eV = 27.211386  # eV/Hartree
 eta = 1e-6  # broadening parameter
-kpoints = 3
+kpoints = 31
 
 def read_bethe_params(filename):
     """Read Slater-Koster parameters from a .bethe file."""
@@ -675,30 +675,30 @@ def main():
     plt.figure(figsize=(12, 8))
 
     # Main comparison plot
-    plt.subplot(2, 1, 1)
-    plt.plot(E_range+fermi_3d, dos_values_3d, 'b-', linewidth=2, label='surfGAt3D (k-space)')
-    plt.plot(E_range+fermi_bethe, dos_values_bethe, 'r--', linewidth=2, label='surfGBAt (Bethe)')
+    #plt.subplot(2, 1, 1)
+    plt.semilogy(E_range+fermi_3d, dos_values_3d, 'b-', linewidth=2, label='surfGAt3D (k-space)')
+    plt.semilogy(E_range+fermi_bethe, dos_values_bethe, 'r--', linewidth=2, label='surfGBAt (Bethe)')
     plt.axvline(fermi_3d, color='blue', linestyle=':', alpha=0.7)
     plt.axvline(fermi_bethe, color='red', linestyle=':', alpha=0.7)
     plt.xlabel('Energy (eV)', fontsize=12)
     plt.ylabel('DOS (states/eV)', fontsize=12)
     plt.title('Density of States Comparison: surfGAt3D vs surfGBAt', fontsize=14)
     plt.grid(True, alpha=0.3)
-    plt.ylim(0, 10)
+    #plt.ylim(0, 10)
     plt.legend()
 
     # Difference plot
-    plt.subplot(2, 1, 2)
-    dos_diff = jnp.array(dos_values_3d) - jnp.array(dos_values_bethe)
-    plt.plot(E_range, dos_diff, 'g-', linewidth=2)
-    plt.axhline(0, color='black', linestyle='-', linewidth=0.5)
-    plt.axvline(fermi_3d, color='blue', linestyle=':', alpha=0.7)
-    plt.axvline(fermi_bethe, color='red', linestyle=':', alpha=0.7)
-    plt.xlabel('Energy (eV)', fontsize=12)
-    plt.ylabel('DOS Difference', fontsize=12)
-    plt.ylim(-10, 10)
-    plt.title('Difference: surfGAt3D - surfGBAt', fontsize=14)
-    plt.grid(True, alpha=0.3)
+    #plt.subplot(2, 1, 2)
+    #dos_diff = jnp.array(dos_values_3d) - jnp.array(dos_values_bethe)
+    #plt.plot(E_range, dos_diff, 'g-', linewidth=2)
+    #plt.axhline(0, color='black', linestyle='-', linewidth=0.5)
+    #plt.axvline(fermi_3d, color='blue', linestyle=':', alpha=0.7)
+    #plt.axvline(fermi_bethe, color='red', linestyle=':', alpha=0.7)
+    #plt.xlabel('Energy (eV)', fontsize=12)
+    #plt.ylabel('DOS Difference', fontsize=12)
+    #plt.ylim(-10, 10)
+    #plt.title('Difference: surfGAt3D - surfGBAt', fontsize=14)
+    #plt.grid(True, alpha=0.3)
 
     plt.tight_layout()
     plt.savefig('test_surfGAt3D_comparison.png', dpi=150)

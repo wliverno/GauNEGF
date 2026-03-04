@@ -6,7 +6,7 @@ from jax import jit
 
 # Configuration
 from gauNEGF.config import (ETA, SURFACE_GREEN_CONVERGENCE, SURFACE_RELAXATION_FACTOR)
-from gauNEGF.utils import fractional_matrix_power, inv
+from gauNEGF.utils import fractional_matrix_power, inv, fixHSList
 
 #Constants
 
@@ -137,15 +137,15 @@ class surfG:
             taus = [self.indsList[-1], self.indsList[0]]
         taus = [jnp.array(tau) for tau in taus]
         if len(jnp.shape(taus[0])) == 1:
-           self.tauFromFock = True
-           self.tauInds = taus
-           self.tauList = [self.F[jnp.ix_(taus[0],self.indsList[0])], self.F[jnp.ix_(taus[1],self.indsList[-1])]]
-           self.stauList = [self.S[jnp.ix_(taus[0],self.indsList[0])], self.S[jnp.ix_(taus[1],self.indsList[-1])]]
+            self.tauFromFock = True
+            self.tauInds = taus
+            taus = [self.F[jnp.ix_(self.tauInds[0],self.indsList[0])], 
+                    self.F[jnp.ix_(self.tauInds[1],self.indsList[-1])]]
+            staus = [self.S[jnp.ix_(self.tauInds[0],self.indsList[0])], 
+                     self.S[jnp.ix_(self.tauInds[1],self.indsList[-1])]]
         else:
-           self.tauFromFock = False
-           self.tauList = [jnp.array(tau) for tau in taus]
-           self.stauList = ([None] * len(taus) if staus is None
-                            else [None if stau is None else jnp.array(stau) for stau in staus])
+            self.tauFromFock = False
+        self.tauList,self.stauList = fixHSList(taus, staus)
 
         # Set up contact information
         if alphas is None:
@@ -155,7 +155,7 @@ class surfG:
             self.contactFromFock = False
             self.setContacts(alphas, aOverlaps, betas, bOverlaps)
             self.fermiList = [None]*len(indsList)
-
+        
         # Set up broadening for retarded/advanced Green's function, initialize g
         self.eta = eta
 
@@ -168,6 +168,7 @@ class surfG:
         self.g = jit(self.g, static_argnums=(1,2,3))
         self.sigma = jit(self.sigma, static_argnums=(1,2))
 
+    
     def setContacts(self, alphas=None, aOverlaps=None, betas=None, bOverlaps=None):
         """
         Update contact parameters for the 1D chain.
@@ -198,30 +199,15 @@ class surfG:
         """
         if self.contactFromFock:
             # Build lists first, then stack into JAX arrays
-            aList_temp = []
-            aSList_temp = []
+            alphas = []
+            aOverlaps = []
             for inds in self.indsList:
-                aList_temp.append(self.F[jnp.ix_(inds, inds)])
-                aSList_temp.append(self.S[jnp.ix_(inds, inds)])
-            self.aList = [jnp.array(a) for a in aList_temp]
-            self.aSList = [jnp.array(aS) for aS in aSList_temp]
-        else:
-            self.aList = [jnp.array(alpha) for alpha in alphas]
-            # Default None aOverlaps to identity (orthonormal onsite overlap)
-            self.aSList = ([jnp.eye(len(alpha)) for alpha in alphas] if aOverlaps is None
-                           else [jnp.array(aOverlap) for aOverlap in aOverlaps])
-
-        if self.contactFromFock:
-            self.bList = [jnp.array(tau) for tau in self.tauList]
-            # Handle None entries in stauList (orthonormal coupling -> zero hopping overlap)
-            self.bSList = [jnp.zeros_like(tau) if stau is None else jnp.array(stau)
-                           for tau, stau in zip(self.tauList, self.stauList)]
-        else:
-            self.bList = [jnp.array(beta) for beta in betas]
-            # Default None bOverlaps to zeros (orthonormal hopping overlap)
-            self.bSList = ([jnp.zeros_like(beta) for beta in betas] if bOverlaps is None
-                           else [jnp.zeros_like(beta) if bOverlap is None else jnp.array(bOverlap)
-                                 for beta, bOverlap in zip(betas, bOverlaps)])
+                alphas.append(self.F[jnp.ix_(inds, inds)])
+                aOverlaps.append(self.S[jnp.ix_(inds, inds)])
+            betas = self.tauList.copy()
+            bOverlaps = self.stauList.copy()
+        self.aList, self.aSList = fixHSList(alphas, aOverlaps)
+        self.bList, self.bSList = fixHSList(betas, bOverlaps)
 
     def g(self, E, i, conv=SURFACE_GREEN_CONVERGENCE, relFactor=SURFACE_RELAXATION_FACTOR):
         """
@@ -282,6 +268,11 @@ class surfG:
         # Initial state: (count, diff, g)
         init_state = (0, jnp.inf, inv(A))
         count, diff, g = lax.while_loop(cond_fun, body_fun, init_state)
+        #lax.cond(diff > conv, 
+        #        lambda E: jax.debug.print("WARNING: EXCEEDED ITERATIONS at {E:.2f} eV:  count={count}, diff={diff:.2e}", 
+        #                                    E=E, count=count, diff=diff), 
+        #        lambda E:None, E)
+        
 
         return g
 
@@ -306,13 +297,12 @@ class surfG:
         if self.tauFromFock:
             taus = self.tauInds
             indsList = self.indsList  # Python list
-            self.F = self.F.at[jnp.ix_(indsList[0], indsList[0])].set(self.F[jnp.ix_(taus[0], taus[0])].copy())
-            self.F = self.F.at[jnp.ix_(indsList[-1], indsList[-1])].set(self.F[jnp.ix_(taus[1], taus[1])].copy())
+            #self.F = self.F.at[jnp.ix_(indsList[0], indsList[0])].set(self.F[jnp.ix_(taus[0], taus[0])].copy())
+            #self.F = self.F.at[jnp.ix_(indsList[-1], indsList[-1])].set(self.F[jnp.ix_(taus[1], taus[1])].copy())
             # Rebuild stacked arrays from new F
             tau_temp = [self.F[jnp.ix_(taus[0],indsList[0])], self.F[jnp.ix_(taus[1],indsList[-1])]]
             stau_temp = [self.S[jnp.ix_(taus[0],indsList[0])], self.S[jnp.ix_(taus[1],indsList[-1])]]
-            self.tauList = [jnp.array(tau) for tau in tau_temp]
-            self.stauList = [jnp.array(stau) for stau in stau_temp]
+            self.tauList, self.stauList = fixHSList(tau_temp, stau_temp)
         if not self.contactFromFock:
             if self.fermiList[0] == None:
                 self.fermiList[0] = mu1

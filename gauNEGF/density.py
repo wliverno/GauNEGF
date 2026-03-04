@@ -819,9 +819,10 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
 
 ## INTEGRATION LIMIT FUNCTIONS
 # Calculate Emin using DOS
-def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES):
-    D,_ = eigh(inv(S)@F)
-    Emin = min(D.real.flatten())-5
+def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES, Emin=None):
+    if Emin is None:
+        D,_ = eigh(inv(S)@F)
+        Emin = min(D.real.flatten())-5
     counter = 0
     dP = _compute_dos_at_energy(Emin, F, S, g.sigmaTot(Emin))
     while dP>tol and counter<maxN:

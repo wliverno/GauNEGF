@@ -143,7 +143,7 @@ Vlist = [constructMat(Vdict, v) for v in vecs]
 # Test parameters
 eta = 1e-6
 T = 0
-test_energy = 1.5  # eV (near Fermi level for Au)
+test_energy = 2.7  # eV (near Fermi level for Au)
 energy_samples = test_energy + np.linspace(-0.1, 0.1, 5)  # Sample around test energy
 kpoint_values = [4*n+1 for n in range(21)]
 
