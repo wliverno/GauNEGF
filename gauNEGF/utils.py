@@ -48,14 +48,12 @@ def fractional_matrix_power(S, power):
     return result
 
 @jit
-def correct_hs(H_raw, S_raw, tol_ratio=1e-10):
+def regularizeOverlap(S_raw, tol_ratio=1e-10):
     """
-    Project H_raw and S_raw onto the subspace where S_raw is positive definite.
+    Make overlap positive definite by clipping eigenvalues.
     
     Parameters:
     -----------
-    H_raw : np.ndarray, shape (N, N)
-        Raw Hamiltonian matrix at a k-point (Hermitian)
     S_raw : np.ndarray, shape (N, N)
         Raw overlap matrix at a k-point (Hermitian, possibly indefinite)
     tol_ratio : float
@@ -76,51 +74,14 @@ def correct_hs(H_raw, S_raw, tol_ratio=1e-10):
     # Step 3: select positive eigenvalues above tolerance
     max_eig = jnp.max(eigvals)
     tol = tol_ratio * max_eig
-    keep_mask = eigvals > tol
-    any_kept = jnp.any(keep_mask)
-    eigvals_keep = jnp.where(keep_mask, eigvals, 0)
-    U_plus = eigvecs * keep_mask[jnp.newaxis, :]
+    all_kept = jnp.all(eigvals > tol)
+    eigvals_clipped = jnp.maximum(eigvals, tol)
     
-    # Step 4: project H and S
-    H_red = U_plus.conj().T @ H_raw @ U_plus
-    S_red = jnp.diag(eigvals_keep)  # because U_plus^T S_raw U_plus = diag(eigvals_keep)
-   
-    # If nothing was kept, return original matrices (silent failure)
-    H_out = jnp.where(any_kept, H_red, H_raw)
-    S_out = jnp.where(any_kept, S_red, S_raw)
-    return H_out, S_out
+    # Step 4: project back to regularized space
+    S_reg = eigvecs @ jnp.diag(eigvals_clipped) @ eigvecs.conj().T
 
-def fixHSList(Flist, Slist=None, default='none'):
-    """
-    Convert F,S lists to jnp arrays with appropriate None handling.
-
-    Parameters
-    ----------
-    Flist : list of arrays
-        Hamiltonian/Fock matrices
-    Slist : list of arrays/None, or None
-        Overlap matrices
-    default : str
-        How to handle None entries in Slist:
-        'none' = preserve None (for stau sentinel in sigma)
-        'identity' = replace with identity matrix
-        'zeros' = replace with zeros_like
-    """
-    Flist = [jnp.array(f) for f in Flist]
-    if Slist is None:
-        Slist = [None] * len(Flist)
-    Sout = []
-    for f, s in zip(Flist, Slist):
-        if s is None:
-            if default == 'identity':
-                Sout.append(jnp.eye(len(f)))
-            elif default == 'zeros':
-                Sout.append(jnp.zeros_like(f))
-            else:
-                Sout.append(None)
-        else:
-            Sout.append(jnp.array(s))
-    return Flist, Sout
+    # If all were kept, return orginal matrix   
+    return jnp.where(all_kept, S_raw, S_reg)
 
 # Simple numpy operations
 
