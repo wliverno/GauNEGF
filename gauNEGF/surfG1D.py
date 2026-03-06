@@ -6,7 +6,7 @@ from jax import jit
 
 # Configuration
 from gauNEGF.config import (ETA, SURFACE_GREEN_CONVERGENCE, SURFACE_RELAXATION_FACTOR)
-from gauNEGF.utils import fractional_matrix_power, inv, regularizeOverlap
+from gauNEGF.utils import fractional_matrix_power, inv
 
 #Constants
 
@@ -144,10 +144,10 @@ class surfG:
             staus = [self.S[jnp.ix_(self.tauInds[0],self.indsList[0])], 
                      self.S[jnp.ix_(self.tauInds[1],self.indsList[-1])]]
         else:
-            staus = [np.zeros_like(tau) for tau in taus] if staus is None else staus
             self.tauFromFock = False
         self.tauList = taus
-        self.stauList = staus
+        self.stauList = ([None] * len(taus) if staus is None
+                         else [None if stau is None else jnp.array(stau) for stau in staus])
 
         # Set up contact information
         if alphas is None:
@@ -204,17 +204,19 @@ class surfG:
             for inds in self.indsList:
                 alphas.append(self.F[jnp.ix_(inds, inds)])
                 aOverlaps.append(self.S[jnp.ix_(inds, inds)])
-            betas = self.tauList.copy()
-            bOverlaps = self.stauList.copy()
             self.aList = alphas
             self.aSList = aOverlaps
-            self.bList = betas
-            self.bSList = bOverlaps
+            self.bList = [jnp.array(tau) for tau in self.tauList]
+            self.bSList = [jnp.zeros_like(tau) if stau is None else jnp.array(stau)
+                           for tau, stau in zip(self.tauList, self.stauList)]
         else:
-            self.alist = alphas
-            self.alist = betas
-            self.aSList = [np.eye(len(aS)) for aS in aOverlaps] if aOverlaps is None else aOverlaps
-            self.bSList = [np.zeros_like(bS) for bS in bOverlaps] if bOverlaps is None else bOverlaps
+            self.aList = [jnp.array(alpha) for alpha in alphas]
+            self.bList = [jnp.array(beta) for beta in betas]
+            self.aSList = ([jnp.eye(len(alpha)) for alpha in alphas] if aOverlaps is None
+                           else [jnp.array(aOverlap) for aOverlap in aOverlaps])
+            self.bSList = ([jnp.zeros_like(beta) for beta in betas] if bOverlaps is None
+                           else [jnp.zeros_like(beta) if bOverlap is None else jnp.array(bOverlap)
+                                 for beta, bOverlap in zip(betas, bOverlaps)])
 
     def _rejit(self):
         """Recompile g and sigma to pick up updated contact parameters.
@@ -320,7 +322,7 @@ class surfG:
             tau_temp = [self.F[jnp.ix_(taus[0],indsList[0])], self.F[jnp.ix_(taus[1],indsList[-1])]]
             stau_temp = [self.S[jnp.ix_(taus[0],indsList[0])], self.S[jnp.ix_(taus[1],indsList[-1])]]
             self.tauList = tau_temp
-            self.stauTemp = stau_temp
+            self.stauList = stau_temp
         if self.contactFromFock:
             # Rebuild aList/bList from new F and re-trace JIT'd functions
             self.setContacts()
