@@ -217,6 +217,55 @@ class surfG:
             self.bSList = ([jnp.zeros_like(beta) for beta in betas] if bOverlaps is None
                            else [jnp.zeros_like(beta) if bOverlap is None else jnp.array(bOverlap)
                                  for beta, bOverlap in zip(betas, bOverlaps)])
+        self._regularizeContacts()
+
+    def _regularizeContacts(self):
+        """Ensure composite overlap matrices for each contact are PSD.
+
+        Checks two composite overlaps per contact and applies a diagonal
+        shift (Tikhonov regularization) to aSList[i] if needed:
+
+        (a) Coupling composite: [[S[inds,inds], stau], [stau', Salpha]]
+        (b) Chain composite:    [[Salpha, Sbeta, 0], [Sbeta', Salpha, Sbeta], [0, Sbeta', Salpha]]
+
+        Only aSList (onsite overlap) is modified; off-diagonal blocks
+        (stauList, bSList) remain unchanged.
+        """
+        import numpy as np
+        for i in range(len(self.indsList)):
+            Salpha = np.array(self.aSList[i])
+            n = Salpha.shape[0]
+            eps = 0.0
+
+            # (b) Chain composite: 3-block Toeplitz (only when Sbeta is square
+            #     and same size as Salpha, i.e. a proper periodic chain)
+            Sbeta = np.array(self.bSList[i])
+            if Sbeta.shape[0] == Sbeta.shape[1] == n:
+                Z = np.zeros_like(Salpha)
+                chain = np.block([
+                    [Salpha, Sbeta,          Z],
+                    [Sbeta.conj().T, Salpha, Sbeta],
+                    [Z,     Sbeta.conj().T,  Salpha],
+                ])
+                lmin = np.linalg.eigvalsh(chain)[0]
+                if lmin < 0:
+                    eps = max(eps, -lmin + 1e-10)
+
+            # (a) Coupling composite (skip if stau is None -- orthonormal coupling)
+            stau = self.stauList[i]
+            if stau is not None:
+                stau_np = np.array(stau)
+                S_inds = np.array(self.S[jnp.ix_(self.indsList[i], self.indsList[i])])
+                coupling = np.block([
+                    [S_inds + eps * np.eye(n), stau_np],
+                    [stau_np.conj().T,         Salpha + eps * np.eye(n)],
+                ])
+                lmin_c = np.linalg.eigvalsh(coupling)[0]
+                if lmin_c < 0:
+                    eps = eps + (-lmin_c + 1e-10)
+
+            if eps > 0:
+                self.aSList[i] = self.aSList[i] + eps * jnp.eye(n, dtype=self.aSList[i].dtype)
 
     def _rejit(self):
         """Recompile g and sigma to pick up updated contact parameters.
