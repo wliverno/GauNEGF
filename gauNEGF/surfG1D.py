@@ -6,7 +6,7 @@ from jax import jit
 
 # Configuration
 from gauNEGF.config import (ETA, SURFACE_GREEN_CONVERGENCE, SURFACE_RELAXATION_FACTOR)
-from gauNEGF.utils import fractional_matrix_power, inv, fixHSList
+from gauNEGF.utils import fractional_matrix_power, inv, regularizeOverlap
 
 #Constants
 
@@ -144,8 +144,10 @@ class surfG:
             staus = [self.S[jnp.ix_(self.tauInds[0],self.indsList[0])], 
                      self.S[jnp.ix_(self.tauInds[1],self.indsList[-1])]]
         else:
+            staus = [np.zeros_like(tau) for tau in taus] if staus is None else staus
             self.tauFromFock = False
-        self.tauList,self.stauList = fixHSList(taus, staus)
+        self.tauList = taus
+        self.stauList = staus
 
         # Set up contact information
         if alphas is None:
@@ -204,11 +206,15 @@ class surfG:
                 aOverlaps.append(self.S[jnp.ix_(inds, inds)])
             betas = self.tauList.copy()
             bOverlaps = self.stauList.copy()
-            self.aList, self.aSList = fixHSList(alphas, aOverlaps)
-            self.bList, self.bSList = fixHSList(betas, bOverlaps, default='zeros')
+            self.aList = alphas
+            self.aSList = aOverlaps
+            self.bList = betas
+            self.bSList = bOverlaps
         else:
-            self.aList, self.aSList = fixHSList(alphas, aOverlaps, default='identity')
-            self.bList, self.bSList = fixHSList(betas, bOverlaps, default='zeros')
+            self.alist = alphas
+            self.alist = betas
+            self.aSList = [np.eye(len(aS)) for aS in aOverlaps] if aOverlaps is None else aOverlaps
+            self.bSList = [np.zeros_like(bS) for bS in bOverlaps] if bOverlaps is None else bOverlaps
 
     def _rejit(self):
         """Recompile g and sigma to pick up updated contact parameters.
@@ -222,7 +228,7 @@ class surfG:
         self.g = jit(self.__class__.g.__get__(self), static_argnums=(1,))
         self.sigma = jit(self.__class__.sigma.__get__(self), static_argnums=(1,))
 
-    def g(self, E, i, conv=SURFACE_GREEN_CONVERGENCE, relFactor=SURFACE_RELAXATION_FACTOR):
+    def g(self, E, i, conv=SURFACE_GREEN_CONVERGENCE, relFactor=0.5):#SURFACE_RELAXATION_FACTOR):
         """
         Calculate surface Green's function for a contact.
 
@@ -239,7 +245,7 @@ class surfG:
         conv : float, optional
             Convergence criterion for iteration (default: 1e-5)
         relFactor : float, optional
-            Relaxation factor for iteration mixing (default: 0.1)
+            Relaxation factor for iteration mixing (default: 0.5)
 
         Returns
         -------
@@ -257,7 +263,7 @@ class surfG:
         B_dag = B.conj().T
 
         # Iterative solution using jax.lax.while_loop
-        MAX_ITER = 2000
+        MAX_ITER = 10000
 
         def cond_fun(state):
             count, diff, g = state
@@ -313,7 +319,8 @@ class surfG:
             # Rebuild coupling arrays from new F
             tau_temp = [self.F[jnp.ix_(taus[0],indsList[0])], self.F[jnp.ix_(taus[1],indsList[-1])]]
             stau_temp = [self.S[jnp.ix_(taus[0],indsList[0])], self.S[jnp.ix_(taus[1],indsList[-1])]]
-            self.tauList, self.stauList = fixHSList(tau_temp, stau_temp)
+            self.tauList = tau_temp
+            self.stauTemp = stau_temp
         if self.contactFromFock:
             # Rebuild aList/bList from new F and re-trace JIT'd functions
             self.setContacts()
