@@ -47,41 +47,43 @@ def fractional_matrix_power(S, power):
 
     return result
 
-@jit
 def regularizeOverlap(S_raw, tol_ratio=1e-10):
     """
-    Make overlap positive definite by clipping eigenvalues.
-    
-    Parameters:
-    -----------
-    S_raw : np.ndarray, shape (N, N)
-        Raw overlap matrix at a k-point (Hermitian, possibly indefinite)
-    tol_ratio : float
-        Relative tolerance for eigenvalue selection (fraction of max eigenvalue)
-    
-    Returns:
-    --------
-    H_red : np.ndarray, shape (r, r)
-        Projected Hamiltonian in the subspace (non-orthogonal basis)
-    S_red : np.ndarray, shape (r, r)
-        Projected overlap = diagonal matrix of kept eigenvalues
-    U_plus : np.ndarray, shape (N, r)
-        Basis vectors of the subspace (orthonormal)
-    """
-    # Step 2: diagonalize S_raw
-    eigvals, eigvecs = jnp.linalg.eigh(S_raw)
-    
-    # Step 3: select positive eigenvalues above tolerance
-    max_eig = jnp.max(eigvals)
-    tol = tol_ratio * max_eig
-    all_kept = jnp.all(eigvals > tol)
-    eigvals_clipped = jnp.maximum(eigvals, tol)
-    
-    # Step 4: project back to regularized space
-    S_reg = eigvecs @ jnp.diag(eigvals_clipped) @ eigvecs.conj().T
+    Make overlap positive definite via diagonal shift (Tikhonov regularization).
 
-    # If all were kept, return orginal matrix   
-    return jnp.where(all_kept, S_raw, S_reg)
+    Computes S_reg = S + eps * I where eps is just large enough to push
+    the smallest eigenvalue above ``tol_ratio * max(abs(eigenvalues))``.
+    If already PSD, the original matrix is returned unchanged.
+
+    This preserves all off-diagonal elements exactly, keeping zeros as
+    zeros and orbital-to-orbital overlaps intact.  Only the diagonal
+    (orbital self-overlap) is modified.
+
+    Parameters
+    ----------
+    S_raw : jax array, shape (N, N)
+        Raw overlap matrix (Hermitian, possibly indefinite)
+    tol_ratio : float
+        Relative tolerance (fraction of largest absolute eigenvalue)
+
+    Returns
+    -------
+    jax array, shape (N, N)
+        Regularized overlap matrix (Hermitian, positive definite)
+
+    References
+    ----------
+    Tikhonov, Dokl. Akad. Nauk SSSR 151, 501 (1963).
+    Saunders & Hillier, Int. J. Quantum Chem. 7, 699 (1973).
+    Gaussian IOp(3/18): overlap eigenvalue threshold for linear dependency.
+    """
+    eigvals = jnp.linalg.eigvalsh(S_raw)
+    lambda_min = jnp.min(eigvals)
+    max_abs_eig = jnp.max(jnp.abs(eigvals))
+    tol = tol_ratio * max_abs_eig
+    eps = jnp.maximum(tol - lambda_min, 0.0)
+    return S_raw + eps * jnp.eye(S_raw.shape[0], dtype=S_raw.dtype)
+
 
 # Simple numpy operations
 
