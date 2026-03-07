@@ -337,3 +337,108 @@ def test_already_psd_composites_unchanged():
         np.testing.assert_allclose(
             np.array(g.aSList[i]), expected, atol=1e-10,
             err_msg=f"aSList[{i}] should be unchanged when composites are PSD")
+
+
+# ---------------------------------------------------------------------------
+# Test 7: Infinite chain overlap S(k) must be PSD for all k
+# ---------------------------------------------------------------------------
+
+def _inf_chain_overlap_min_eig(Salpha, Sbeta):
+    """Min eigenvalue of S(k) = Salpha + 2*cos(k)*Sbeta over all k.
+
+    For symmetric Sbeta, worst cases are k=0 and k=pi.
+    For general Sbeta, uses spectral norm bound.
+    """
+    Sbeta = np.array(Sbeta)
+    Salpha = np.array(Salpha)
+    # Check both extremes: Salpha +/- 2*Sbeta_sym
+    Sbeta_sym = (Sbeta + Sbeta.conj().T) / 2
+    eig_pi = np.linalg.eigvalsh(Salpha - 2 * Sbeta_sym)[0]
+    eig_0 = np.linalg.eigvalsh(Salpha + 2 * Sbeta_sym)[0]
+    # Also check anti-symmetric contribution via spectral norm bound
+    Sbeta_anti = (Sbeta - Sbeta.conj().T) / 2
+    anti_norm = np.linalg.norm(Sbeta_anti, ord=2)
+    return min(eig_pi, eig_0) - 2 * anti_norm
+
+
+def test_infinite_chain_overlap_psd_after_regularization():
+    """After regularization, the infinite chain S(k) = Salpha + 2*cos(k)*Sbeta
+    must be PSD for ALL k, not just the 3-block Toeplitz sampling points.
+
+    With Sbeta = 0.8*I and Salpha = I, the 3-block composite has min eig ~ -0.13
+    but the infinite chain has min eig = 1 - 2*0.8 = -0.6.
+    The regularization must handle the infinite chain condition."""
+    N = 6
+    n = 2
+    Salpha = np.eye(n, dtype=complex)
+    Sbeta = 0.8 * np.eye(n, dtype=complex)
+
+    # Verify test setup: infinite chain is non-PSD
+    assert _inf_chain_overlap_min_eig(Salpha, Sbeta) < -0.5, \
+        "Test setup: infinite chain S(pi) = I - 1.6*I should have min eig ~ -0.6"
+
+    F = np.zeros((N, N), dtype=complex)
+    S = np.eye(N, dtype=complex)
+    for i in range(N - 1):
+        F[i, i + 1] = -1.0
+        F[i + 1, i] = -1.0
+
+    alpha = np.zeros((n, n), dtype=complex)
+    beta = -1.0 * np.eye(n, dtype=complex)
+
+    g = surfG(F, S, [[0, 1], [4, 5]],
+              taus=[beta, beta],
+              staus=[Sbeta, Sbeta],
+              alphas=[alpha, alpha],
+              aOverlaps=[Salpha.copy(), Salpha.copy()],
+              betas=[beta, beta],
+              bOverlaps=[Sbeta.copy(), Sbeta.copy()])
+
+    # After regularization, infinite chain must be PSD
+    for i in range(2):
+        aS = np.array(g.aSList[i])
+        bS = np.array(g.bSList[i])
+        min_eig = _inf_chain_overlap_min_eig(aS, bS)
+        assert min_eig > -1e-10, (
+            f"Infinite chain S(k) for contact {i} must be PSD for all k, "
+            f"min eig = {min_eig:.4e}")
+
+
+def test_dos_decays_at_large_negative_energy():
+    """With large overlap (Sbeta=0.8), DOS must decay far below the band.
+
+    This is the physical consequence of the infinite chain regularization:
+    no spurious DOS tail extending to -infinity."""
+    from gauNEGF.utils import inv as jinv
+    N = 6
+    n = 2
+    Salpha = np.eye(n, dtype=complex)
+    Sbeta = 0.8 * np.eye(n, dtype=complex)
+
+    F = np.zeros((N, N), dtype=complex)
+    S = np.eye(N, dtype=complex)
+    for i in range(N - 1):
+        F[i, i + 1] = -1.0
+        F[i + 1, i] = -1.0
+
+    alpha = np.zeros((n, n), dtype=complex)
+    beta = -1.0 * np.eye(n, dtype=complex)
+
+    g = surfG(F, S, [[0, 1], [4, 5]],
+              taus=[beta, beta],
+              staus=[Sbeta, Sbeta],
+              alphas=[alpha, alpha],
+              aOverlaps=[Salpha.copy(), Salpha.copy()],
+              betas=[beta, beta],
+              bOverlaps=[Sbeta.copy(), Sbeta.copy()])
+
+    # DOS at E=-50 should be negligible (band is roughly [-3, 3])
+    E = -50.0
+    eta = 1e-3
+    sig = np.array(g.sigmaTot(E))
+    S_dev = np.array(g.S)
+    F_dev = np.array(g.F)
+    Gr = np.array(jinv(jnp.array((E + 1j*eta) * S_dev - F_dev - sig)))
+    dos = -np.imag(np.trace(Gr @ S_dev)) / np.pi
+    assert dos < 0.01, (
+        f"DOS at E={E} should be negligible after regularization, got {dos:.4f}")
