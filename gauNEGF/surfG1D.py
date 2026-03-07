@@ -237,19 +237,17 @@ class surfG:
             n = Salpha.shape[0]
             eps = 0.0
 
-            # (b) Chain composite: 3-block Toeplitz (only when Sbeta is square
-            #     and same size as Salpha, i.e. a proper periodic chain)
+            # (b) Infinite chain condition: S(k) = Salpha + Sbeta*e^{ik} + Sbeta^H*e^{-ik}
+            #     must be PSD for all k.  Sufficient condition:
+            #       min_eigval(Salpha) >= 2 * spectral_norm(Sbeta)
+            #     For Hermitian Sbeta this tightens to checking Salpha +/- 2*Sbeta.
             Sbeta = np.array(self.bSList[i])
             if Sbeta.shape[0] == Sbeta.shape[1] == n:
-                Z = np.zeros_like(Salpha)
-                chain = np.block([
-                    [Salpha, Sbeta,          Z],
-                    [Sbeta.conj().T, Salpha, Sbeta],
-                    [Z,     Sbeta.conj().T,  Salpha],
-                ])
-                lmin = np.linalg.eigvalsh(chain)[0]
-                if lmin < 0:
-                    eps = max(eps, -lmin + 1e-10)
+                sigma_max = np.linalg.norm(Sbeta, ord=2)
+                lmin = np.linalg.eigvalsh(Salpha)[0]
+                deficit = 2 * sigma_max - lmin
+                if deficit > 0:
+                    eps = max(eps, deficit + 1e-10)
 
             # (a) Coupling composite (skip if stau is None -- orthonormal coupling)
             stau = self.stauList[i]
