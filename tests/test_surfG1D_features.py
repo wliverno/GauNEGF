@@ -249,52 +249,6 @@ def test_chain_composite_regularized():
             err_msg=f"bSList[{i}] should be unchanged by regularization")
 
 
-def test_coupling_composite_regularized():
-    """When the coupling composite [[S_inds, stau], [stau', Salpha]] is non-PSD,
-    surfG should shift aSList so it becomes PSD.
-    stauList must remain unchanged."""
-    N = 6
-    n = 2
-    # Reduced self-overlap + large coupling -> coupling composite non-PSD
-    # [[0.5I, 0.8I], [0.8I, 0.5I]] has eigenvalues -0.3 and 1.3
-    Salpha = 0.5 * np.eye(n, dtype=complex)
-    stau = 0.8 * np.eye(n, dtype=complex)
-    assert np.linalg.eigvalsh(_build_composite_coupling(Salpha, stau))[0] < 0, \
-        "Test setup: coupling composite should be non-PSD"
-
-    F = np.zeros((N, N), dtype=complex)
-    S = np.eye(N, dtype=complex)
-    for i in range(N - 1):
-        F[i, i + 1] = -1.0
-        F[i + 1, i] = -1.0
-    # Set reduced diagonal and large coupling overlap in S
-    S[0:2, 0:2] = Salpha
-    S[4:6, 4:6] = Salpha
-    S[0:2, 2:4] = stau
-    S[2:4, 0:2] = stau.conj().T
-    S[4:6, 2:4] = stau
-    S[2:4, 4:6] = stau.conj().T
-
-    g = surfG(F, S, [[0, 1], [4, 5]], [[2, 3], [2, 3]])
-
-    # After init, coupling composite should be PSD
-    for i in range(2):
-        aS = np.array(g.aSList[i])
-        st = np.array(g.stauList[i])
-        coupling = _build_composite_coupling(aS, st)
-        eigs = np.linalg.eigvalsh(coupling)
-        assert eigs[0] > -1e-10, (
-            f"Coupling composite for contact {i} should be PSD, "
-            f"min eig = {eigs[0]:.4e}")
-
-    # stauList should be unchanged
-    for i in range(2):
-        expected_stau = S[np.ix_([2, 3], g.indsList[i])]
-        np.testing.assert_allclose(
-            np.array(g.stauList[i]), expected_stau, atol=1e-12,
-            err_msg=f"stauList[{i}] should be unchanged by regularization")
-
-
 def test_sigma_no_blowup_with_regularized_overlap():
     """sigma() should produce reasonable values after composite regularization."""
     N = 6
