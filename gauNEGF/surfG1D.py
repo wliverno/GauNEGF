@@ -227,13 +227,16 @@ class surfG:
         For finite bandwidth (no spurious DOS tail), S(k) >= 0 for all k.
         Sufficient condition: min_eigval(Salpha) >= 2 * spectral_norm(Sbeta).
 
-        Applies a diagonal shift to aSList[i] if needed.  Off-diagonal
-        blocks (stauList, bSList) remain unchanged.
+        Applies a diagonal shift to aSList[i] if needed.  The shift is
+        stored in _overlap_eps[i] so sigma() can apply the correction
+        -E*eps*I to keep g.S unchanged (see docs/sigma_correction_proof.md).
         """
         import numpy as np
+        self._overlap_eps = []
         for i in range(len(self.indsList)):
             Salpha = np.array(self.aSList[i])
             n = Salpha.shape[0]
+            eps = 0.0
 
             Sbeta = np.array(self.bSList[i])
             if Sbeta.shape[0] == Sbeta.shape[1] == n:
@@ -243,6 +246,8 @@ class surfG:
                 if deficit > 0:
                     eps = deficit + 1e-10
                     self.aSList[i] = self.aSList[i] + eps * jnp.eye(n, dtype=self.aSList[i].dtype)
+
+            self._overlap_eps.append(eps)
 
     def _rejit(self):
         """Recompile g and sigma to pick up updated contact parameters.
@@ -400,6 +405,11 @@ class surfG:
         if stau is None:
             Xi_i = self.Xi[jnp.ix_(inds, inds)]
             sig = Xi_i @ sig @ Xi_i
+        # Overlap regularization correction: absorb Salpha shift into sigma
+        # so g.S stays unchanged.  See docs/sigma_correction_proof.md.
+        if self._overlap_eps[i] > 0:
+            n = sig.shape[0]
+            sig = sig - E * self._overlap_eps[i] * jnp.eye(n, dtype=sig.dtype)
         sigma = sigma.at[jnp.ix_(inds, inds)].add(sig)
         return sigma
 
