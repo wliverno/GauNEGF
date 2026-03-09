@@ -184,11 +184,6 @@ def test_sigma_deortho_applied_when_staus_none():
 # Test 6: Composite overlap regularization
 # ---------------------------------------------------------------------------
 
-def _build_composite_coupling(Salpha, stau):
-    """Build [[Salpha, stau], [stau', Salpha]] composite overlap."""
-    return np.block([[Salpha, stau], [stau.conj().T, Salpha]])
-
-
 def _build_composite_chain(Salpha, Sbeta):
     """Build 3-block Toeplitz chain overlap."""
     n = Salpha.shape[0]
@@ -356,6 +351,199 @@ def test_infinite_chain_overlap_psd_after_regularization():
         assert min_eig > -1e-10, (
             f"Infinite chain S(k) for contact {i} must be PSD for all k, "
             f"min eig = {min_eig:.4e}")
+
+
+def test_overlap_eps_stored_per_contact():
+    """_regularizeContacts must store the shift eps per contact
+    in self._overlap_eps so sigma() can apply the correction."""
+    N = 6
+    n = 2
+    Salpha = np.eye(n, dtype=complex)
+    Sbeta = 0.8 * np.eye(n, dtype=complex)
+
+    F = np.zeros((N, N), dtype=complex)
+    S = np.eye(N, dtype=complex)
+    for i in range(N - 1):
+        F[i, i + 1] = -1.0
+        F[i + 1, i] = -1.0
+
+    alpha = np.zeros((n, n), dtype=complex)
+    beta = -1.0 * np.eye(n, dtype=complex)
+
+    g = surfG(F, S, [[0, 1], [4, 5]],
+              taus=[beta, beta],
+              staus=[Sbeta, Sbeta],
+              alphas=[alpha, alpha],
+              aOverlaps=[Salpha.copy(), Salpha.copy()],
+              betas=[beta, beta],
+              bOverlaps=[Sbeta.copy(), Sbeta.copy()])
+
+    # _overlap_eps must exist and have one entry per contact
+    assert hasattr(g, '_overlap_eps'), "surfG must store _overlap_eps"
+    assert len(g._overlap_eps) == 2, "One eps per contact"
+
+    # For Sbeta=0.8, eps should be 2*0.8 - 1.0 + 1e-10 ~ 0.6
+    for i in range(2):
+        assert g._overlap_eps[i] > 0.5, (
+            f"eps[{i}] should be ~0.6, got {g._overlap_eps[i]:.4f}")
+
+
+def test_overlap_eps_zero_when_no_regularization_needed():
+    """When the chain is already PSD, _overlap_eps should be 0."""
+    N = 6
+    F, S = make_chain(N, S_offdiag=0.05)
+    g = surfG(F, S, [[0, 1], [4, 5]])
+
+    assert hasattr(g, '_overlap_eps'), "surfG must store _overlap_eps"
+    for i in range(2):
+        assert g._overlap_eps[i] == 0.0, (
+            f"eps[{i}] should be 0 when no regularization needed")
+
+
+def test_device_overlap_unchanged_after_regularization():
+    """g.S must equal the original input S -- regularization should NOT
+    modify the device overlap.  The overlap shift is absorbed into sigma."""
+    N = 6
+    n = 2
+    Salpha = np.eye(n, dtype=complex)
+    Sbeta = 0.8 * np.eye(n, dtype=complex)
+
+    F = np.zeros((N, N), dtype=complex)
+    S = np.eye(N, dtype=complex)
+    for i in range(N - 1):
+        F[i, i + 1] = -1.0
+        F[i + 1, i] = -1.0
+
+    alpha = np.zeros((n, n), dtype=complex)
+    beta = -1.0 * np.eye(n, dtype=complex)
+
+    g = surfG(F, S, [[0, 1], [4, 5]],
+              taus=[beta, beta],
+              staus=[Sbeta, Sbeta],
+              alphas=[alpha, alpha],
+              aOverlaps=[Salpha.copy(), Salpha.copy()],
+              betas=[beta, beta],
+              bOverlaps=[Sbeta.copy(), Sbeta.copy()])
+
+    np.testing.assert_allclose(
+        np.array(g.S), S, atol=1e-14,
+        err_msg="g.S must be the original input, not modified by regularization")
+
+
+def test_sigma_includes_overlap_correction():
+    """sigma() must subtract E*eps*I at contact indices to compensate
+    for the Salpha shift.  Verify by checking that (E*S - F - sigma)
+    equals (E*S_mod - F - sigma_reg) where S_mod has the shifted diagonal."""
+    N = 6
+    n = 2
+    s = 0.8
+    Salpha = np.eye(n, dtype=complex)
+    Sbeta = s * np.eye(n, dtype=complex)
+
+    F = np.zeros((N, N), dtype=complex)
+    S = np.eye(N, dtype=complex)
+    for i in range(N - 1):
+        F[i, i + 1] = -1.0
+        F[i + 1, i] = -1.0
+        S[i, i + 1] = s
+        S[i + 1, i] = s
+
+    alpha = np.zeros((n, n), dtype=complex)
+    beta = -1.0 * np.eye(n, dtype=complex)
+
+    g = surfG(F, S, [[0, 1], [4, 5]],
+              taus=[beta, beta],
+              staus=[Sbeta, Sbeta],
+              alphas=[alpha, alpha],
+              aOverlaps=[Salpha.copy(), Salpha.copy()],
+              betas=[beta, beta],
+              bOverlaps=[Sbeta.copy(), Sbeta.copy()])
+
+    # Build S_mod manually (what approach 1 would do)
+    S_mod = S.copy()
+    for i in range(2):
+        inds = g.indsList[i]
+        eps_i = g._overlap_eps[i]
+        ni = len(inds)
+        S_mod[np.ix_(inds, inds)] += eps_i * np.eye(ni)
+
+    # At several energies, check E*S - F - sigma_corr == E*S_mod - F - sigma_reg
+    # (sigma_corr already includes the -E*eps*I correction)
+    for E in [-10.0, 0.0, 2.5]:
+        sigma_corr = np.array(g.sigmaTot(E))
+        mat_corr = E * S - F - sigma_corr
+        # Reconstruct sigma_reg by ADDING back the correction
+        sigma_reg = sigma_corr.copy()
+        for i in range(2):
+            inds = g.indsList[i]
+            ni = len(inds)
+            sigma_reg[np.ix_(inds, inds)] += E * g._overlap_eps[i] * np.eye(ni)
+        mat_mod = E * S_mod - F - sigma_reg
+        np.testing.assert_allclose(
+            mat_corr, mat_mod, atol=1e-10,
+            err_msg=f"E*S - F - sigma_corr must equal E*S_mod - F - sigma_reg at E={E}")
+
+
+def test_integer_transmission_with_large_overlap():
+    """For a 2-cell device where both cells are contacts (device = repeating
+    unit folded into both contacts), transmission must be integer even with
+    large overlap that triggers regularization.  The sigma correction ensures
+    the device-lead interface is transparent when every device cell gets the
+    same Salpha shift."""
+    from gauNEGF.utils import inv as jinv
+
+    n = 2   # orbitals per unit cell
+    n_cells = 2  # device = 2 unit cells, both are contacts
+    N = n * n_cells
+
+    # Lead parameters (large Sbeta triggers regularization, eps ~ 0.6)
+    alpha = np.zeros((n, n), dtype=complex)
+    beta = -1.0 * np.eye(n, dtype=complex)
+    Salpha = np.eye(n, dtype=complex)
+    Sbeta = 0.8 * np.eye(n, dtype=complex)
+
+    # Build device F and S from lead parameters so system is periodic
+    F = np.zeros((N, N), dtype=complex)
+    S = np.zeros((N, N), dtype=complex)
+    for c in range(n_cells):
+        sl = slice(c * n, (c + 1) * n)
+        F[sl, sl] = alpha
+        S[sl, sl] = Salpha
+        if c < n_cells - 1:
+            sl_next = slice((c + 1) * n, (c + 2) * n)
+            F[sl, sl_next] = beta
+            F[sl_next, sl] = beta.conj().T
+            S[sl, sl_next] = Sbeta
+            S[sl_next, sl] = Sbeta.conj().T
+
+    g = surfG(F, S, [[0, 1], [2, 3]],
+              taus=[beta, beta],
+              staus=[Sbeta, Sbeta],
+              alphas=[alpha, alpha],
+              aOverlaps=[Salpha.copy(), Salpha.copy()],
+              betas=[beta, beta],
+              bOverlaps=[Sbeta.copy(), Sbeta.copy()])
+
+    eta = 1e-4
+    S_dev = np.array(g.S)
+    F_dev = np.array(g.F)
+
+    # 2 degenerate channels -> T=2 at energies inside the band
+    for E in [0.0, -0.3, -0.5]:
+        sig_L = np.array(g.sigma(E, 0))
+        sig_R = np.array(g.sigma(E, 1))
+        sig_tot = sig_L + sig_R
+
+        Gr = np.array(jinv(jnp.array((E + 1j*eta) * S_dev - F_dev - sig_tot)))
+        Ga = Gr.conj().T
+
+        Gamma_L = 1j * (sig_L - sig_L.conj().T)
+        Gamma_R = 1j * (sig_R - sig_R.conj().T)
+
+        T = np.real(np.trace(Gamma_L @ Gr @ Gamma_R @ Ga))
+        T_rounded = round(T)
+        assert abs(T - T_rounded) < 0.05, (
+            f"Transmission at E={E} should be integer, got T={T:.4f}")
 
 
 def test_dos_decays_at_large_negative_energy():
