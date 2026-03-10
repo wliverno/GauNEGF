@@ -118,7 +118,8 @@ def test_aoverlaps_none_defaults_to_identity():
 # ---------------------------------------------------------------------------
 
 def test_setf_fermi_update_pattern_c_no_crash():
-    """Second call to setF() with changed mu should not crash for pattern (c)."""
+    """setF() for pattern (c) should track mu but NOT shift aList/bList.
+    The retarded self-energy is independent of chemical potential."""
     N = 6
     n_contact = 2
     F, S = make_chain(N)
@@ -135,14 +136,13 @@ def test_setf_fermi_update_pattern_c_no_crash():
     # First setF call: initializes fermiList
     g.setF(F, mu1=0.0, mu2=0.0)
 
-    # Second setF call with different mu -> previously crashed with AttributeError
-    g.setF(F, mu1=0.1, mu2=-0.1)  # should not raise
+    # Second setF call with different mu -> should not crash or shift aList
+    g.setF(F, mu1=0.1, mu2=-0.1)
 
-    # Verify alpha was shifted correctly (aList[0] should be alpha + 0.1*I)
-    expected = np.array(alpha) + 0.1 * np.eye(n_contact)
+    # aList must stay at the original alpha (no Fermi shift)
     np.testing.assert_allclose(
-        np.array(g.aList[0]), expected, atol=1e-12,
-        err_msg="aList[0] should be shifted by dFermi after setF")
+        np.array(g.aList[0]), np.array(alpha), atol=1e-12,
+        err_msg="aList[0] must not be shifted by setF -- sigma is mu-independent")
 
 
 # ---------------------------------------------------------------------------
@@ -400,9 +400,9 @@ def test_overlap_eps_zero_when_no_regularization_needed():
             f"eps[{i}] should be 0 when no regularization needed")
 
 
-def test_device_overlap_unchanged_after_regularization():
-    """g.S must equal the original input S -- regularization should NOT
-    modify the device overlap.  The overlap shift is absorbed into sigma."""
+def test_device_overlap_modified_at_contacts():
+    """g.S must include the eps shift at contact blocks (S-modification
+    approach).  g.S_orig must store the unmodified original."""
     N = 6
     n = 2
     Salpha = np.eye(n, dtype=complex)
@@ -425,28 +425,36 @@ def test_device_overlap_unchanged_after_regularization():
               betas=[beta, beta],
               bOverlaps=[Sbeta.copy(), Sbeta.copy()])
 
+    # g.S_orig must equal the original input
     np.testing.assert_allclose(
-        np.array(g.S), S, atol=1e-14,
-        err_msg="g.S must be the original input, not modified by regularization")
+        np.array(g.S_orig), S, atol=1e-14,
+        err_msg="g.S_orig must be the unmodified original overlap")
+
+    # g.S must have eps added at contact blocks
+    S_expected = S.copy()
+    for i, inds in enumerate([[0, 1], [4, 5]]):
+        eps_i = g._overlap_eps[i]
+        if eps_i > 0:
+            S_expected[np.ix_(inds, inds)] += eps_i * np.eye(n)
+    np.testing.assert_allclose(
+        np.array(g.S), S_expected, atol=1e-14,
+        err_msg="g.S must include the eps shift at contact blocks")
 
 
-def test_sigma_includes_overlap_correction():
-    """sigma() must subtract E*eps*I at contact indices to compensate
-    for the Salpha shift.  Verify by checking that (E*S - F - sigma)
-    equals (E*S_mod - F - sigma_reg) where S_mod has the shifted diagonal."""
+def test_sigma_uses_s_modification_not_correction():
+    """With S-modification approach, sigma() should NOT contain the
+    -E*eps*I correction.  Instead g.S already has eps at contacts,
+    so G = [E*g.S - F - sigma_reg]^{-1} is correct directly."""
     N = 6
     n = 2
-    s = 0.8
     Salpha = np.eye(n, dtype=complex)
-    Sbeta = s * np.eye(n, dtype=complex)
+    Sbeta = 0.8 * np.eye(n, dtype=complex)
 
     F = np.zeros((N, N), dtype=complex)
     S = np.eye(N, dtype=complex)
     for i in range(N - 1):
         F[i, i + 1] = -1.0
         F[i + 1, i] = -1.0
-        S[i, i + 1] = s
-        S[i + 1, i] = s
 
     alpha = np.zeros((n, n), dtype=complex)
     beta = -1.0 * np.eye(n, dtype=complex)
@@ -459,29 +467,31 @@ def test_sigma_includes_overlap_correction():
               betas=[beta, beta],
               bOverlaps=[Sbeta.copy(), Sbeta.copy()])
 
-    # Build S_mod manually (what approach 1 would do)
-    S_mod = S.copy()
-    for i in range(2):
-        inds = g.indsList[i]
-        eps_i = g._overlap_eps[i]
-        ni = len(inds)
-        S_mod[np.ix_(inds, inds)] += eps_i * np.eye(ni)
-
-    # At several energies, check E*S - F - sigma_corr == E*S_mod - F - sigma_reg
-    # (sigma_corr already includes the -E*eps*I correction)
+    # sigma() at a real energy should NOT have the -E*eps*I term.
+    # Verify: the Green's function built from (g.S, sigma) matches
+    # the one built from (S_orig, sigma + correction).
+    from gauNEGF.utils import inv as jinv
+    eta = 1e-4
     for E in [-10.0, 0.0, 2.5]:
-        sigma_corr = np.array(g.sigmaTot(E))
-        mat_corr = E * S - F - sigma_corr
-        # Reconstruct sigma_reg by ADDING back the correction
-        sigma_reg = sigma_corr.copy()
+        sig = np.array(g.sigmaTot(E))
+
+        # Approach 1 (current): G = [E*S_mod - F - sigma_reg]^{-1}
+        S_mod = np.array(g.S)
+        Gr_1 = np.array(jinv(jnp.array((E + 1j*eta) * S_mod - F - sig)))
+
+        # Approach 2 equivalent: G = [(E+i*eta)*S_orig - F - (sigma_reg - (E+i*eta)*eps*I)]^{-1}
+        z = E + 1j*eta
+        S_orig = np.array(g.S_orig)
+        sig_corr = sig.copy()
         for i in range(2):
             inds = g.indsList[i]
             ni = len(inds)
-            sigma_reg[np.ix_(inds, inds)] += E * g._overlap_eps[i] * np.eye(ni)
-        mat_mod = E * S_mod - F - sigma_reg
+            sig_corr[np.ix_(inds, inds)] -= z * g._overlap_eps[i] * np.eye(ni)
+        Gr_2 = np.array(jinv(jnp.array(z * S_orig - F - sig_corr)))
+
         np.testing.assert_allclose(
-            mat_corr, mat_mod, atol=1e-10,
-            err_msg=f"E*S - F - sigma_corr must equal E*S_mod - F - sigma_reg at E={E}")
+            Gr_1, Gr_2, atol=1e-10,
+            err_msg=f"S-modification and sigma-correction must give same G at E={E}")
 
 
 def test_integer_transmission_with_large_overlap():

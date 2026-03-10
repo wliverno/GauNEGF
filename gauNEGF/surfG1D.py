@@ -126,6 +126,7 @@ class surfG:
         # Set up system
         self.F = jnp.array(Fock)
         self.S = jnp.array(Overlap)
+        self.S_orig = jnp.array(Overlap)
         self.spin = spin
         self.X = jnp.array(fractional_matrix_power(Overlap, -0.5))
         self.Xi = jnp.linalg.inv(self.X)
@@ -227,11 +228,16 @@ class surfG:
         For finite bandwidth (no spurious DOS tail), S(k) >= 0 for all k.
         Sufficient condition: min_eigval(Salpha) >= 2 * spectral_norm(Sbeta).
 
-        Applies a diagonal shift to aSList[i] if needed.  The shift is
-        stored in _overlap_eps[i] so sigma() can apply the correction
-        -E*eps*I to keep g.S unchanged (see docs/sigma_correction_proof.md).
+        Shifts both aSList[i] (contact overlap) and self.S (device overlap)
+        at the contact block.  This is the S-modification approach: the
+        device Green's function G = [E*S_mod - F - Sigma_reg]^{-1} uses the
+        modified overlap directly, and Tr(P @ S_mod) gives a consistent
+        electron count for the Fermi search.
+        See docs/infinite_chain_regularization.md for derivation.
         """
         import numpy as np
+        # Reset self.S so repeated calls (e.g. from setF) don't accumulate eps.
+        self.S = jnp.array(self.S_orig)
         self._overlap_eps = []
         for i in range(len(self.indsList)):
             Salpha = np.array(self.aSList[i])
@@ -246,6 +252,10 @@ class surfG:
                 if deficit > 0:
                     eps = deficit + 1e-10
                     self.aSList[i] = self.aSList[i] + eps * jnp.eye(n, dtype=self.aSList[i].dtype)
+                    inds = self.indsList[i]
+                    self.S = self.S.at[jnp.ix_(inds, inds)].add(
+                        eps * jnp.eye(n, dtype=self.S.dtype))
+                    print(f'Regularized contact {i}: eps = {eps:.4f}')
 
             self._overlap_eps.append(eps)
 
@@ -359,16 +369,15 @@ class surfG:
             self.setContacts()
             self._rejit()
         if not self.contactFromFock:
-            if self.fermiList[0] == None:
+            # Track chemical potentials but do NOT shift aList/bList.
+            # The retarded self-energy is independent of chemical potential;
+            # mu enters only through the Fermi function in density integration.
+            if self.fermiList[0] is None:
                 self.fermiList[0] = mu1
                 self.fermiList[-1] = mu2
             else:
-                for i,mu in zip([0,-1], [mu1, mu2]):
-                    fermi = self.fermiList[i]
-                    if fermi is not None and mu is not None and fermi != mu:
-                        dFermi = mu - fermi
-                        self.aList[i] = self.aList[i] + dFermi*jnp.eye(len(self.aList[i]))
-                        self.bList[i] = self.bList[i] + dFermi*self.bSList[i]
+                for i, mu in zip([0, -1], [mu1, mu2]):
+                    if mu is not None:
                         self.fermiList[i] = mu
 
     def sigma(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
@@ -405,11 +414,6 @@ class surfG:
         if stau is None:
             Xi_i = self.Xi[jnp.ix_(inds, inds)]
             sig = Xi_i @ sig @ Xi_i
-        # Overlap regularization correction: absorb Salpha shift into sigma
-        # so g.S stays unchanged.  See docs/sigma_correction_proof.md.
-        if self._overlap_eps[i] > 0:
-            n = sig.shape[0]
-            sig = sig - E * self._overlap_eps[i] * jnp.eye(n, dtype=sig.dtype)
         sigma = sigma.at[jnp.ix_(inds, inds)].add(sig)
         return sigma
 
