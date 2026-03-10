@@ -138,8 +138,6 @@ class NEGFE(NEGF):
 
         # Generate surfG() object for the molecule + contacts and initialize variables
         self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eta, self.spin)
-        # Propagate any overlap regularization back to the local S
-        self.S = np.array(self.g.S)
 
         if alphas is not None:
             muL = getFermi1DContact(self.g, neList[0], 0)

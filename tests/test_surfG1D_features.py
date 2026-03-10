@@ -400,9 +400,9 @@ def test_overlap_eps_zero_when_no_regularization_needed():
             f"eps[{i}] should be 0 when no regularization needed")
 
 
-def test_device_overlap_modified_at_contacts():
-    """g.S must include the eps shift at contact blocks (S-modification
-    approach).  g.S_orig must store the unmodified original."""
+def test_device_overlap_unchanged_after_regularization():
+    """g.S must remain the unmodified original overlap (sigma-correction
+    approach).  g.S_orig must also store the unmodified original."""
     N = 6
     n = 2
     Salpha = np.eye(n, dtype=complex)
@@ -430,21 +430,16 @@ def test_device_overlap_modified_at_contacts():
         np.array(g.S_orig), S, atol=1e-14,
         err_msg="g.S_orig must be the unmodified original overlap")
 
-    # g.S must have eps added at contact blocks
-    S_expected = S.copy()
-    for i, inds in enumerate([[0, 1], [4, 5]]):
-        eps_i = g._overlap_eps[i]
-        if eps_i > 0:
-            S_expected[np.ix_(inds, inds)] += eps_i * np.eye(n)
+    # g.S must also equal the original input (sigma-correction, not S-modification)
     np.testing.assert_allclose(
-        np.array(g.S), S_expected, atol=1e-14,
-        err_msg="g.S must include the eps shift at contact blocks")
+        np.array(g.S), S, atol=1e-14,
+        err_msg="g.S must be unchanged (sigma-correction approach, not S-modification)")
 
 
-def test_sigma_uses_s_modification_not_correction():
-    """With S-modification approach, sigma() should NOT contain the
-    -E*eps*I correction.  Instead g.S already has eps at contacts,
-    so G = [E*g.S - F - sigma_reg]^{-1} is correct directly."""
+def test_sigma_includes_overlap_correction():
+    """With sigma-correction approach, sigma() must include the -z*eps*I term
+    at contact blocks.  G = [z*S_orig - F - sigma_corr]^{-1} must equal
+    G = [z*S_mod - F - sigma_reg]^{-1} (equivalence proof)."""
     N = 6
     n = 2
     Salpha = np.eye(n, dtype=complex)
@@ -467,39 +462,50 @@ def test_sigma_uses_s_modification_not_correction():
               betas=[beta, beta],
               bOverlaps=[Sbeta.copy(), Sbeta.copy()])
 
-    # sigma() at a real energy should NOT have the -E*eps*I term.
-    # Verify: the Green's function built from (g.S, sigma) matches
-    # the one built from (S_orig, sigma + correction).
     from gauNEGF.utils import inv as jinv
-    eta = 1e-4
     for E in [-10.0, 0.0, 2.5]:
-        sig = np.array(g.sigmaTot(E))
+        sig_corr = np.array(g.sigmaTot(E))
+        z = E + 1j * g.eta
 
-        # Approach 1 (current): G = [E*S_mod - F - sigma_reg]^{-1}
-        S_mod = np.array(g.S)
-        Gr_1 = np.array(jinv(jnp.array((E + 1j*eta) * S_mod - F - sig)))
+        # Compute uncorrected sigma manually from surface GF
+        sig_uncorr = np.zeros((N, N), dtype=complex)
+        for ci in range(2):
+            inds = g.indsList[ci]
+            stau_i = g.stauList[ci]
+            tau_i = g.tauList[ci]
+            t = E * stau_i - tau_i
+            sig_raw = t @ np.array(g.g(E, ci)) @ t.conj().T
+            sig_uncorr[np.ix_(inds, inds)] += sig_raw
 
-        # Approach 2 equivalent: G = [(E+i*eta)*S_orig - F - (sigma_reg - (E+i*eta)*eps*I)]^{-1}
-        z = E + 1j*eta
-        S_orig = np.array(g.S_orig)
-        sig_corr = sig.copy()
-        for i in range(2):
-            inds = g.indsList[i]
-            ni = len(inds)
-            sig_corr[np.ix_(inds, inds)] -= z * g._overlap_eps[i] * np.eye(ni)
-        Gr_2 = np.array(jinv(jnp.array(z * S_orig - F - sig_corr)))
+        # Verify correction is included: sig_corr = sig_uncorr - z*eps*I at contacts
+        for ci in range(2):
+            inds = g.indsList[ci]
+            if g._overlap_eps[ci] != 0.0:
+                expected_diff = -z * g._overlap_eps[ci] * np.eye(len(inds))
+                actual_diff = sig_corr[np.ix_(inds, inds)] - sig_uncorr[np.ix_(inds, inds)]
+                np.testing.assert_allclose(
+                    actual_diff, expected_diff, atol=1e-10,
+                    err_msg=f"sigma must include -z*eps*I at contact {ci}, E={E}")
 
+        # Equivalence: G from (S_orig, sigma_corr) == G from (S_mod, sigma_uncorr)
+        S_orig = np.array(g.S)
+        Gr_1 = np.array(jinv(jnp.array(z * S_orig - F - sig_corr)))
+        S_mod = S_orig.copy()
+        for ci in range(2):
+            inds = g.indsList[ci]
+            S_mod[np.ix_(inds, inds)] += g._overlap_eps[ci] * np.eye(len(inds))
+        Gr_2 = np.array(jinv(jnp.array(z * S_mod - F - sig_uncorr)))
         np.testing.assert_allclose(
             Gr_1, Gr_2, atol=1e-10,
-            err_msg=f"S-modification and sigma-correction must give same G at E={E}")
+            err_msg=f"sigma-correction and S-modification must give same G at E={E}")
 
 
 def test_integer_transmission_with_large_overlap():
     """For a 2-cell device where both cells are contacts (device = repeating
     unit folded into both contacts), transmission must be integer even with
-    large overlap that triggers regularization.  The sigma correction ensures
-    the device-lead interface is transparent when every device cell gets the
-    same Salpha shift."""
+    large overlap that triggers regularization.  The S-modification approach
+    keeps the device-lead interface transparent when every device cell gets the
+    same Salpha shift via g.S."""
     from gauNEGF.utils import inv as jinv
 
     n = 2   # orbitals per unit cell
@@ -594,3 +600,184 @@ def test_dos_decays_at_large_negative_energy():
     dos = -np.imag(np.trace(Gr @ S_dev)) / np.pi
     assert dos < 0.01, (
         f"DOS at E={E} should be negligible after regularization, got {dos:.4f}")
+
+
+# ---------------------------------------------------------------------------
+# CNT (3,3) tests: integer transmission and Fermi energy with overlap
+# ---------------------------------------------------------------------------
+
+def _construct_cnt33(t):
+    """(3,3) armchair CNT tight-binding Hamiltonian, 12 atoms per unit cell.
+
+    Returns Haa (12x12 intra-cell) and Hab (12x12 inter-cell hopping).
+    Each carbon has exactly 3 bonds (sp2 lattice).
+    """
+    bonds = [(2,1),(3,4),(6,5),(7,8),(10,9),(11,0)]
+    Haa = np.zeros((12,12), dtype=complex)
+    for i in range(11):
+        Haa[i, i+1] = t
+    Haa[0, 11] = t
+    Haa += Haa.conj().T
+    Hab = np.zeros((12,12), dtype=complex)
+    for bond in bonds:
+        Hab[bond[0], bond[1]] = t
+    return Haa, Hab
+
+
+def _make_cnt33_surfg(t, s, eta=5e-4):
+    """2-cell (3,3) CNT surfG with nearest-neighbor overlap s per inter-cell bond.
+
+    Sb has the same bond pattern as Hab, scaled to give ||Sb||_2 = s.
+    For s < 0.5 no regularization is needed; for s > 0.5 eps > 0.
+    """
+    Haa, Hab = _construct_cnt33(t)
+    Sa = np.eye(12, dtype=complex)
+    Sb = (s / abs(t)) * np.abs(Hab).astype(complex)
+    F = np.block([[Haa, Hab], [Hab.conj().T, Haa]])
+    Sdev = np.block([[Sa, Sb], [Sb.T, Sa]])
+    return surfG(F, Sdev, [np.arange(12), np.arange(12, 24)],
+                 alphas=[Haa, Haa], aOverlaps=[Sa.copy(), Sa.copy()],
+                 taus=[Hab.conj().T, Hab], staus=[Sb.copy(), Sb.copy()],
+                 betas=[Hab.conj().T, Hab], bOverlaps=[Sb.copy(), Sb.copy()],
+                 eta=eta)
+
+
+def _T_cnt(g, E):
+    """Coherent transmission using g.S consistently."""
+    eta = 5e-4
+    S_g = np.array(g.S)
+    F_g = np.array(g.F)
+    sigL = np.array(g.sigma(E, 0))
+    sigR = np.array(g.sigma(E, 1))
+    Gr = np.linalg.inv((E + 1j*eta)*S_g - F_g - sigL - sigR)
+    GamL = 1j*(sigL - sigL.conj().T)
+    GamR = 1j*(sigR - sigR.conj().T)
+    return float(np.real(np.trace(GamL @ Gr @ GamR @ Gr.conj().T)))
+
+
+def test_cnt33_integer_transmission_with_overlap():
+    """(3,3) CNT with three overlap strengths: T(E=0) must be integer (~2).
+
+    The (3,3) armchair CNT is metallic with 2 channels at E=0.
+    This test verifies that adding nearest-neighbor overlap (with or without
+    regularization) preserves integer transmission when g.S is used for G_R.
+
+    - s=0.0: identity overlap, no regularization
+    - s=0.3: overlap below threshold (||Sb||_2=0.3 < 0.5), no regularization
+    - s=0.6: overlap above threshold (||Sb||_2=0.6 > 0.5), eps~0.2 applied
+    """
+    t = -2.7  # graphene/CNT hopping in eV
+
+    for s, expect_reg in [(0.0, False), (0.3, False), (0.6, True)]:
+        g = _make_cnt33_surfg(t=t, s=s)
+
+        if expect_reg:
+            assert all(eps > 0 for eps in g._overlap_eps), (
+                f"s={s}: expected regularization, got eps={g._overlap_eps}")
+        else:
+            assert g._overlap_eps == [0.0, 0.0], (
+                f"s={s}: no regularization expected, got eps={g._overlap_eps}")
+
+        T = _T_cnt(g, E=0.0)
+        assert abs(T - round(T)) < 0.05, (
+            f"s={s}: T(E=0)={T:.4f} not integer (expected 2)")
+        assert round(T) == 2, (
+            f"s={s}: T(E=0) rounds to {round(T)}, expected 2 channels")
+
+
+def test_cnt33_fermi_energy_with_overlap():
+    """(3,3) CNT: Fermi level from generalized eigenproblem stays near band midpoint.
+
+    For the half-filled metallic (3,3) CNT (24 states, 12 occupied), E_F is
+    the midpoint between the 12th and 13th eigenvalue of F c = E S c.
+    With s=0 this is exactly 0 by particle-hole symmetry.
+    With overlap the Fermi level shifts slightly but must stay within the band.
+    """
+    from scipy.linalg import eigh
+
+    t = -2.7
+    band_half_width = abs(t) * 3   # rough upper bound on |E_F|
+
+    for s in [0.0, 0.3, 0.6]:
+        g = _make_cnt33_surfg(t=t, s=s)
+        evals = eigh(np.array(g.F), np.array(g.S), eigvals_only=True)
+        E_F = float((evals[11] + evals[12]) / 2.0)
+
+        assert abs(E_F) < band_half_width, (
+            f"s={s}: Fermi energy {E_F:.4f} eV outside band [-{band_half_width}, {band_half_width}]")
+
+        # For s=0: particle-hole symmetry pins E_F exactly to 0
+        if s == 0.0:
+            assert abs(E_F) < 1e-10, f"s=0: E_F={E_F:.2e} should be exactly 0"
+
+
+# ---------------------------------------------------------------------------
+# Sigma-correction regression: half-filled 1D chain with high overlap
+# ---------------------------------------------------------------------------
+
+def test_1d_chain_high_overlap_transmission_and_fermi():
+    """Half-filled 1-orbital chain (Sbeta=0.8) with 4 unit cells.
+
+    Sbeta=0.8 triggers regularization (eps~0.6), exercising the sigma-correction
+    path.  Checks:
+    (a) Transmission inside the band is non-zero (single open channel).
+    (b) getFermi1DContact converges and returns E_F ≈ 0.
+        Analytic result: E(k=pi/2) = -2*cos(pi/2) / (1 + 1.6*cos(pi/2)) = 0
+        for any Sbeta, so E_F = 0 exactly for half-filling with alpha=0.
+    """
+    from gauNEGF.density import getFermi1DContact
+
+    n = 1
+    alpha = np.zeros((n, n), dtype=complex)
+    beta = -1.0 * np.eye(n, dtype=complex)
+    Salpha = np.eye(n, dtype=complex)
+    Sbeta = 0.8 * np.eye(n, dtype=complex)
+
+    # 4-cell device, contacts at first and last cell
+    n_cells = 4
+    N = n_cells * n
+    F = np.zeros((N, N), dtype=complex)
+    S = np.zeros((N, N), dtype=complex)
+    for c in range(n_cells):
+        F[c, c] = 0.0
+        S[c, c] = 1.0
+        if c < n_cells - 1:
+            F[c, c+1] = -1.0
+            F[c+1, c] = -1.0
+            S[c, c+1] = 0.8
+            S[c+1, c] = 0.8
+
+    g = surfG(F, S, [[0], [N-1]],
+              taus=[beta, beta],
+              staus=[Sbeta, Sbeta],
+              alphas=[alpha, alpha],
+              aOverlaps=[Salpha.copy(), Salpha.copy()],
+              betas=[beta, beta],
+              bOverlaps=[Sbeta.copy(), Sbeta.copy()])
+
+    assert any(eps > 0 for eps in g._overlap_eps), (
+        "Sbeta=0.8 should trigger regularization")
+    assert np.allclose(np.array(g.S), S), (
+        "g.S must be unchanged (sigma-correction approach)")
+
+    # (a) Transmission at E=0 should be non-zero (channel is open)
+    eta = 1e-4
+    S_g = np.array(g.S)
+    F_g = np.array(g.F)
+    sigL = np.array(g.sigma(0.0, 0))
+    sigR = np.array(g.sigma(0.0, 1))
+    Gr = np.linalg.inv((0.0 + 1j*eta)*S_g - F_g - sigL - sigR)
+    GamL = 1j*(sigL - sigL.conj().T)
+    GamR = 1j*(sigR - sigR.conj().T)
+    T = float(np.real(np.trace(GamL @ Gr @ GamR @ Gr.conj().T)))
+    assert T > 0.1, f"T(E=0)={T:.4f} should be non-zero for open channel"
+    assert T <= 1.05, f"T(E=0)={T:.4f} should be <= 1 channel"
+
+    # (b) Fermi search: ne=0.5 fills half the spinless band (k_F = pi/2).
+    # Analytic: E(k=pi/2) = -2*cos(pi/2) / (S_alpha + 2*S_beta*cos(pi/2)) = 0
+    # for any Sbeta when alpha=0.
+    fermi = getFermi1DContact(g, ne=0.5, ind=0)
+    assert abs(fermi) < 0.1, (
+        f"E_F={fermi:.4f} eV, expected ~0 for spinless half-band fill with alpha=0")
+
+
