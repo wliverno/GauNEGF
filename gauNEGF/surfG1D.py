@@ -153,10 +153,10 @@ class surfG:
         # Set up contact information
         if alphas is None:
             self.contactFromFock = True
-            self.setContacts()
+            self._setContacts()
         else:
             self.contactFromFock = False
-            self.setContacts(alphas, aOverlaps, betas, bOverlaps)
+            self._setContacts(alphas, aOverlaps, betas, bOverlaps)
             self.fermiList = [None]*len(indsList)
         
         # Set up broadening for retarded/advanced Green's function, initialize g
@@ -171,40 +171,19 @@ class surfG:
         self._rejit()
 
     
-    def setContacts(self, alphas=None, aOverlaps=None, betas=None, bOverlaps=None):
-        """
-        Update contact parameters for the 1D chain.
+    def _setContacts(self, alphas=None, aOverlaps=None, betas=None, bOverlaps=None):
+        """Internal: build aList/aSList/bList/bSList and regularize contacts.
 
-        This method is used internally during initialization and can be called
-        later to update contact parameters. It follows the same patterns as
-        initialization:
-
-        a) If self.contactFromFock is True (patterns a and b):
-           - Parameters are extracted from F/S matrices
-           - Any provided parameters are ignored
-
-        b) If self.contactFromFock is False (pattern c):
-           - alphas and betas must be provided
-           - aOverlaps=None defaults to identity (orthonormal onsite)
-           - bOverlaps=None defaults to zeros (orthonormal hopping)
-
-        Parameters
-        ----------
-        alphas : list of ndarray or None, optional
-            On-site energies for contacts (default: None)
-        aOverlaps : list of ndarray or None, optional
-            On-site overlap matrices; defaults to identity when None
-        betas : list of ndarray or None, optional
-            Hopping matrices between contact unit cells (default: None)
-        bOverlaps : list of ndarray or None, optional
-            Overlap matrices between contact unit cells; defaults to zeros when None
+        contactFromFock=True: extracts alpha/Salpha from self.F and self.S_orig.
+        contactFromFock=False: uses provided alphas/aOverlaps/betas/bOverlaps.
+        Calls _regularizeContacts() after setting lists.
         """
         if self.contactFromFock:
             alphas = []
             aOverlaps = []
             for inds in self.indsList:
                 alphas.append(self.F[jnp.ix_(inds, inds)])
-                aOverlaps.append(self.S[jnp.ix_(inds, inds)])
+                aOverlaps.append(self.S_orig[jnp.ix_(inds, inds)])
             self.aList = alphas
             self.aSList = aOverlaps
             self.bList = [jnp.array(tau) for tau in self.tauList]
@@ -263,7 +242,7 @@ class surfG:
         """Recompile g and sigma to pick up updated contact parameters.
 
         JAX JIT caches compiled functions keyed on shape/dtype of closed-over
-        arrays, not their values. After setF/setContacts change aList/bList,
+        arrays, not their values. After setF/_setContacts change aList/bList,
         creating fresh JIT wrappers forces a re-trace on next call.
         self.__class__.g always refers to the original class method regardless
         of what self.g currently points to (instance vs class attribute).
@@ -366,7 +345,7 @@ class surfG:
             self.stauList = stau_temp
         if self.contactFromFock:
             # Rebuild aList/bList from new F and re-trace JIT'd functions
-            self.setContacts()
+            self._setContacts()
             self._rejit()
         if not self.contactFromFock:
             # Track chemical potentials but do NOT shift aList/bList.
