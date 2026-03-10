@@ -1037,12 +1037,15 @@ def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INT
     return calcFermi(g, ne, Emin, Ef, lBound=lBound, uBound=uBound,
                     tol=tol, conv=conv, maxcycles=maxcycles, T=T, nOrbs=nOrbs)
 
-def getFermi1DContact(gSys, ne, ind=0, tol=FERMI_CALCULATION_TOL, Eminf=ENERGY_MIN, T=TEMPERATURE, maxcycles=MAX_CYCLES):
+def getFermi1DContact(gSys, ne, ind=0, tol=FERMI_CALCULATION_TOL, T=TEMPERATURE, maxcycles=MAX_CYCLES):
     """
     Calculate Fermi energy for a 1D chain contact.
 
-    Specialized version of getFermiContact for 1D chain contacts, handling
-    the periodic boundary conditions correctly.
+    Builds a 3-cell [L, R, C] model (C center, last) with semi-infinite contacts
+    at L and R.  The Mulliken charge of C is Tr((P@S3)[C,C]), which includes
+    contributions from both left and right Sbeta neighbors, giving the correct
+    bulk electron count for non-orthogonal bases.  Adaptive complex contour
+    integration is used for the bisection.
 
     Parameters
     ----------
@@ -1053,39 +1056,53 @@ def getFermi1DContact(gSys, ne, ind=0, tol=FERMI_CALCULATION_TOL, Eminf=ENERGY_M
     ind : int, optional
         Contact index (0 for left, -1 for right) (default: 0)
     tol : float, optional
-        Convergence tolerance (default: 1e-4)
-    Eminf : float, optional
-        Lower bound for integration (default: -1e6)
+        Convergence tolerance (default: FERMI_CALCULATION_TOL)
+    T : float, optional
+        Temperature in Kelvin (default: TEMPERATURE)
     maxcycles : int, optional
-        Maximum number of iterations (default: 1000)
+        Maximum number of bisection iterations (default: MAX_CYCLES)
 
     Returns
     -------
-    tuple
-        (fermi, Emin, N1, N2) - Optimized parameters:
-        - fermi: Calculated Fermi energy in eV
-        - Emin: Lower bound for complex contour
-        - N1: Number of complex contour points
-        - N2: Number of real axis points
+    float
+        Fermi energy in eV
     """
-    # Set up infinite system from contact
     F = gSys.aList[ind]
-    S = gSys.aSList[ind]
     tau = gSys.bList[ind]
     stau = gSys.bSList[ind]
-    inds = np.arange(len(F))
-    g = surfG(F, S, [inds], [tau], [stau], eta=1e-6)
+    n = len(F)
+    # Recover original (unregularized) Salpha: aSList[ind] has eps added in-place
+    # by _regularizeContacts. Subtract it back so g3 uses physical S for density
+    # counting (Tr(P @ S_phys) = ne) and applies its own sigma correction.
+    eps_i = gSys._overlap_eps[ind]
+    S = gSys.aSList[ind] - eps_i * jnp.eye(n, dtype=gSys.aSList[ind].dtype)
+    inds = np.arange(n)
+    z = jnp.zeros_like(F)
+    zs = jnp.zeros_like(stau)
 
-    # Initial guess and integral setup using two layers
-    Forbs = np.block([[F, tau], [tau.conj().T, F]])
-    Sorbs = np.block([[S, stau], [stau.T, S]])
-    gorbs = surfG(Forbs, Sorbs, [inds], [tau], [stau], eta=1e-6)
-    orbs, _ = jnp.linalg.eigh(jnp.linalg.inv(Sorbs)@Forbs)
-    orbs = np.sort(np.real(orbs))
-    fermi = (orbs[2*int(ne)-1] + orbs[2*int(ne)])/2
-    Emin, N1, N2 = integralFit(Forbs, Sorbs, gorbs, fermi, Eminf, tol, T, maxN=maxcycles)
-    Emax = max(orbs)
-    return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, Eminf, T, tol, maxcycles)
+    # 3-cell [L, R, C] system -- C is last so calcFermi's nOrbs=n
+    # extracts the center-cell Mulliken charge including both Sbeta neighbors.
+    F3 = jnp.block([[F,            z,            tau          ],
+                    [z,            F,            tau.conj().T ],
+                    [tau.conj().T, tau,          F            ]])
+    S3 = jnp.block([[S,             zs,            stau         ],
+                    [zs,            S,             stau.conj().T],
+                    [stau.conj().T, stau,          S            ]])
+    g3 = surfG(F3, S3, [inds, inds + n], [tau, tau], [stau, stau], eta=1e-6)
+
+    # Initial Fermi guess from 3-cell generalized eigenvalues
+    orbs3, _ = eigh(inv(S3) @ F3)
+    orbs3 = np.sort(np.real(orbs3))
+    ne3_int = int(round(3.0 * ne))
+    if 0 < ne3_int < len(orbs3):
+        fermi = (orbs3[ne3_int - 1] + orbs3[ne3_int]) / 2
+    else:
+        fermi = float(orbs3[-1])  # half-filled edge case: all 3-cell states filled
+
+    Emin = float(orbs3[0]) - 1.0
+    Emax = float(orbs3[-1])
+    return calcFermi(g3, ne, Emin, fermi, lBound=Emin, uBound=Emax,
+                     tol=tol, maxcycles=maxcycles, T=T, nOrbs=n)
 
 # Calculate the fermi energy of the surface Green's Function object
 def calcFermi(g, ne, Emin, Ef, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATION_TOL,

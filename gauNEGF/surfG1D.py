@@ -207,16 +207,15 @@ class surfG:
         For finite bandwidth (no spurious DOS tail), S(k) >= 0 for all k.
         Sufficient condition: min_eigval(Salpha) >= 2 * spectral_norm(Sbeta).
 
-        Shifts both aSList[i] (contact overlap) and self.S (device overlap)
-        at the contact block.  This is the S-modification approach: the
-        device Green's function G = [E*S_mod - F - Sigma_reg]^{-1} uses the
-        modified overlap directly, and Tr(P @ S_mod) gives a consistent
-        electron count for the Fermi search.
+        Shifts aSList[i] (contact overlap) to ensure the lead surface GF
+        converges.  This is the sigma-correction approach: self.S is NOT
+        modified.  Instead sigma() subtracts z*eps*I at the contact block so
+        that G = [z*S_orig - F - Sigma_corr]^{-1} is equivalent to the
+        regularized lead.
         See docs/infinite_chain_regularization.md for derivation.
         """
         import numpy as np
-        # Reset self.S so repeated calls (e.g. from setF) don't accumulate eps.
-        self.S = jnp.array(self.S_orig)
+        first_call = not hasattr(self, '_overlap_eps')
         self._overlap_eps = []
         for i in range(len(self.indsList)):
             Salpha = np.array(self.aSList[i])
@@ -228,13 +227,11 @@ class surfG:
                 sigma_max = np.linalg.norm(Sbeta, ord=2)
                 lmin = np.linalg.eigvalsh(Salpha)[0]
                 deficit = 2 * sigma_max - lmin
-                if deficit > 0:
-                    eps = deficit + 1e-10
+                if deficit > 1e-6:
+                    eps = deficit + 1e-6
                     self.aSList[i] = self.aSList[i] + eps * jnp.eye(n, dtype=self.aSList[i].dtype)
-                    inds = self.indsList[i]
-                    self.S = self.S.at[jnp.ix_(inds, inds)].add(
-                        eps * jnp.eye(n, dtype=self.S.dtype))
-                    print(f'Regularized contact {i}: eps = {eps:.4f}')
+                    if first_call:
+                        print(f'Contact overlap regularized (contact {i}): eps = {eps:.4e}')
 
             self._overlap_eps.append(eps)
 
@@ -394,6 +391,12 @@ class surfG:
             Xi_i = self.Xi[jnp.ix_(inds, inds)]
             sig = Xi_i @ sig @ Xi_i
         sigma = sigma.at[jnp.ix_(inds, inds)].add(sig)
+        eps_i = self._overlap_eps[i]
+        if eps_i != 0.0:
+            n_i = len(inds)
+            z = E + 1j * self.eta
+            sigma = sigma.at[jnp.ix_(inds, inds)].add(
+                -z * eps_i * jnp.eye(n_i, dtype=sigma.dtype))
         return sigma
 
     def sigmaTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
