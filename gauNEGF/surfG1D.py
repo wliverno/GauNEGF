@@ -5,7 +5,8 @@ import jax.lax as lax
 from jax import jit
 
 # Configuration
-from gauNEGF.config import (ETA, SURFACE_GREEN_CONVERGENCE, SURFACE_RELAXATION_FACTOR)
+from gauNEGF.config import (ETA, SURFACE_GREEN_CONVERGENCE, SURFACE_RELAXATION_FACTOR,
+                             OVERLAP_EIGENVALUE_RATIO)
 from gauNEGF.utils import fractional_matrix_power, inv
 
 #Constants
@@ -200,40 +201,45 @@ class surfG:
         self._regularizeContacts()
 
     def _regularizeContacts(self):
-        """Ensure the infinite chain overlap is PSD for all Bloch k-vectors.
+        """Ensure the infinite chain overlap is PSD via congruent eigenvalue clipping.
 
-        The semi-infinite lead overlap has Fourier symbol:
-            S(k) = Salpha + Sbeta*exp(ik) + Sbeta^H*exp(-ik)
-        For finite bandwidth (no spurious DOS tail), S(k) >= 0 for all k.
-        Sufficient condition: min_eigval(Salpha) >= 2 * spectral_norm(Sbeta).
+        For each contact i, diagonalizes S0 = aSList[i]. If the minimum eigenvalue
+        is already >= OVERLAP_EIGENVALUE_RATIO * max(eigenvalue), no transform is
+        applied. Otherwise builds a congruence transform C that floors small
+        eigenvalues and applies C' @ X @ C to all four contact matrices in-place:
+            aSList[i], aList[i], bSList[i], bList[i]
 
-        Shifts aSList[i] (contact overlap) to ensure the lead surface GF
-        converges.  This is the sigma-correction approach: self.S is NOT
-        modified.  Instead sigma() subtracts z*eps*I at the contact block so
-        that G = [z*S_orig - F - Sigma_corr]^{-1} is equivalent to the
-        regularized lead.
-        See docs/infinite_chain_regularization.md for derivation.
+        This keeps the basis dimension unchanged and each basis vector as close as
+        possible to an original orbital. No downstream sigma correction is needed.
+        See docs/plans/2026-03-10-congruent-clipping-design.md.
         """
         import numpy as np
-        first_call = not hasattr(self, '_overlap_eps')
-        self._overlap_eps = []
         for i in range(len(self.indsList)):
-            Salpha = np.array(self.aSList[i])
-            n = Salpha.shape[0]
-            eps = 0.0
+            S0 = np.array(self.aSList[i])
+            n = S0.shape[0]
+            eigvals, U = np.linalg.eigh(S0)
+            lam_max = float(eigvals[-1])
+            lam_min_thresh = OVERLAP_EIGENVALUE_RATIO * lam_max
 
-            Sbeta = np.array(self.bSList[i])
-            if Sbeta.shape[0] == Sbeta.shape[1] == n:
-                sigma_max = np.linalg.norm(Sbeta, ord=2)
-                lmin = np.linalg.eigvalsh(Salpha)[0]
-                deficit = 2 * sigma_max - lmin
-                if deficit > 1e-6:
-                    eps = deficit + 1e-6
-                    self.aSList[i] = self.aSList[i] + eps * jnp.eye(n, dtype=self.aSList[i].dtype)
-                    if first_call:
-                        print(f'Contact overlap regularized (contact {i}): eps = {eps:.4e}')
+            if float(eigvals[0]) >= lam_min_thresh:
+                # Already PSD -- no transform needed
+                continue
 
-            self._overlap_eps.append(eps)
+            lam_prime = np.maximum(eigvals, lam_min_thresh)
+            C = U @ np.diag(np.sqrt(lam_prime / eigvals))
+            C = C.astype(self.aSList[i].dtype)
+
+            H0 = np.array(self.aList[i])
+            H1 = np.array(self.bList[i])
+            S1 = np.array(self.bSList[i])
+
+            self.aSList[i] = jnp.array(C.conj().T @ S0 @ C)
+            self.aList[i]  = jnp.array(C.conj().T @ H0 @ C)
+            self.bSList[i] = jnp.array(C.conj().T @ S1 @ C)
+            self.bList[i]  = jnp.array(C.conj().T @ H1 @ C)
+
+            print(f'Contact overlap regularized (contact {i}): '
+                  f'min_eig {eigvals[0]:.4e} -> {lam_min_thresh:.4e}')
 
     def _rejit(self):
         """Recompile g and sigma to pick up updated contact parameters.
@@ -391,12 +397,6 @@ class surfG:
             Xi_i = self.Xi[jnp.ix_(inds, inds)]
             sig = Xi_i @ sig @ Xi_i
         sigma = sigma.at[jnp.ix_(inds, inds)].add(sig)
-        eps_i = self._overlap_eps[i]
-        if eps_i != 0.0:
-            n_i = len(inds)
-            z = E + 1j * self.eta
-            sigma = sigma.at[jnp.ix_(inds, inds)].add(
-                -z * eps_i * jnp.eye(n_i, dtype=sigma.dtype))
         return sigma
 
     def sigmaTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
