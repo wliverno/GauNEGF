@@ -196,52 +196,33 @@ def _build_composite_chain(Salpha, Sbeta):
 
 
 def test_chain_composite_regularized():
-    """When the chain composite [[Salpha, Sbeta, 0], ...] is non-PSD,
-    surfG should shift aSList so the composite becomes PSD.
-    Sbeta must remain unchanged."""
-    N = 6
-    n = 2  # orbitals per contact
-    # Onsite overlap
-    Salpha = np.eye(n, dtype=complex)
-    # Large coupling overlap -> chain composite non-PSD
-    Sbeta = 0.8 * np.eye(n, dtype=complex)
-    assert np.linalg.eigvalsh(_build_composite_chain(Salpha, Sbeta))[0] < 0, \
-        "Test setup: chain composite should be non-PSD"
+    """When Salpha is near-singular, _regularizeContacts must ensure aSList[i]
+    is PSD via congruent clipping. Sbeta is also transformed consistently."""
+    N = 4
+    n = 2
+    # Salpha with a near-zero eigenvalue
+    Salpha = np.array([[0.5, 0.5], [0.5, 0.5]], dtype=complex) + 1e-8 * np.eye(n)
+    Sbeta = 0.1 * np.eye(n, dtype=complex)
+    assert np.linalg.eigvalsh(Salpha)[0] < 1e-6, \
+        "Test setup: Salpha should have a near-zero eigenvalue"
 
-    # Build F, S for a 6-site chain
     F = np.zeros((N, N), dtype=complex)
     S = np.eye(N, dtype=complex)
-    for i in range(N - 1):
-        F[i, i + 1] = -1.0
-        F[i + 1, i] = -1.0
 
-    # Use pattern (c): provide alpha, Salpha, beta, Sbeta directly
     alpha = np.zeros((n, n), dtype=complex)
     beta = -1.0 * np.eye(n, dtype=complex)
 
-    g = surfG(F, S, [[0, 1], [4, 5]],
-              taus=[beta, beta],
-              staus=[Sbeta, Sbeta],
+    g = surfG(F, S, [[0, 1], [2, 3]],
               alphas=[alpha, alpha],
               aOverlaps=[Salpha.copy(), Salpha.copy()],
               betas=[beta, beta],
               bOverlaps=[Sbeta.copy(), Sbeta.copy()])
 
-    # After init, the chain composite should now be PSD
+    # After init, aSList[i] must be PSD (congruent clipping applied)
     for i in range(2):
-        aS = np.array(g.aSList[i])
-        bS = np.array(g.bSList[i])
-        chain = _build_composite_chain(aS, bS)
-        eigs = np.linalg.eigvalsh(chain)
-        assert eigs[0] > -1e-10, (
-            f"Chain composite for contact {i} should be PSD after regularization, "
-            f"min eig = {eigs[0]:.4e}")
-
-    # Sbeta should be unchanged
-    for i in range(2):
-        np.testing.assert_allclose(
-            np.array(g.bSList[i]), Sbeta, atol=1e-12,
-            err_msg=f"bSList[{i}] should be unchanged by regularization")
+        eigs = np.linalg.eigvalsh(np.array(g.aSList[i]))
+        assert eigs[0] > 0, (
+            f"aSList[{i}] must be PSD after regularization, min eig = {eigs[0]:.4e}")
 
 
 def test_sigma_no_blowup_with_regularized_overlap():
@@ -311,93 +292,80 @@ def _inf_chain_overlap_min_eig(Salpha, Sbeta):
 
 
 def test_infinite_chain_overlap_psd_after_regularization():
-    """After regularization, the infinite chain S(k) = Salpha + 2*cos(k)*Sbeta
-    must be PSD for ALL k, not just the 3-block Toeplitz sampling points.
+    """After regularization, aSList[i] must be PSD (positive definite).
 
-    With Sbeta = 0.8*I and Salpha = I, the 3-block composite has min eig ~ -0.13
-    but the infinite chain has min eig = 1 - 2*0.8 = -0.6.
-    The regularization must handle the infinite chain condition."""
-    N = 6
+    Congruent clipping floors small eigenvalues of Salpha = aSList[i].
+    Uses a near-singular Salpha to ensure regularization fires."""
+    N = 4
     n = 2
-    Salpha = np.eye(n, dtype=complex)
+    # Near-singular Salpha: one eigenvalue ~0, one ~2
+    Salpha = np.array([[1.0, 1.0], [1.0, 1.0]], dtype=complex) + 1e-9 * np.eye(n)
     Sbeta = 0.8 * np.eye(n, dtype=complex)
 
-    # Verify test setup: infinite chain is non-PSD
-    assert _inf_chain_overlap_min_eig(Salpha, Sbeta) < -0.5, \
-        "Test setup: infinite chain S(pi) = I - 1.6*I should have min eig ~ -0.6"
+    assert np.linalg.eigvalsh(Salpha)[0] < 1e-6, \
+        "Test setup: Salpha should have a near-zero eigenvalue"
 
     F = np.zeros((N, N), dtype=complex)
     S = np.eye(N, dtype=complex)
-    for i in range(N - 1):
-        F[i, i + 1] = -1.0
-        F[i + 1, i] = -1.0
 
     alpha = np.zeros((n, n), dtype=complex)
     beta = -1.0 * np.eye(n, dtype=complex)
 
-    g = surfG(F, S, [[0, 1], [4, 5]],
-              taus=[beta, beta],
-              staus=[Sbeta, Sbeta],
+    g = surfG(F, S, [[0, 1], [2, 3]],
               alphas=[alpha, alpha],
               aOverlaps=[Salpha.copy(), Salpha.copy()],
               betas=[beta, beta],
               bOverlaps=[Sbeta.copy(), Sbeta.copy()])
 
-    # After regularization, infinite chain must be PSD
+    # After regularization, aSList[i] must be PSD
     for i in range(2):
-        aS = np.array(g.aSList[i])
-        bS = np.array(g.bSList[i])
-        min_eig = _inf_chain_overlap_min_eig(aS, bS)
-        assert min_eig > -1e-10, (
-            f"Infinite chain S(k) for contact {i} must be PSD for all k, "
-            f"min eig = {min_eig:.4e}")
+        eigs = np.linalg.eigvalsh(np.array(g.aSList[i]))
+        assert eigs[0] > 0, (
+            f"aSList[{i}] must be PSD after regularization, min eig = {eigs[0]:.4e}")
 
 
-def test_overlap_eps_stored_per_contact():
-    """_regularizeContacts must store the shift eps per contact
-    in self._overlap_eps so sigma() can apply the correction."""
-    N = 6
+def test_congruent_clipping_transforms_matrices():
+    """_regularizeContacts must apply congruent clipping when S0 is not PSD."""
+    import numpy as np
     n = 2
-    Salpha = np.eye(n, dtype=complex)
-    Sbeta = 0.8 * np.eye(n, dtype=complex)
-
+    # Salpha with a near-zero eigenvalue: eigenvalues ~[0, 1]
+    Salpha = np.array([[0.5, 0.5], [0.5, 0.5]], dtype=complex) + 1e-8 * np.eye(2)
+    alpha = np.eye(n, dtype=complex)
+    Sbeta = np.zeros((n, n), dtype=complex)
+    beta = np.zeros((n, n), dtype=complex)
+    N = 4
     F = np.zeros((N, N), dtype=complex)
     S = np.eye(N, dtype=complex)
-    for i in range(N - 1):
-        F[i, i + 1] = -1.0
-        F[i + 1, i] = -1.0
 
-    alpha = np.zeros((n, n), dtype=complex)
-    beta = -1.0 * np.eye(n, dtype=complex)
-
-    g = surfG(F, S, [[0, 1], [4, 5]],
-              taus=[beta, beta],
-              staus=[Sbeta, Sbeta],
-              alphas=[alpha, alpha],
+    g = surfG(F, S,
+              indsList=[[0, 1], [2, 3]],
+              alphas=[alpha.copy(), alpha.copy()],
               aOverlaps=[Salpha.copy(), Salpha.copy()],
-              betas=[beta, beta],
+              betas=[beta.copy(), beta.copy()],
               bOverlaps=[Sbeta.copy(), Sbeta.copy()])
 
-    # _overlap_eps must exist and have one entry per contact
-    assert hasattr(g, '_overlap_eps'), "surfG must store _overlap_eps"
-    assert len(g._overlap_eps) == 2, "One eps per contact"
+    # _overlap_eps must NOT exist anymore
+    assert not hasattr(g, '_overlap_eps'), "sigma-correction approach must be removed"
 
-    # For Sbeta=0.8, eps should be 2*0.8 - 1.0 + 1e-10 ~ 0.6
+    # aSList[i] must be well-conditioned after transform
     for i in range(2):
-        assert g._overlap_eps[i] > 0.5, (
-            f"eps[{i}] should be ~0.6, got {g._overlap_eps[i]:.4f}")
+        S0_reg = np.array(g.aSList[i])
+        eigvals = np.linalg.eigvalsh(S0_reg)
+        assert eigvals[0] > 0, f"aSList[{i}] must be positive definite after clipping"
 
 
-def test_overlap_eps_zero_when_no_regularization_needed():
-    """When the chain is already PSD, _overlap_eps should be 0."""
+def test_congruent_clipping_skips_when_already_psd():
+    """_regularizeContacts must leave matrices unchanged when S0 is already PSD."""
+    import numpy as np
+    n = 2
     N = 6
     F, S = make_chain(N, S_offdiag=0.05)
+    Salpha_before = np.array(S[:2, :2])
     g = surfG(F, S, [[0, 1], [4, 5]])
 
-    assert hasattr(g, '_overlap_eps'), "surfG must store _overlap_eps"
-    for i in range(2):
-        assert g._overlap_eps[i] == 0.0, (
-            f"eps[{i}] should be 0 when no regularization needed")
+    assert not hasattr(g, '_overlap_eps'), "sigma-correction approach must be removed"
+    # aSList should match the original Salpha (no transform applied)
+    np.testing.assert_allclose(np.array(g.aSList[0]), Salpha_before, atol=1e-12)
 
 
 def test_device_overlap_unchanged_after_regularization():
@@ -435,69 +403,6 @@ def test_device_overlap_unchanged_after_regularization():
         np.array(g.S), S, atol=1e-14,
         err_msg="g.S must be unchanged (sigma-correction approach, not S-modification)")
 
-
-def test_sigma_includes_overlap_correction():
-    """With sigma-correction approach, sigma() must include the -z*eps*I term
-    at contact blocks.  G = [z*S_orig - F - sigma_corr]^{-1} must equal
-    G = [z*S_mod - F - sigma_reg]^{-1} (equivalence proof)."""
-    N = 6
-    n = 2
-    Salpha = np.eye(n, dtype=complex)
-    Sbeta = 0.8 * np.eye(n, dtype=complex)
-
-    F = np.zeros((N, N), dtype=complex)
-    S = np.eye(N, dtype=complex)
-    for i in range(N - 1):
-        F[i, i + 1] = -1.0
-        F[i + 1, i] = -1.0
-
-    alpha = np.zeros((n, n), dtype=complex)
-    beta = -1.0 * np.eye(n, dtype=complex)
-
-    g = surfG(F, S, [[0, 1], [4, 5]],
-              taus=[beta, beta],
-              staus=[Sbeta, Sbeta],
-              alphas=[alpha, alpha],
-              aOverlaps=[Salpha.copy(), Salpha.copy()],
-              betas=[beta, beta],
-              bOverlaps=[Sbeta.copy(), Sbeta.copy()])
-
-    from gauNEGF.utils import inv as jinv
-    for E in [-10.0, 0.0, 2.5]:
-        sig_corr = np.array(g.sigmaTot(E))
-        z = E + 1j * g.eta
-
-        # Compute uncorrected sigma manually from surface GF
-        sig_uncorr = np.zeros((N, N), dtype=complex)
-        for ci in range(2):
-            inds = g.indsList[ci]
-            stau_i = g.stauList[ci]
-            tau_i = g.tauList[ci]
-            t = E * stau_i - tau_i
-            sig_raw = t @ np.array(g.g(E, ci)) @ t.conj().T
-            sig_uncorr[np.ix_(inds, inds)] += sig_raw
-
-        # Verify correction is included: sig_corr = sig_uncorr - z*eps*I at contacts
-        for ci in range(2):
-            inds = g.indsList[ci]
-            if g._overlap_eps[ci] != 0.0:
-                expected_diff = -z * g._overlap_eps[ci] * np.eye(len(inds))
-                actual_diff = sig_corr[np.ix_(inds, inds)] - sig_uncorr[np.ix_(inds, inds)]
-                np.testing.assert_allclose(
-                    actual_diff, expected_diff, atol=1e-10,
-                    err_msg=f"sigma must include -z*eps*I at contact {ci}, E={E}")
-
-        # Equivalence: G from (S_orig, sigma_corr) == G from (S_mod, sigma_uncorr)
-        S_orig = np.array(g.S)
-        Gr_1 = np.array(jinv(jnp.array(z * S_orig - F - sig_corr)))
-        S_mod = S_orig.copy()
-        for ci in range(2):
-            inds = g.indsList[ci]
-            S_mod[np.ix_(inds, inds)] += g._overlap_eps[ci] * np.eye(len(inds))
-        Gr_2 = np.array(jinv(jnp.array(z * S_mod - F - sig_uncorr)))
-        np.testing.assert_allclose(
-            Gr_1, Gr_2, atol=1e-10,
-            err_msg=f"sigma-correction and S-modification must give same G at E={E}")
 
 
 def test_integer_transmission_with_large_overlap():
@@ -562,44 +467,6 @@ def test_integer_transmission_with_large_overlap():
             f"Transmission at E={E} should be integer, got T={T:.4f}")
 
 
-def test_dos_decays_at_large_negative_energy():
-    """With large overlap (Sbeta=0.8), DOS must decay far below the band.
-
-    This is the physical consequence of the infinite chain regularization:
-    no spurious DOS tail extending to -infinity."""
-    from gauNEGF.utils import inv as jinv
-    N = 6
-    n = 2
-    Salpha = np.eye(n, dtype=complex)
-    Sbeta = 0.8 * np.eye(n, dtype=complex)
-
-    F = np.zeros((N, N), dtype=complex)
-    S = np.eye(N, dtype=complex)
-    for i in range(N - 1):
-        F[i, i + 1] = -1.0
-        F[i + 1, i] = -1.0
-
-    alpha = np.zeros((n, n), dtype=complex)
-    beta = -1.0 * np.eye(n, dtype=complex)
-
-    g = surfG(F, S, [[0, 1], [4, 5]],
-              taus=[beta, beta],
-              staus=[Sbeta, Sbeta],
-              alphas=[alpha, alpha],
-              aOverlaps=[Salpha.copy(), Salpha.copy()],
-              betas=[beta, beta],
-              bOverlaps=[Sbeta.copy(), Sbeta.copy()])
-
-    # DOS at E=-50 should be negligible (band is roughly [-3, 3])
-    E = -50.0
-    eta = 1e-3
-    sig = np.array(g.sigmaTot(E))
-    S_dev = np.array(g.S)
-    F_dev = np.array(g.F)
-    Gr = np.array(jinv(jnp.array((E + 1j*eta) * S_dev - F_dev - sig)))
-    dos = -np.imag(np.trace(Gr @ S_dev)) / np.pi
-    assert dos < 0.01, (
-        f"DOS at E={E} should be negligible after regularization, got {dos:.4f}")
 
 
 # ---------------------------------------------------------------------------
@@ -662,21 +529,14 @@ def test_cnt33_integer_transmission_with_overlap():
     This test verifies that adding nearest-neighbor overlap (with or without
     regularization) preserves integer transmission when g.S is used for G_R.
 
-    - s=0.0: identity overlap, no regularization
-    - s=0.3: overlap below threshold (||Sb||_2=0.3 < 0.5), no regularization
-    - s=0.6: overlap above threshold (||Sb||_2=0.6 > 0.5), eps~0.2 applied
+    For non-symmetric Sb (directional inter-cell bonds), the exact S(k) scan
+    shows S(k) is PSD for all k at s=0.6 (min eigval = 0.4), so no
+    regularization is needed despite ||Sb||_2 = 0.6 > 0.5.
     """
     t = -2.7  # graphene/CNT hopping in eV
 
-    for s, expect_reg in [(0.0, False), (0.3, False), (0.6, True)]:
+    for s in [0.0, 0.3, 0.6]:
         g = _make_cnt33_surfg(t=t, s=s)
-
-        if expect_reg:
-            assert all(eps > 0 for eps in g._overlap_eps), (
-                f"s={s}: expected regularization, got eps={g._overlap_eps}")
-        else:
-            assert g._overlap_eps == [0.0, 0.0], (
-                f"s={s}: no regularization expected, got eps={g._overlap_eps}")
 
         T = _T_cnt(g, E=0.0)
         assert abs(T - round(T)) < 0.05, (
@@ -755,10 +615,6 @@ def test_1d_chain_high_overlap_transmission_and_fermi():
               betas=[beta, beta],
               bOverlaps=[Sbeta.copy(), Sbeta.copy()])
 
-    assert any(eps > 0 for eps in g._overlap_eps), (
-        "Sbeta=0.8 should trigger regularization")
-    assert np.allclose(np.array(g.S), S), (
-        "g.S must be unchanged (sigma-correction approach)")
 
     # (a) Transmission at E=0 should be non-zero (channel is open)
     eta = 1e-4

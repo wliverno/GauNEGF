@@ -1071,11 +1071,7 @@ def getFermi1DContact(gSys, ne, ind=0, tol=FERMI_CALCULATION_TOL, T=TEMPERATURE,
     tau = gSys.bList[ind]
     stau = gSys.bSList[ind]
     n = len(F)
-    # Recover original (unregularized) Salpha: aSList[ind] has eps added in-place
-    # by _regularizeContacts. Subtract it back so g3 uses physical S for density
-    # counting (Tr(P @ S_phys) = ne) and applies its own sigma correction.
-    eps_i = gSys._overlap_eps[ind]
-    S = gSys.aSList[ind] - eps_i * jnp.eye(n, dtype=gSys.aSList[ind].dtype)
+    S = gSys.aSList[ind]
     inds = np.arange(n)
     z = jnp.zeros_like(F)
     zs = jnp.zeros_like(stau)

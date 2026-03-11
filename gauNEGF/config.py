@@ -11,6 +11,7 @@ ENERGY_STEP = 0.001             # eV - default energy step size
 
 # Contact Tolerances
 FERMI_CALCULATION_TOL = 1e-3        # Fermi energy calculation tolerance
+OVERLAP_EIGENVALUE_RATIO = 1e-6     # Floor overlap eigenvalues below this fraction of max
 FERMI_SEARCH_CYCLES = 10            # Number of cycles to run search before returning
 SURFACE_GREEN_CONVERGENCE = 1e-5    # Surface Green's function convergence
 SURFACE_RELAXATION_FACTOR = 0.1     # Relaxation/Mixing factor for Green's function convergence
