@@ -6,8 +6,9 @@ from jax import jit
 
 # Configuration
 from gauNEGF.config import (ETA, SURFACE_GREEN_CONVERGENCE, SURFACE_RELAXATION_FACTOR,
-                             OVERLAP_EIGENVALUE_RATIO)
-from gauNEGF.utils import fractional_matrix_power, inv
+                             OVERLAP_EIGENVALUE_RATIO, FERMI_DEBUG)
+from gauNEGF.utils import fractional_matrix_power, inv, eigh
+from gauNEGF.density import densityComplex
 
 #Constants
 
@@ -151,6 +152,12 @@ class surfG:
         self.stauList = ([None] * len(taus) if staus is None
                          else [None if stau is None else jnp.array(stau) for stau in staus])
 
+        # Store number of contacts for loop bounds
+        self.num_contacts = len(indsList)
+        
+        # Set up broadening for retarded/advanced Green's function, initialize g
+        self.eta = eta
+
         # Set up contact information
         if alphas is None:
             self.contactFromFock = True
@@ -159,12 +166,6 @@ class surfG:
             self.contactFromFock = False
             self._setContacts(alphas, aOverlaps, betas, bOverlaps)
             self.fermiList = [None]*len(indsList)
-        
-        # Set up broadening for retarded/advanced Green's function, initialize g
-        self.eta = eta
-
-        # Store number of contacts for loop bounds
-        self.num_contacts = len(indsList)
 
         # JIT compile g and sigma methods with static contact index
         # This compiles separate versions for each contact (i=0, i=1, etc.)
@@ -213,33 +214,53 @@ class surfG:
         possible to an original orbital. No downstream sigma correction is needed.
         See docs/plans/2026-03-10-congruent-clipping-design.md.
         """
-        import numpy as np
+        
+        if not hasattr(self, "CList"):
+            self.CList = [jnp.eye(len(A)*3) for A in self.aList]
+            for i in range(len(self.indsList)):
+                S0 = self.aSList[i]
+                S1 = self.bSList[i]
+                zeros = jnp.zeros_like(S0)
+                S3 = jnp.block([[S0, S1, zeros],
+                                [S1.T, S0, S1],
+                                [zeros, S1.T, S0]])
+                n = S1.shape[0]
+                eigvals, U = eigh(S3)
+                lam_max = jnp.max(eigvals)
+                lam_min_thresh = OVERLAP_EIGENVALUE_RATIO * lam_max
+
+                if jnp.min(eigvals) >= lam_min_thresh:
+                    # Already PSD -- no transform needed
+                    continue
+
+                lam_prime = jnp.maximum(eigvals, lam_min_thresh)
+                C = U @ jnp.diag(jnp.sqrt(lam_prime / jnp.abs(eigvals)))
+                C = C.astype(self.aSList[i].dtype)
+                self.CList[i] = C.copy()
+
+                S3_reg = C.conj().T@S3@C
+
+                self.aSList[i] = S3_reg[n:-n, n:-n]#(S3_reg[:n, :n] + S2_reg[n:, n:])/2
+                self.bSList[i] = (S3_reg[:n, n:-n] + S3_reg[n:-n, -n:])/2
+
+                print(f'Contact overlap regularized (contact {i}): '
+                      f'min_eig {eigvals[0]:.4e} -> {lam_min_thresh:.4e}')
+            if FERMI_DEBUG:
+                rho_ = densityComplex(self.F, self.S, self, -1e6,  1e6)
+                print(f"Total Spectral Weight: {jnp.trace(rho_@self.S).real}")
         for i in range(len(self.indsList)):
-            S0 = np.array(self.aSList[i])
-            n = S0.shape[0]
-            eigvals, U = np.linalg.eigh(S0)
-            lam_max = float(eigvals[-1])
-            lam_min_thresh = OVERLAP_EIGENVALUE_RATIO * lam_max
-
-            if float(eigvals[0]) >= lam_min_thresh:
-                # Already PSD -- no transform needed
-                continue
-
-            lam_prime = np.maximum(eigvals, lam_min_thresh)
-            C = U @ np.diag(np.sqrt(lam_prime / eigvals))
-            C = C.astype(self.aSList[i].dtype)
-
-            H0 = np.array(self.aList[i])
-            H1 = np.array(self.bList[i])
-            S1 = np.array(self.bSList[i])
-
-            self.aSList[i] = jnp.array(C.conj().T @ S0 @ C)
-            self.aList[i]  = jnp.array(C.conj().T @ H0 @ C)
-            self.bSList[i] = jnp.array(C.conj().T @ S1 @ C)
-            self.bList[i]  = jnp.array(C.conj().T @ H1 @ C)
-
-            print(f'Contact overlap regularized (contact {i}): '
-                  f'min_eig {eigvals[0]:.4e} -> {lam_min_thresh:.4e}')
+            H0 = self.aList[i]
+            H1 = self.bList[i]
+            zeros = jnp.zeros_like(H0)
+            n=len(H0)
+            H3 = jnp.block([[H0, H1, zeros],
+                            [H1.conj().T, H0, H1],
+                            [zeros, H1.conj().T, H0]])
+            C = self.CList[i]
+            H3_reg = C.conj().T@H3@C
+            self.aList[i]  = H3_reg[n:-n, n:-n]
+            self.bList[i] = (H3_reg[:n, n:-n] + H3_reg[n:-n, -n:])/2 
+         
 
     def _rejit(self):
         """Recompile g and sigma to pick up updated contact parameters.
@@ -392,7 +413,8 @@ class surfG:
         stau = self.stauList[i]
         tau = self.tauList[i]
         t = (-tau) if stau is None else (E*stau - tau)
-        sig = t @ self.g(E, i, conv) @ t.conj().T
+        t_reg = t@self.CList[i][len(t):-len(t), len(t):-len(t)]
+        sig = t_reg @ self.g(E, i, conv) @ t_reg.conj().T
         if stau is None:
             Xi_i = self.Xi[jnp.ix_(inds, inds)]
             sig = Xi_i @ sig @ Xi_i

@@ -40,7 +40,6 @@ import os
 
 # Developed Packages:
 from gauNEGF.fermiSearch import DOSFermiSearch
-from gauNEGF.surfG1D import surfG
 from gauNEGF.integrate import GrInt, GrLessInt
 
 # JIT-compiled functions
@@ -1221,6 +1220,7 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
     else:   
         pMu = lambda E: densityComplexN(g.F, g.S, g, Emin, E, N, T)
     E = Ef + 0.0
+    Ef0 = Ef + 0.0
     P = None
     Ncurr = ne+0
     dE = tol
@@ -1264,8 +1264,12 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
             Ncurr = np.trace(P@g.S)
     if counter == maxcycles:
         print(f'Warning: Max cycles reached, convergence = {abs(Ncurr-ne):.2E}')
+        print(f'Reverting to previous Fermi level...')
+        Ef = Ef0
     elif uBound == lBound:
         print(f'Warning: Bisection failed, convergence = {abs(Ncurr-ne):.2E}')
+        print(f'Reverting to previous Fermi level...')
+        Ef = Ef0
     return Ef, dE, P
 
 def calcFermiSecant(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, 
@@ -1317,6 +1321,7 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, tol, T)
     else:   
         pMu = lambda E: densityComplexN(g.F, g.S, g, Emin, E, N, T)
+    Ef0 = Ef + 0.0
 
     # Initialize three points around initial guess
     E2 = Ef
@@ -1395,6 +1400,8 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
 
     if counter == maxcycles:
         print(f'Warning: Max cycles reached, convergence = {abs(n2):.2E}')
+        print(f'Reverting to previous Fermi level...')
+        Ef = Ef0
 
     return E2, dE, P, abs(n2), uBound, lBound
 
