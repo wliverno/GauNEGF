@@ -1540,24 +1540,24 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         # Enforce monotonicity: Higher E -> higher N 
         # If N-nE > 0: need lower E, so E_next must be < E_pts[-1]
         # If N-nE < 0: need higher E, so E_next must be > E_pts[-1]
-        if n_pts[-1] > 0 and E_next > E_pts[-1]:
-            # Polynomial violated monotonicity - discard it and step in correct direction
-            E_next = E_pts[-1] - abs(dE) * 10
-            # Remove the last point that led to bad interpolation
-            E_pts.pop()
-            n_pts.pop()
-            counter -= 1  # Don't count this as a valid iteration
-            if FERMI_DEBUG:
-                print('Warning: monotonicity exception corrected!')
-        elif n_pts[-1] < 0 and E_next < E_pts[-1]:
-            # Polynomial violated monotonicity - discard it and step in correct direction
-            E_next = E_pts[-1] + abs(dE) * 10
-            # Remove the last point that led to bad interpolation
-            E_pts.pop()
-            n_pts.pop()
-            counter -= 1  # Don't count this as a valid iteration
-            if FERMI_DEBUG:
-                print('Warning: monotonicity exception corrected!')
+        #if n_pts[-1] > 0 and E_next > E_pts[-1]:
+        #    # Polynomial violated monotonicity - discard it and step in correct direction
+        #    E_next = E_pts[-1] - abs(dE) * 10
+        #    # Remove the last point that led to bad interpolation
+        #    E_pts.pop()
+        #    n_pts.pop()
+        #    counter -= 1  # Don't count this as a valid iteration
+        #    if FERMI_DEBUG:
+        #        print('Warning: monotonicity exception corrected!')
+        #elif n_pts[-1] < 0 and E_next < E_pts[-1]:
+        #    # Polynomial violated monotonicity - discard it and step in correct direction
+        #    E_next = E_pts[-1] + abs(dE) * 10
+        #    # Remove the last point that led to bad interpolation
+        #    E_pts.pop()
+        #    n_pts.pop()
+        #    counter -= 1  # Don't count this as a valid iteration
+        #    if FERMI_DEBUG:
+        #        print('Warning: monotonicity exception corrected!')
 
         # Calculate new point
         E = E_next
