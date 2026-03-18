@@ -1036,69 +1036,6 @@ def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INT
     return calcFermi(g, ne, Emin, Ef, lBound=lBound, uBound=uBound,
                     tol=tol, conv=conv, maxcycles=maxcycles, T=T, nOrbs=nOrbs)
 
-def getFermi1DContact(gSys, ne, ind=0, tol=FERMI_CALCULATION_TOL, T=TEMPERATURE, maxcycles=MAX_CYCLES):
-    """
-    Calculate Fermi energy for a 1D chain contact.
-
-    Builds a 3-cell [L, R, C] model (C center, last) with semi-infinite contacts
-    at L and R.  The Mulliken charge of C is Tr((P@S3)[C,C]), which includes
-    contributions from both left and right Sbeta neighbors, giving the correct
-    bulk electron count for non-orthogonal bases.  Adaptive complex contour
-    integration is used for the bisection.
-
-    Parameters
-    ----------
-    gSys : surfG object
-        Surface Green's function calculator for the full system
-    ne : float
-        Target number of electrons per unit cell
-    ind : int, optional
-        Contact index (0 for left, -1 for right) (default: 0)
-    tol : float, optional
-        Convergence tolerance (default: FERMI_CALCULATION_TOL)
-    T : float, optional
-        Temperature in Kelvin (default: TEMPERATURE)
-    maxcycles : int, optional
-        Maximum number of bisection iterations (default: MAX_CYCLES)
-
-    Returns
-    -------
-    float
-        Fermi energy in eV
-    """
-    F = gSys.aList[ind]
-    tau = gSys.bList[ind]
-    stau = gSys.bSList[ind]
-    n = len(F)
-    S = gSys.aSList[ind]
-    inds = np.arange(n)
-    z = jnp.zeros_like(F)
-    zs = jnp.zeros_like(stau)
-
-    # 3-cell [L, R, C] system -- C is last so calcFermi's nOrbs=n
-    # extracts the center-cell Mulliken charge including both Sbeta neighbors.
-    F3 = jnp.block([[F,            z,            tau          ],
-                    [z,            F,            tau.conj().T ],
-                    [tau.conj().T, tau,          F            ]])
-    S3 = jnp.block([[S,             zs,            stau         ],
-                    [zs,            S,             stau.conj().T],
-                    [stau.conj().T, stau,          S            ]])
-    g3 = surfG(F3, S3, [inds, inds + n], [tau, tau], [stau, stau], eta=1e-6)
-
-    # Initial Fermi guess from 3-cell generalized eigenvalues
-    orbs3, _ = eigh(inv(S3) @ F3)
-    orbs3 = np.sort(np.real(orbs3))
-    ne3_int = int(round(3.0 * ne))
-    if 0 < ne3_int < len(orbs3):
-        fermi = (orbs3[ne3_int - 1] + orbs3[ne3_int]) / 2
-    else:
-        fermi = float(orbs3[-1])  # half-filled edge case: all 3-cell states filled
-
-    Emin = float(orbs3[0]) - 1.0
-    Emax = float(orbs3[-1])
-    return calcFermi(g3, ne, Emin, fermi, lBound=Emin, uBound=Emax,
-                     tol=tol, maxcycles=maxcycles, T=T, nOrbs=n)
-
 # Calculate the fermi energy of the surface Green's Function object
 def calcFermi(g, ne, Emin, Ef, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATION_TOL,
               conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE, nOrbs=0):
