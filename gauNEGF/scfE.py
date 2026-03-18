@@ -93,7 +93,7 @@ class NEGFE(NEGF):
         return inds
 
     # Set energy dependent 1D contact using surfG() object
-    def setContact1D(self, contactList, tauList=None, stauList=None, alphas=None, aOverlaps=None, betas=None, bOverlaps=None, neList=None, muList=None, eta=ETA, T=TEMPERATURE):
+    def setContact1D(self, contactList, tauList=None, stauList=None, alphas=None, aOverlaps=None, betas=None, bOverlaps=None, neList=None, muList=None, eta=ETA, T=TEMPERATURE, symmetrize_contacts=None):
         """
         Set energy-dependent 1D chain contacts.
 
@@ -121,6 +121,10 @@ class NEGFE(NEGF):
             Broadening parameter in eV (default: 1e-9)
         T : float, optional
             Temperature in Kelvin (default: 0)
+        symmetrize_contacts : bool or None, optional
+            Enforce identical on-site parameters for both contacts during SCF.
+            True for same-material contacts, False for junctions.
+            None (default) auto-detects based on setup pattern.
 
         Returns
         -------
@@ -133,13 +137,13 @@ class NEGFE(NEGF):
         self.rInd = inds[1]
         # if tauList is a list of atom numbers (rather than a matrix), generate orbital indices
         if tauList is not None:
-            if len(np.shape(tauList[0])) == 1: 
+            if len(np.shape(tauList[0])) == 1:
                 ind1 = np.where(np.isin(abs(self.locs), tauList[0]))[0]
                 ind2 = np.where(np.isin(abs(self.locs), tauList[-1]))[0]
                 tauList = (ind1, ind2)
 
         # Generate surfG() object for the molecule + contacts and initialize variables
-        self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eta, self.spin)
+        self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eta, self.spin, symmetrize_contacts)
 
         if alphas is not None:
             gList = []

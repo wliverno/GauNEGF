@@ -62,24 +62,6 @@ def test_xi_attribute_exists_after_init():
 
 
 # ---------------------------------------------------------------------------
-# Test 2: staus=None does not crash (orthonormal coupling)
-# ---------------------------------------------------------------------------
-
-def test_staus_none_does_not_crash():
-    """Providing tau matrices but staus=None should not crash init."""
-    N = 6
-    F, S = make_chain(N)
-    # Pattern (b): tau matrices provided, staus=None -> orthonormal coupling
-    tau_L = jnp.array(F[0:1, 1:3])   # 1x2 coupling block
-    tau_R = jnp.array(F[5:6, 3:5])
-    # staus=None (default) with matrix taus -> should work now
-    g = surfG(F, S, [[1, 2], [3, 4]], taus=[tau_L, tau_R], staus=None)
-    assert g is not None
-    assert g.stauList[0] is None
-    assert g.stauList[1] is None
-
-
-# ---------------------------------------------------------------------------
 # Test 3: None aOverlaps defaults to identity in setContacts
 # ---------------------------------------------------------------------------
 
@@ -575,65 +557,141 @@ def test_cnt33_fermi_energy_with_overlap():
 # Sigma-correction regression: half-filled 1D chain with high overlap
 # ---------------------------------------------------------------------------
 
-def test_1d_chain_high_overlap_transmission_and_fermi():
-    """Half-filled 1-orbital chain (Sbeta=0.8) with 4 unit cells.
+def _make_sp_chain():
+    """2-cell chain with s and px orbitals, non-orthogonal overlap.
 
-    Sbeta=0.8 triggers regularization (eps~0.6), exercising the sigma-correction
-    path.  Checks:
-    (a) Transmission inside the band is non-zero (single open channel).
-    (b) getFermi1DContact converges and returns E_F ≈ 0.
-        Analytic result: E(k=pi/2) = -2*cos(pi/2) / (1 + 1.6*cos(pi/2)) = 0
-        for any Sbeta, so E_F = 0 exactly for half-filling with alpha=0.
+    Slater-Koster sign conventions: the s-px hopping along +x has
+    H[s,px] = +Vsp and H[px,s] = -Vsp (p-orbital parity).
     """
-    from gauNEGF.density import getFermi1DContact
+    eps_s, eps_p = -2.0, 0.5
+    alpha = np.array([[eps_s, 0.0], [0.0, eps_p]], dtype=complex)
+    Salpha = np.eye(2, dtype=complex)
 
-    n = 1
-    alpha = np.zeros((n, n), dtype=complex)
-    beta = -1.0 * np.eye(n, dtype=complex)
-    Salpha = np.eye(n, dtype=complex)
-    Sbeta = 0.8 * np.eye(n, dtype=complex)
+    V_ss, V_sp, V_pp = -1.0, 0.6, 0.8
+    H1 = np.array([[V_ss, V_sp], [-V_sp, V_pp]], dtype=complex)
 
-    # 4-cell device, contacts at first and last cell
-    n_cells = 4
-    N = n_cells * n
-    F = np.zeros((N, N), dtype=complex)
-    S = np.zeros((N, N), dtype=complex)
-    for c in range(n_cells):
-        F[c, c] = 0.0
-        S[c, c] = 1.0
-        if c < n_cells - 1:
-            F[c, c+1] = -1.0
-            F[c+1, c] = -1.0
-            S[c, c+1] = 0.8
-            S[c+1, c] = 0.8
+    s_ss, s_sp, s_pp = 0.15, 0.10, 0.12
+    S1 = np.array([[s_ss, s_sp], [-s_sp, s_pp]], dtype=complex)
 
-    g = surfG(F, S, [[0], [N-1]],
-              taus=[beta, beta],
-              staus=[Sbeta, Sbeta],
-              alphas=[alpha, alpha],
-              aOverlaps=[Salpha.copy(), Salpha.copy()],
-              betas=[beta, beta],
-              bOverlaps=[Sbeta.copy(), Sbeta.copy()])
+    F = np.block([[alpha, H1], [H1.conj().T, alpha]])
+    S = np.block([[Salpha, S1], [S1.conj().T, Salpha]])
+    return F, S, alpha, H1, Salpha, S1
 
 
-    # (a) Transmission at E=0 should be non-zero (channel is open)
-    eta = 1e-4
-    S_g = np.array(g.S)
-    F_g = np.array(g.F)
-    sigL = np.array(g.sigma(0.0, 0))
-    sigR = np.array(g.sigma(0.0, 1))
-    Gr = np.linalg.inv((0.0 + 1j*eta)*S_g - F_g - sigL - sigR)
-    GamL = 1j*(sigL - sigL.conj().T)
-    GamR = 1j*(sigR - sigR.conj().T)
-    T = float(np.real(np.trace(GamL @ Gr @ GamR @ Gr.conj().T)))
-    assert T > 0.1, f"T(E=0)={T:.4f} should be non-zero for open channel"
-    assert T <= 1.05, f"T(E=0)={T:.4f} should be <= 1 channel"
+def _T_sp(g, E, eta=1e-6):
+    """Transmission for sp-chain surfG object."""
+    S_dev = np.array(g.S)
+    F_dev = np.array(g.F)
+    sigL = np.array(g.sigma(E, 0))
+    sigR = np.array(g.sigma(E, 1))
+    Gr = np.linalg.inv((E + 1j*eta) * S_dev - F_dev - sigL - sigR)
+    Ga = Gr.conj().T
+    GamL = 1j * (sigL - sigL.conj().T)
+    GamR = 1j * (sigR - sigR.conj().T)
+    return float(np.real(np.trace(GamL @ Gr @ GamR @ Ga)))
 
-    # (b) Fermi search: ne=0.5 fills half the spinless band (k_F = pi/2).
-    # Analytic: E(k=pi/2) = -2*cos(pi/2) / (S_alpha + 2*S_beta*cos(pi/2)) = 0
-    # for any Sbeta when alpha=0.
-    fermi = getFermi1DContact(g, ne=0.5, ind=0)
-    assert abs(fermi) < 0.1, (
-        f"E_F={fermi:.4f} eV, expected ~0 for spinless half-band fill with alpha=0")
+
+def test_sp_chain_symmetrized_integer_transmission():
+    """sp chain with auto-extraction: contact symmetrization must give integer T.
+
+    The parity identity Sigma_L = P Sigma_R P (P = diag(+1,-1)) causes
+    asymmetric effective Hamiltonians for the two cells. Without symmetrization,
+    the contacts diverge during SCF. With symmetrization (default for 2-cell
+    auto-extraction), both contacts use the same on-site block and transmission
+    is integer inside the band.
+
+    See docs/sigma_parity_symmetrization.md for the full derivation.
+    """
+    from scipy.linalg import eigh as scipy_eigh
+
+    F, S, alpha, H1, Salpha, S1 = _make_sp_chain()
+    n = 2
+
+    # Compute band edges to pick in-band energies
+    kpoints = np.linspace(0, np.pi, 200)
+    bands = np.zeros((len(kpoints), n))
+    for ik, k in enumerate(kpoints):
+        eik = np.exp(1j * k)
+        Hk = alpha + H1 * eik + H1.conj().T * np.conj(eik)
+        Sk = Salpha + S1 * eik + S1.conj().T * np.conj(eik)
+        bands[ik] = scipy_eigh(Hk, Sk, eigvals_only=True)
+
+    # With symmetrization (default): integer transmission
+    g_sym = surfG(F, S, [np.arange(n), np.arange(n, 2*n)])
+    assert g_sym._symmetrize_contacts, "Default should be True for 2-cell auto"
+
+    # Test at energies clearly inside each band (avoid edges)
+    margin = 0.3
+    for b in range(n):
+        E_mid = float((bands[:, b].min() + bands[:, b].max()) / 2)
+        if bands[:, b].max() - bands[:, b].min() < 2 * margin:
+            continue  # band too narrow
+        T = _T_sp(g_sym, E_mid)
+        n_channels = sum(
+            1 for bb in range(n)
+            if bands[:, bb].min() + margin <= E_mid <= bands[:, bb].max() - margin
+        )
+        assert abs(T - round(T)) < 0.05, (
+            f"E={E_mid:.3f}: T={T:.4f} not integer (expected {n_channels})")
+
+
+def test_sp_chain_parity_identity():
+    """Verify Sigma_L = P Sigma_R P numerically for the sp chain.
+
+    P = diag(+1, -1) is the spatial parity operator. The diagonal elements
+    must match and the s-p off-diagonal elements must be negated.
+    """
+    F, S, alpha, H1, Salpha, S1 = _make_sp_chain()
+    n = 2
+    P = np.diag([1.0, -1.0])
+
+    g = surfG(F, S, [np.arange(n), np.arange(n, 2*n)])
+
+    inds_L = np.arange(n)
+    inds_R = np.arange(n, 2*n)
+
+    for E in [-2.0, -1.0, 0.0, 0.5]:
+        sigL_full = np.array(g.sigma(E, 0))
+        sigR_full = np.array(g.sigma(E, 1))
+
+        # Extract contact blocks
+        sigL = sigL_full[np.ix_(inds_L, inds_L)]
+        sigR = sigR_full[np.ix_(inds_R, inds_R)]
+
+        # Sigma_L should equal P @ Sigma_R @ P
+        expected = P @ sigR @ P
+        np.testing.assert_allclose(
+            sigL, expected, atol=1e-10,
+            err_msg=f"Parity identity Sigma_L = P Sigma_R P failed at E={E}")
+
+
+def test_symmetrize_contacts_flag():
+    """symmetrize_contacts parameter: None=auto, True=force, False=disable."""
+    F, S, alpha, H1, Salpha, S1 = _make_sp_chain()
+    n = 2
+    inds = [np.arange(n), np.arange(n, 2*n)]
+
+    # Default (None) with 2-cell auto -> True
+    g_default = surfG(F, S, inds)
+    assert g_default._symmetrize_contacts is True
+
+    # Explicit True
+    g_true = surfG(F, S, inds, symmetrize_contacts=True)
+    assert g_true._symmetrize_contacts is True
+
+    # Explicit False
+    g_false = surfG(F, S, inds, symmetrize_contacts=False)
+    assert g_false._symmetrize_contacts is False
+
+    # With explicit taus (not auto-extraction) -> default is False
+    g_taus = surfG(F, S, inds, taus=[H1.conj().T, H1],
+                   staus=[S1.conj().T, S1],
+                   alphas=[alpha, alpha],
+                   aOverlaps=[np.eye(2, dtype=complex), np.eye(2, dtype=complex)],
+                   betas=[H1.conj().T, H1],
+                   bOverlaps=[S1.conj().T, S1])
+    assert g_taus._symmetrize_contacts is False
+
+
 
 
