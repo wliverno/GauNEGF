@@ -93,7 +93,7 @@ class NEGFE(NEGF):
         return inds
 
     # Set energy dependent 1D contact using surfG() object
-    def setContact1D(self, contactList, tauList=None, stauList=None, alphas=None, aOverlaps=None, betas=None, bOverlaps=None, neList=None, eta=ETA, T=TEMPERATURE):
+    def setContact1D(self, contactList, tauList=None, stauList=None, alphas=None, aOverlaps=None, betas=None, bOverlaps=None, neList=None, muList=None, eta=ETA, T=TEMPERATURE):
         """
         Set energy-dependent 1D chain contacts.
 
@@ -115,6 +115,8 @@ class NEGFE(NEGF):
             Hopping overlaps (default: None)
         neList : list or None, optional
             Number of electrons per unit cell (default: None)
+        muList : list or None, optional
+            fermiEnergy for each contact in eV (default: None)
         eta : float, optional
             Broadening parameter in eV (default: 1e-9)
         T : float, optional
@@ -140,8 +142,18 @@ class NEGFE(NEGF):
         self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eta, self.spin)
 
         if alphas is not None:
-            muL = getFermi1DContact(self.g, neList[0], 0)
-            muR = getFermi1DContact(self.g, neList[-1], -1)
+            gList = []
+            for a, Sa, b, Sb in zip(self.g.aList, self.g.aSList, self.g.bList, self.g.bSList):
+                inds = np.arange(len(a))
+                gList.append(surfG(a, Sa, [inds, inds], [b, b.conj().T], [Sb, Sb.conj().T], eta=eta, spin=self.spin))
+            if neList is not None:
+                muL = getFermiContact(gList[0], neList[0], maxcycles=100)
+                muR = getFermiContact(gList[-1], neList[-1], maxcycles=100)
+            elif muList is not None:
+                muL = muList[0]
+                muR = muList[-1]
+            else:  
+                raise Exception('neList or muList must be defined!') 
             self.g.setF(self.g.F, muL, muR)
         # Update other variables
         self.setIntegralLimits()
