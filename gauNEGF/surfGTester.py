@@ -151,3 +151,11 @@ class surfGTest:
         Green's function calculators.
         """
         self.F = F
+
+    def crossTermQ(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
+        """Cross-term Q_sym for surfGTest. Always None (orthogonal basis)."""
+        return None
+
+    def crossTermQTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
+        """Total cross-term Q_sym for surfGTest. Always None (orthogonal basis)."""
+        return None
