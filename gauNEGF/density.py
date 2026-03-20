@@ -40,7 +40,7 @@ import os
 
 # Developed Packages:
 from gauNEGF.fermiSearch import DOSFermiSearch
-from gauNEGF.integrate import GrInt, GrLessInt
+from gauNEGF.integrate import GrInt, GrLessInt, GrIntCross
 
 # JIT-compiled functions
 from gauNEGF.utils import inv, eig, eigh
@@ -657,6 +657,8 @@ def densityGrid(F, S, g, mu1, mu2, ind=None, tol=ADAPTIVE_INTEGRATION_TOL, T=TEM
 
     return den/(2*np.pi)
 
+
+
 def densityComplexN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True, method='ant'):
     """
     Calculate equilibrium density matrix using complex contour integration.
@@ -724,8 +726,8 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True, meth
     if showText:
         print(f'Complex Integration over {N} points...')
 
-    lineInt = GrInt(F, S, g, Elist, weights)
-    
+    lineInt, cross_scalar = GrIntCross(F, S, g, Elist, weights)
+
     #Add integration points for Fermi Broadening
     if T>0:
         if showText:
@@ -739,13 +741,17 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True, meth
             w_fermi = 2*np.ones(Nbroad)/Nbroad
         Elist = broadening * (x_fermi) + mu
         weights = broadening*w_fermi*fermi(Elist, mu, T)
-        lineInt += GrInt(F, S, g, Elist, weights)
+        broadInt, cross_broad = GrIntCross(F, S, g, Elist, weights)
+        lineInt += broadInt
+        cross_scalar += cross_broad
 
     if showText:
         print('Integration done!')
 
-    # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19) 
-    return (-1j/(2*jnp.pi)) * (lineInt - lineInt.conj().T)
+    # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19)
+    P = (-1j/(2*jnp.pi)) * (lineInt - lineInt.conj().T)
+    delta_N = float(-(1/jnp.pi) * jnp.imag(cross_scalar))
+    return P, delta_N
 
 def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, debug=False):
     """
@@ -798,10 +804,10 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
         dz = 1j * r * np.exp(1j*theta)
         weights = (np.pi/2)*w*dz*fermi(z, mu, T)
         return GrInt(F, S, g, z, weights)
-    
+
     print('Complex Contour Integration:')
     lineInt = integratePointsAdaptiveANT(computePoint, tol=tol, debug=debug)
-    
+
     #Add integration points for Fermi Broadening
     if T>0:
         print('Integrating Fermi Broadening:')
@@ -809,12 +815,32 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
             E = broadening * (x) + mu
             weights = broadening*w*fermi(E, mu, T)
             return GrInt(F, S, g, E, weights)
-    
+
         lineInt += integratePointsAdaptiveANT(computePointBroadening, tol=tol, debug=debug)
 
-
     # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19)
-    return (-1j/(2*jnp.pi)) * (lineInt - lineInt.conj().T)
+    P = (-1j/(2*jnp.pi)) * (lineInt - lineInt.conj().T)
+
+    # Cross-term scalar: fixed-N pass (adaptive framework can't co-accumulate tuples)
+    cross_scalar = 0.0 + 0j
+    if hasattr(g, 'crossTermQTot'):
+        N_cross = 54
+        x_c, w_c = getANTPoints(N_cross)
+        theta_c = np.pi/2 * (x_c + 1)
+        Elist_c = center + r*np.exp(1j*theta_c)
+        dz_c = 1j * r * np.exp(1j*theta_c)
+        weights_c = (np.pi/2)*w_c*fermi(Elist_c, mu, T)*dz_c
+        _, cross_scalar = GrIntCross(F, S, g, Elist_c, weights_c)
+        if T > 0:
+            Nbroad_c = max(N_cross // 8, 6)
+            x_f, w_f = roots_legendre(Nbroad_c)
+            E_broad = broadening * x_f + mu
+            w_broad = broadening * w_f * fermi(E_broad, mu, T)
+            _, cross_broad = GrIntCross(F, S, g, E_broad, w_broad)
+            cross_scalar += cross_broad
+
+    delta_N = float(-(1/jnp.pi) * jnp.imag(cross_scalar))
+    return P, delta_N
 
 ## INTEGRATION LIMIT FUNCTIONS
 # Calculate Emin using DOS
@@ -884,7 +910,8 @@ def integralFit(F, S, g, mu, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_TOL, T=TEMP
     rho = np.zeros(np.shape(F))
     while dP > tol and Ncomplex < maxN:
         Ncomplex *= 2 # Start with 8 points, double each time
-        rho_ = np.real(densityComplexN(F, S, g, Emin,  mu, Ncomplex, T=T))
+        rho_, _ = densityComplexN(F, S, g, Emin,  mu, Ncomplex, T=T)
+        rho_ = np.real(rho_)
         dP = max(abs(np.diag(rho_ - rho)))
         print(f"MaxDP = {dP:.2E}, N = {sum(np.diag(rho_).real):2f}")
         rho = rho_
@@ -1014,7 +1041,7 @@ def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INT
         Emin = calcEmin(F, S, g, tol=conv, maxN=maxcycles)
    
     # Count electrons below Emin 
-    P = densityComplex(F, S, g, Eminf, Emin, tol, T=0)
+    P, _ = densityComplex(F, S, g, Eminf, Emin, tol, T=0)
     nLower = 0
     if nOrbs==0:
         nLower = np.trace(P@g.S).real
@@ -1083,11 +1110,11 @@ def calcFermi(g, ne, Emin, Ef, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATIO
 
     # Initial calculation
     g.setF(g.F, E, E)
-    P = pMu(E)
+    P, _delta_N = pMu(E)
     if nOrbs == 0:
-        Ncurr = np.trace(P@g.S).real
+        Ncurr = np.trace(P@g.S).real + _delta_N
     else:
-        Ncurr = np.trace((P@g.S)[-nOrbs:, -nOrbs:]).real
+        Ncurr = np.trace((P@g.S)[-nOrbs:, -nOrbs:]).real + _delta_N
 
     # Establish bounds if not provided
     while None in [uBound, lBound] and counter < maxcycles:
@@ -1110,11 +1137,11 @@ def calcFermi(g, ne, Emin, Ef, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATIO
         counter += 1
 
         g.setF(g.F, E, E)
-        P = pMu(E)
+        P, _delta_N = pMu(E)
         if nOrbs == 0:
-            Ncurr = np.trace(P@g.S).real
+            Ncurr = np.trace(P@g.S).real + _delta_N
         else:
-            Ncurr = np.trace((P@g.S)[-nOrbs:, -nOrbs:]).real
+            Ncurr = np.trace((P@g.S)[-nOrbs:, -nOrbs:]).real + _delta_N
 
     # Bisection search
     print('Calculating Fermi energy using bisection with adaptive integration:')
@@ -1131,11 +1158,11 @@ def calcFermi(g, ne, Emin, Ef, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATIO
         counter += 1
         if abs(dN) > conv:
             g.setF(g.F, Ef, Ef)
-            P = pMu(Ef)
+            P, _delta_N = pMu(Ef)
             if nOrbs == 0:
-                Ncurr = np.trace(P@g.S).real
+                Ncurr = np.trace(P@g.S).real + _delta_N
             else:
-                Ncurr = np.trace((P@g.S)[-nOrbs:, -nOrbs:]).real
+                Ncurr = np.trace((P@g.S)[-nOrbs:, -nOrbs:]).real + _delta_N
 
     if counter == maxcycles:
         print(f'Warning: Max cycles reached, convergence = {abs(Ncurr-ne):.2E}')
@@ -1163,8 +1190,8 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
     dE = tol
     counter = 0
     g.setF(g.F, E, E)
-    P = pMu(E)
-    Ncurr = np.trace(P@g.S).real
+    P, _delta_N = pMu(E)
+    Ncurr = np.trace(P@g.S).real + _delta_N
     while None in [uBound, lBound] and counter<maxcycles:
         if counter==maxcycles:
             dE = 1e3
@@ -1178,12 +1205,12 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
             E += dE
         if FERMI_DEBUG:
             print(f"DEBUG: Ef={Ef:.2f}, dN={ne-Ncurr:.2E}, dE={dE:.2E}")
-        dos = _compute_dos_at_energy(E, g.S, g.F, g.sigmaTot(E))
+        dos = _compute_dos_at_energy(E, g.F, g.S, g.sigmaTot(E))
         dE = max(2*abs(Ncurr-ne)/dos, dE)
         counter += 1
         g.setF(g.F, E, E)
-        P = pMu(E)
-        Ncurr = np.trace(P@g.S).real
+        P, _delta_N = pMu(E)
+        Ncurr = np.trace(P@g.S).real + _delta_N
     while abs(ne - Ncurr) > conv and counter < maxcycles and uBound != lBound:
         dN = ne-Ncurr
         if dN > 0 and Ef > lBound:
@@ -1197,8 +1224,8 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
         counter += 1
         if abs(dN) > conv:
             g.setF(g.F, Ef, Ef)
-            P = pMu(Ef)
-            Ncurr = np.trace(P@g.S)
+            P, _delta_N = pMu(Ef)
+            Ncurr = np.trace(P@g.S).real + _delta_N
     if counter == maxcycles:
         print(f'Warning: Max cycles reached, convergence = {abs(Ncurr-ne):.2E}')
         print(f'Reverting to previous Fermi level...')
@@ -1221,15 +1248,15 @@ def calcFermiSecant(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
     else:   
         pMu = lambda E: densityComplexN(g.F, g.S, g, Emin, E, N, T)
     g.setF(g.F, Ef, Ef)
-    P = pMu(Ef)
-    nCurr = np.trace(P@g.S).real
+    P, _delta_N = pMu(Ef)
+    nCurr = np.trace(P@g.S).real + _delta_N
     dE = conv
     counter = 0
     while abs(nCurr-ne) > conv and counter < maxcycles:
         Ef += dE
         g.setF(g.F, Ef, Ef)
-        P = pMu(Ef)
-        nNext = np.trace(P@g.S).real
+        P, _delta_N = pMu(Ef)
+        nNext = np.trace(P@g.S).real + _delta_N
         if FERMI_DEBUG:
             print(f"DEBUG: Ef={Ef:.2f}, dN={nNext-ne:.2E}, dE={dE:.2E}")
         if abs(nNext - nCurr)<1e-10:
@@ -1272,8 +1299,8 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
     nList = []
     for E in [E2, E1, E0]:
         g.setF(g.F, E, E)
-        P = pMu(E)
-        n = np.trace(P@g.S).real - ne
+        P, _delta_N = pMu(E)
+        n = np.trace(P@g.S).real + _delta_N - ne
         if n > 0:
             uBound = min(uBound, E) if uBound is not None else E
         elif n < 0:
@@ -1319,8 +1346,8 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
 
         E2 = Enext
         g.setF(g.F, E2, E2)
-        P = pMu(E2)
-        n2 = np.trace(P@g.S).real - ne
+        P, _delta_N = pMu(E2)
+        n2 = np.trace(P@g.S).real + _delta_N - ne
 
         if n2 > 0:
             uBound = min(uBound, E2) if uBound is not None else E2
@@ -1403,8 +1430,8 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
     # Initialize with first point
     E = Ef
     g.setF(g.F, E, E)
-    P = pMu(E)
-    n = np.trace(P@g.S).real - ne
+    P, _delta_N = pMu(E)
+    n = np.trace(P@g.S).real + _delta_N - ne
 
     if abs(n) < conv:
         return E, 0, P, abs(n), uBound, lBound
@@ -1419,8 +1446,8 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
     while counter < maxcycles:
         E = Ef + step
         g.setF(g.F, E, E)
-        P = pMu(E)
-        n = np.trace(P@g.S).real - ne
+        P, _delta_N = pMu(E)
+        n = np.trace(P@g.S).real + _delta_N - ne
         if n > 0:
             uBound = min(uBound, E) if uBound is not None else E
         elif n < 0:
@@ -1499,8 +1526,8 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         # Calculate new point
         E = E_next
         g.setF(g.F, E, E)
-        P = pMu(E)
-        n = np.trace(P@g.S).real - ne
+        P, _delta_N = pMu(E)
+        n = np.trace(P@g.S).real + _delta_N - ne
         if n > 0:
             uBound = min(uBound, E) if uBound is not None else E
         elif n < 0:
