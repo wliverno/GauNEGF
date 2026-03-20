@@ -282,7 +282,7 @@ class surfG:
                 print(f'Contact overlap regularized (contact {i}): '
                       f'min_eig {eigvals[0]:.4e} -> {lam_min_thresh:.4e}')
             if FERMI_DEBUG:
-                rho_ = densityComplex(self.F, self.S, self, -1e6,  1e6)
+                rho_, _ = densityComplex(self.F, self.S, self, -1e6,  1e6)
                 print(f"Total Spectral Weight: {jnp.trace(rho_@self.S).real}")
         for i in range(len(self.indsList)):
             H0 = self.aList[i]
@@ -458,6 +458,40 @@ class surfG:
                           lambda s: s,
                           sigma)
         return sigma
+
+    def crossTermQ(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
+        """Symmetrized cross-term matrix Q_sym_i in full device basis.
+
+        Q_sym = (t_eff @ g_surf @ S_LD + S_DL @ g_surf @ t_eff^dagger) / 2
+
+        where t_eff is the same regularized coupling used in sigma(). Returns
+        None if contact i has orthogonal coupling (stauList[i] is None).
+        """
+        stau = self.stauList[i]
+        if stau is None or not jnp.any(stau):
+            return None
+        inds = self.indsList[i]
+        tau = self.tauList[i]
+        n = len(tau)
+        t = E * stau - tau
+        C_mid = self.CList[i][n:-n, n:-n]
+        t_reg = t @ C_mid
+        g_surf = self.g(E, i, conv)
+        Q_fwd = t_reg @ g_surf @ stau.conj().T
+        Q_rev = stau @ g_surf @ t_reg.conj().T
+        Q_raw = (Q_fwd + Q_rev) / 2
+        Q = jnp.zeros(self.F.shape, dtype=complex)
+        Q = Q.at[jnp.ix_(inds, inds)].set(Q_raw)
+        return Q
+
+    def crossTermQTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
+        """Sum of Q_sym over all contacts. Returns None if all contacts orthogonal."""
+        Q_tot = None
+        for i in range(self.num_contacts):
+            Q_i = self.crossTermQ(E, i, conv)
+            if Q_i is not None:
+                Q_tot = Q_i if Q_tot is None else Q_tot + Q_i
+        return Q_tot
 
     def sigmaTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
         """
