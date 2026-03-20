@@ -217,6 +217,39 @@ def GrInt(F, S, g, Elist, weights):
     return _GInt(weighted_func_Gr, F, S, g, Elist, weights)
 
 
+def GrIntCross(F, S, g, Elist, weights):
+    """Integrate G^R with co-accumulation of cross-term scalar.
+
+    Returns (lineInt, cross_scalar) where:
+    - lineInt = sum_k w_k * G^R(z_k)  (NxN matrix, same as GrInt)
+    - cross_scalar = sum_k w_k * Tr(G^R(z_k) @ Q_tot(z_k))  (complex scalar)
+
+    The cross-term delta_N = -(1/pi) * Im(cross_scalar).
+
+    If crossTermQTot returns None for all energies (orthogonal system),
+    returns (lineInt, 0+0j).
+    """
+    lineInt = GrInt(F, S, g, Elist, weights)
+
+    # Check if there are any cross terms to accumulate
+    Q_check = g.crossTermQTot(Elist[0]) if len(Elist) > 0 else None
+    if Q_check is None:
+        return lineInt, 0.0 + 0j
+
+    # Sequential loop for cross-term scalar (avoids JAX-tracing None checks)
+    F_jax = jnp.array(F)
+    S_jax = jnp.array(S)
+    cross_scalar = 0.0 + 0j
+    for E, w in zip(Elist, weights):
+        sigTot = g.sigmaTot(E)
+        Gr = _gr_matrix_ops(sigTot, E, F_jax, S_jax)
+        Q = g.crossTermQTot(E)
+        if Q is not None:
+            cross_scalar = cross_scalar + w * jnp.trace(Gr @ Q)
+
+    parallel_logger.info(f"GrIntCross: cross_scalar = {cross_scalar:.4e}")
+    return lineInt, cross_scalar
+
 
 def GrLessInt(F, S, g, Elist, weights, ind=None):
     """
