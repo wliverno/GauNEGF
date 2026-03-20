@@ -342,7 +342,7 @@ class surfG:
         # Prepare matrices using JAX
         A = (E+1j*self.eta)*Salpha - alpha
         B = (E+1j*self.eta)*Sbeta - beta
-        B_dag = B.conj().T
+        B_bar = (E+1j*self.eta)*Sbeta.conj().T - beta.conj().T
 
         # Iterative solution using jax.lax.while_loop
         MAX_ITER = 10000
@@ -355,7 +355,7 @@ class surfG:
             count, diff, g = state
 
             # Compute new Green's function using JAX operations
-            g_new = inv(A - B @ g @ B_dag)
+            g_new = inv(A - B @ g @ B_bar)
 
             # Compute convergence metric
             dg = jnp.abs(g_new - g) / jnp.maximum(jnp.abs(g_new), 1e-12)
@@ -448,8 +448,11 @@ class surfG:
         stau = self.stauList[i]
         tau = self.tauList[i]
         t = (-tau) if stau is None else (E*stau - tau)
-        t_reg = t@self.CList[i][len(t):-len(t), len(t):-len(t)]
-        sig = t_reg @ self.g(E, i, conv) @ t_reg.conj().T
+        bar_t = (-tau.conj().T) if stau is None else (E*stau.conj().T - tau.conj().T)
+        C_mid = self.CList[i][len(t):-len(t), len(t):-len(t)]
+        t_reg = t @ C_mid
+        bar_t_reg = C_mid.conj().T @ bar_t
+        sig = t_reg @ self.g(E, i, conv) @ bar_t_reg
         sigma = jnp.zeros(self.F.shape, dtype=complex)
         sigma = sigma.at[jnp.ix_(inds, inds)].add(sig)
         # De-orthogonalization - TODO: makes sure that alpha/beta also orthogonal!
@@ -477,8 +480,10 @@ class surfG:
         C_mid = self.CList[i][n:-n, n:-n]
         t_reg = t @ C_mid
         g_surf = self.g(E, i, conv)
+        bar_t = E * stau.conj().T - tau.conj().T
+        bar_t_reg = C_mid.conj().T @ bar_t
         Q_fwd = t_reg @ g_surf @ stau.conj().T
-        Q_rev = stau @ g_surf @ t_reg.conj().T
+        Q_rev = stau @ g_surf @ bar_t_reg
         Q_raw = (Q_fwd + Q_rev) / 2
         Q = jnp.zeros(self.F.shape, dtype=complex)
         Q = Q.at[jnp.ix_(inds, inds)].set(Q_raw)

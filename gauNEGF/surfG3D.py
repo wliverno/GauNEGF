@@ -1067,14 +1067,17 @@ class surfGAt3D:
             # Build tau: horizontal concat of phase-free couplings
             # active_dirs must be a static Python list (not a traced JAX value)
             E_eff = E - self.dFermi
-            tau_blocks = [(E_eff + self.eta*1j) * self.Slist[a] - self.Vlist0[a] for a in active_dirs]
+            z = E_eff + self.eta*1j
+            tau_blocks = [z * self.Slist[a] - self.Vlist0[a] for a in active_dirs]
             tau = jnp.concatenate(tau_blocks, axis=1)  # dim x (11*dim)
+            bar_tau_blocks = [z * self.Slist[a].conj().T - self.Vlist0[a].conj().T for a in active_dirs]
+            bar_tau = jnp.concatenate(bar_tau_blocks, axis=0)  # (11*dim) x dim
 
             # Extract sub-block of G_AB for active directions
             row_idx = jnp.concatenate([jnp.arange(a*dim, (a+1)*dim) for a in active_dirs])
             G_sub = G_AB[jnp.ix_(row_idx, row_idx)]  # (11*dim) x (11*dim)
 
-            sigList.append(tau @ G_sub @ tau.conj().T)
+            sigList.append(tau @ G_sub @ bar_tau)
 
         return jnp.array(sigList)  # 12 x dim x dim
 
@@ -1100,10 +1103,12 @@ class surfGAt3D:
         out_plane_indices = jnp.array([3, 4, 5])
         Fbk = jnp.sum(Flist[:, out_plane_indices, :, :], axis=1)
         Sbk = jnp.sum(Slist[:, out_plane_indices, :, :], axis=1)
-        B = (E_eff + self.eta*1j)*Sbk - Fbk
+        z = E_eff + self.eta*1j
+        B = z*Sbk - Fbk
+        B_bar = z*jnp.conj(Sbk).transpose(0,2,1) - jnp.conj(Fbk).transpose(0,2,1)
 
         # Converge each k-point independently with robust solver
-        def converge_single_k(A_k, B_k):
+        def converge_single_k(A_k, B_k, B_bar_k):
             """
             Converge Dyson equation for a single k-point using robust iteration.
 
@@ -1120,7 +1125,7 @@ class surfGAt3D:
                 count, diff, g, g_ = state
                 
                 # Compute self-energy
-                sig = B_k@ g @ B_k.conj().T
+                sig = B_k @ g @ B_bar_k
 
                 # Update Green's function
                 gNew = LA.inv(A_k - sig)
@@ -1145,9 +1150,10 @@ class surfGAt3D:
         # Shard k-point data across devices for parallel computation
         A_sharded = shard_array(A, axis=0)
         B_sharded = shard_array(B, axis=0)
+        B_bar_sharded = shard_array(B_bar, axis=0)
 
         # Vectorize over all k-points, automatically parallelized across devices
-        g_k, counts, diffs = jax.vmap(converge_single_k)(A_sharded, B_sharded)
+        g_k, counts, diffs = jax.vmap(converge_single_k)(A_sharded, B_sharded, B_bar_sharded)
 
         # Inverse Fourier transform: build 81x81 real-space propagator G_AB
         # G_AB[A*dim:(A+1)*dim, B*dim:(B+1)*dim] = (1/Nk) sum_k exp(+ik*R_A) * g_k * exp(-ik*R_B)
@@ -1198,8 +1204,11 @@ class surfGAt3D:
         # Build tau: horizontal concat of phase-free coupling matrices
         # active_dirs must be a static Python list (not a traced JAX value)
         E_eff = E - self.dFermi
-        tau_blocks = [(E_eff + self.eta*1j) * self.Slist[a] - self.Vlist0[a] for a in active_dirs]
+        z = E_eff + self.eta*1j
+        tau_blocks = [z * self.Slist[a] - self.Vlist0[a] for a in active_dirs]
         tau = jnp.concatenate(tau_blocks, axis=1)  # dim x (nDirs*dim)
+        bar_tau_blocks = [z * self.Slist[a].conj().T - self.Vlist0[a].conj().T for a in active_dirs]
+        bar_tau = jnp.concatenate(bar_tau_blocks, axis=0)  # (nDirs*dim) x dim
 
         # Extract sub-block of G_AB for active directions
         # G_AB is 81x81 with block structure [A*dim:(A+1)*dim, B*dim:(B+1)*dim]
@@ -1207,8 +1216,8 @@ class surfGAt3D:
         col_idx = row_idx  # square sub-block
         G_sub = G_AB[jnp.ix_(row_idx, col_idx)]  # (nDirs*dim) x (nDirs*dim)
 
-        # Self-energy: tau @ G_sub @ tau'
-        return tau @ G_sub @ tau.conj().T  # dim x dim
+        # Self-energy: tau @ G_sub @ bar_tau
+        return tau @ G_sub @ bar_tau  # dim x dim
 
     def crossTermQ(self, E, active_dirs=None, conv=1e-4, mix=0.1, G_AB=None):
         """Symmetrized cross-term Q_sym using G_AB propagator.
@@ -1233,16 +1242,16 @@ class surfGAt3D:
         S_LD = jnp.concatenate([self.Slist[a].conj().T for a in active_dirs], axis=0)
         # S_DL: row stack of S[a] for each active direction, shape (dim, nDirs*dim)
         S_DL = jnp.concatenate([self.Slist[a] for a in active_dirs], axis=1)
-        # tau^dagger: stack of tau_a^H, shape (nDirs*dim, dim)
-        tau_dag = jnp.concatenate([(E_eff - self.eta * 1j) * self.Slist[a].conj().T
+        # bar_tau: right-side coupling, uses z (not z*) with S^H, V^H
+        bar_tau = jnp.concatenate([(E_eff + self.eta * 1j) * self.Slist[a].conj().T
                                     - self.Vlist0[a].conj().T
                                     for a in active_dirs], axis=0)
 
         row_idx = jnp.concatenate([jnp.arange(a * dim, (a + 1) * dim) for a in active_dirs])
         G_sub = G_AB[jnp.ix_(row_idx, row_idx)]
 
-        Q_fwd = tau @ G_sub @ S_LD      # (dim, dim)
-        Q_rev = S_DL @ G_sub @ tau_dag  # (dim, dim)
+        Q_fwd = tau @ G_sub @ S_LD       # (dim, dim)
+        Q_rev = S_DL @ G_sub @ bar_tau   # (dim, dim)
         return (Q_fwd + Q_rev) / 2
 
     # Empty function for compatibility with density.py methods

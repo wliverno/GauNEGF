@@ -690,8 +690,9 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True, meth
 
     Returns
     -------
-    ndarray
-        Equilibrium density matrix
+    tuple (ndarray, float)
+        (P, delta_N) where P is the equilibrium density matrix and
+        delta_N is the Mulliken cross-term correction from device-lead overlap.
 
     Notes
     -----
@@ -704,7 +705,7 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True, meth
     Emax = mu-broadening
     center = (Emin+Emax)/2
     r = (Emax-Emin)/2
-    
+
     if method == 'legendre':
         x, w = roots_legendre(N)
     elif method == 'chebyshev':
@@ -782,13 +783,15 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
 
     Returns
     -------
-    ndarray
-        Equilibrium density matrix
+    tuple (ndarray, float)
+        (P, delta_N) where P is the equilibrium density matrix and
+        delta_N is the Mulliken cross-term correction from device-lead overlap.
 
     Notes
     -----
-    The 'ant' method uses a modified Gauss-Chebyshev quadrature optimized
-    for transport calculations, matching the ANT.Gaussian implementation.
+    Uses adaptive integration for the density matrix P, then a fixed-N
+    GrIntCross pass for the cross-term scalar (the adaptive framework
+    cannot co-accumulate tuple returns).
     """
     #Construct circular contour
     nKT= 10
@@ -823,7 +826,7 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
 
     # Cross-term scalar: fixed-N pass (adaptive framework can't co-accumulate tuples)
     cross_scalar = 0.0 + 0j
-    if hasattr(g, 'crossTermQTot'):
+    if hasattr(g, 'crossTermQTot') and g.crossTermQTot(center + r*1j) is not None:
         N_cross = 54
         x_c, w_c = getANTPoints(N_cross)
         theta_c = np.pi/2 * (x_c + 1)
