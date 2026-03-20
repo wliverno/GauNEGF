@@ -1085,7 +1085,8 @@ class surfGBAt:
                 pair_k = (k + 6)%12 # Opposite direction vector
                 gK = LA.inv(A - sigTot + sigmaK[pair_k]) # subtracted from sigTot
                 B = E_eff*self.Slist[k] - self.Vlist0[k]
-                sigmaK = sigmaK.at[k].set(mix*(B@gK@B.conj().T) + (1-mix)*sigmaK_[k])
+                B_bar = E_eff*self.Slist[k].conj().T - self.Vlist0[k].conj().T
+                sigmaK = sigmaK.at[k].set(mix*(B@gK@B_bar) + (1-mix)*sigmaK_[k])
             
             # Convergence Check
             diff = jnp.max(jnp.abs(sigmaK - sigmaK_))/jnp.max(jnp.abs(sigmaK_))
@@ -1167,7 +1168,8 @@ class surfGBAt:
             for k in planeVec:
                 pair_k = (k + 6)%12 # Opposite direction vector
                 B = E_eff*self.Slist[k] - self.Vlist0[k]
-                sigSurf = sigSurf.at[k].set(mix*(B@g@B.conj().T) + (1-mix)*sigSurf_[k])
+                B_bar = E_eff*self.Slist[k].conj().T - self.Vlist0[k].conj().T
+                sigSurf = sigSurf.at[k].set(mix*(B@g@B_bar) + (1-mix)*sigSurf_[k])
             
             # Convergence Check
             diff = jnp.max(jnp.abs(sigSurf - sigSurf_))/jnp.max(jnp.abs(sigSurf_))
@@ -1203,8 +1205,9 @@ class surfGBAt:
         Q = jnp.zeros((self.dim, self.dim), dtype=complex)
         for k in sigInds:
             B_k = E_eff * self.Slist[k] - self.Vlist0[k]
+            B_k_bar = E_eff * self.Slist[k].conj().T - self.Vlist0[k].conj().T
             Q_fwd = B_k @ g_surf @ self.Slist[k].conj().T
-            Q_rev = self.Slist[k] @ g_surf @ B_k.conj().T
+            Q_rev = self.Slist[k] @ g_surf @ B_k_bar
             Q = Q + (Q_fwd + Q_rev) / 2
         return Q
 
