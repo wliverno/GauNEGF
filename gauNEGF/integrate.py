@@ -217,6 +217,91 @@ def GrInt(F, S, g, Elist, weights):
     return _GInt(weighted_func_Gr, F, S, g, Elist, weights)
 
 
+def _GIntCross(F, S, g, Elist, weights):
+    """Single-pass vmap integration of G^R matrix and cross-term scalar.
+
+    Computes sigmaTot, G^R, and crossTermQ once per energy point, accumulating:
+    - matrix: sum_k w_k * G^R(z_k)
+    - scalar: sum_k w_k * Tr(G^R(z_k) @ Q_tot(z_k))
+
+    Uses vmap over energy points. The cross-term accumulation is inlined with
+    a zero-initialized Q_tot to avoid the None type transition in crossTermQTot
+    that would break JAX tracing.
+    """
+    assert Elist.size == weights.size, "Elist and weights must have the same length"
+
+    start_time = time.time()
+    F_jax = jnp.array(F)
+    S_jax = jnp.array(S)
+    Elist_jax = jnp.array(Elist)
+    weights_jax = jnp.array(weights)
+    matrix_size = F.shape[0]
+    num_energies = len(Elist)
+    num_contacts = len(g.indsList)
+
+    def weighted_combined(E, w, F_jax, S_jax, g):
+        sigTot = g.sigmaTot(E)
+        Gr = _gr_matrix_ops(sigTot, E, F_jax, S_jax)
+        # Inline crossTermQTot with zero-init (vmappable, no None type change)
+        Q_tot = jnp.zeros_like(F_jax, dtype=complex)
+        for i in range(num_contacts):
+            Q_i = g.crossTermQ(E, i)
+            if Q_i is not None:  # static at trace time (stau is None check)
+                Q_tot = Q_tot + Q_i
+        return w * Gr, w * jnp.trace(Gr @ Q_tot)
+
+    matrix_size_gb = (matrix_size * matrix_size * MEMORY_PER_MATRIX_FACTOR) / BYTES_TO_GB
+
+    if num_energies * matrix_size_gb < MAX_VMAP_MEMORY_GB:
+        parallel_logger.info(
+            f"GIntCross using vmap: {matrix_size}x{matrix_size} matrix, "
+            f"{num_energies} energies (single-pass)")
+        Elist_sharded = shard_array(Elist_jax, axis=0)
+        weights_sharded = shard_array(weights_jax, axis=0)
+        matrices, scalars = jax.vmap(
+            weighted_combined, in_axes=(0, 0, None, None, None)
+        )(Elist_sharded, weights_sharded, F_jax, S_jax, g)
+        matrix_sum = jnp.sum(matrices, axis=0)
+        scalar_sum = jnp.sum(scalars)
+    else:
+        batch_size = max(1, int(MAX_VMAP_MEMORY_GB // matrix_size_gb))
+        parallel_logger.info(
+            f"GIntCross using batched: {matrix_size}x{matrix_size} matrix, "
+            f"{num_energies} energies, batch={batch_size} (single-pass)")
+
+        def scan_fn(carry, inputs):
+            mat_acc, scl_acc = carry
+            E_batch, w_batch = inputs
+            E_batch_sharded = shard_array(E_batch, axis=0)
+            w_batch_sharded = shard_array(w_batch, axis=0)
+            mats, scls = jax.vmap(
+                weighted_combined, in_axes=(0, 0, None, None, None)
+            )(E_batch_sharded, w_batch_sharded, F_jax, S_jax, g)
+            mat_acc = mat_acc + jnp.sum(mats, axis=0)
+            scl_acc = scl_acc + jnp.sum(scls)
+            return (mat_acc, scl_acc), None
+
+        n_batches = num_energies // batch_size
+        Elist_batched = Elist_jax[:n_batches * batch_size].reshape(n_batches, batch_size)
+        weights_batched = weights_jax[:n_batches * batch_size].reshape(n_batches, batch_size)
+        Elist_tail = Elist_jax[n_batches * batch_size:]
+        weights_tail = weights_jax[n_batches * batch_size:]
+
+        init = (jnp.zeros_like(F_jax, dtype=complex), 0.0 + 0j)
+        (matrix_sum, scalar_sum), _ = jax.lax.scan(
+            scan_fn, init, (Elist_batched, weights_batched))
+
+        if len(Elist_tail) > 0:
+            (matrix_sum, scalar_sum), _ = scan_fn(
+                (matrix_sum, scalar_sum), (Elist_tail, weights_tail))
+
+    if FORCE_SYNCHRONOUS:
+        jax.block_until_ready(matrix_sum)
+    elapsed = time.time() - start_time
+    parallel_logger.debug(f"GIntCross completed in {elapsed:.3f}s")
+    return matrix_sum, scalar_sum
+
+
 def GrIntCross(F, S, g, Elist, weights):
     """Integrate G^R with co-accumulation of cross-term scalar.
 
@@ -226,29 +311,20 @@ def GrIntCross(F, S, g, Elist, weights):
 
     The cross-term delta_N = -(1/pi) * Im(cross_scalar).
 
-    If crossTermQTot returns None for all energies (orthogonal system),
-    returns (lineInt, 0+0j).
+    For orthogonal systems (crossTermQTot returns None), uses the fast
+    vmap/scan path via GrInt with no cross-term computation. For non-orthogonal
+    systems, uses a single-pass vmap that computes sigmaTot, G^R, and Q_tot
+    once per energy point.
     """
-    lineInt = GrInt(F, S, g, Elist, weights)
-
-    # Check if there are any cross terms to accumulate
+    # Fast path: orthogonal system -- use vmap/scan GrInt, no cross-term
     Q_check = g.crossTermQTot(Elist[0]) if len(Elist) > 0 else None
     if Q_check is None:
+        lineInt = GrInt(F, S, g, Elist, weights)
         return lineInt, 0.0 + 0j
 
-    # Sequential loop for cross-term scalar (avoids JAX-tracing None checks)
-    F_jax = jnp.array(F)
-    S_jax = jnp.array(S)
-    cross_scalar = 0.0 + 0j
-    for E, w in zip(Elist, weights):
-        sigTot = g.sigmaTot(E)
-        Gr = _gr_matrix_ops(sigTot, E, F_jax, S_jax)
-        Q = g.crossTermQTot(E)
-        if Q is not None:
-            cross_scalar = cross_scalar + w * jnp.trace(Gr @ Q)
-
-    parallel_logger.info(f"GrIntCross: cross_scalar = {cross_scalar:.4e}")
-    return lineInt, cross_scalar
+    # Non-orthogonal: single-pass vmap (sigmaTot + crossTermQ once per point)
+    parallel_logger.info("Calculating G^R + cross-term with single-pass GrIntCross...")
+    return _GIntCross(F, S, g, Elist, weights)
 
 
 def GrLessInt(F, S, g, Elist, weights, ind=None):
