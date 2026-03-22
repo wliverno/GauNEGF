@@ -201,6 +201,7 @@ class surfGB:
                 Vlist.append(self.constructMat(self.Vdict, d, self.SOC))
             self.Slists.append(Slist)
             self.Vlists.append(Vlist)
+        self.num_contacts = len(self.indsLists)
         # Use surfGBAt() object to store the atomic Bethe lattice green's function for each contact
         self.gList = [surfGBAt(self.H0.copy(), Slist, Vlist, eta, T, self.SOC) for Slist, Vlist in zip(self.Slists, self.Vlists)]
        

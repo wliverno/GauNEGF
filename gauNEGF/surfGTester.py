@@ -81,6 +81,7 @@ class surfGTest:
         self.spin = spin
         self.N = len(Fock)
         self.indsList = indsList
+        self.num_contacts = len(indsList)
         self.sig = [np.array(np.zeros((self.N, self.N)), dtype=complex)]*2
         if sig1 is not None:
             self.sig[0] = formSigma(indsList[0], sig1, self.N, self.S)
