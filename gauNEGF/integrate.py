@@ -14,7 +14,7 @@ import tempfile
 import logging
 
 # IMPORTANT: Import config BEFORE jax to set up JAX environment
-from gauNEGF.config import LOG_LEVEL, LOG_PERFORMANCE, shard_array
+from gauNEGF.config import LOG_LEVEL, LOG_PERFORMANCE, ETA, shard_array
 
 import jax
 import jax.numpy as jnp
@@ -66,16 +66,18 @@ BYTES_TO_GB = 1e9                     # Conversion factor
 @jit
 def _gr_matrix_ops(sigTot, E, F, S):
     """Retarded Green's function matrix operations (used by both vmap and workers)."""
-    mat = E * S - F - sigTot
+    mat = (E + 1j*ETA) * S - F - sigTot
     return jnp.linalg.solve(mat, jnp.eye(F.shape[0]))
 
 # Jit G< function: (g, ind are static)
 @jit
 def _gless_matrix_ops(sig, sigTot, E, F, S):
     """Lesser Green's function matrix operations (used by both vmap and workers)."""
-    mat = E * S - F - sigTot
-    Gr_E = jnp.linalg.solve(mat, jnp.eye(F.shape[0]))
-    Ga_E = jnp.conj(Gr_E).T
+    I = jnp.eye(F.shape[0])
+    mat_r = (E + 1j*ETA) * S - F - sigTot
+    mat_a = (E - 1j*ETA) * S - F - jnp.conj(sigTot).T
+    Gr_E = jnp.linalg.solve(mat_r, I)
+    Ga_E = jnp.linalg.solve(mat_a, I)
     gamma_E = 1j * (sig - jnp.conj(sig).T)
     gless = Gr_E @ gamma_E @ Ga_E
     return gless
@@ -237,7 +239,7 @@ def _GIntCross(F, S, g, Elist, weights):
     weights_jax = jnp.array(weights)
     matrix_size = F.shape[0]
     num_energies = len(Elist)
-    num_contacts = len(g.indsList)
+    num_contacts = g.num_contacts
 
     def weighted_combined(E, w, F_jax, S_jax, g):
         sigTot = g.sigmaTot(E)

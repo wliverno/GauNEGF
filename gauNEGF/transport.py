@@ -23,7 +23,7 @@ import scipy.io as io
 from scipy.integrate import trapezoid
 
 # IMPORTANT: Import config BEFORE jax to set up JAX environment
-from gauNEGF.config import ENERGY_STEP, N_KT, TEMPERATURE, shard_array
+from gauNEGF.config import ENERGY_STEP, ETA, N_KT, TEMPERATURE, shard_array
 from gauNEGF.utils import inv
 
 import jax
@@ -164,7 +164,7 @@ def _Im(A):
 @jit
 def _transmission_kernel_restricted(E, F, S, sigma_total, gamma1, gamma2):
     """JIT-compiled kernel for restricted transmission calculation."""
-    mat = E * S - F - sigma_total
+    mat = (E + 1j*ETA) * S - F - sigma_total
     Gr = inv(mat)
     Ga = jnp.conj(Gr).T
     temp = gamma1 @ Gr @ gamma2
@@ -173,7 +173,7 @@ def _transmission_kernel_restricted(E, F, S, sigma_total, gamma1, gamma2):
 @jit
 def _transmission_kernel_spin_block(E, F, S, sigma_total, gamma1, gamma2):
     """JIT-compiled kernel for spin-resolved block transmission calculation."""
-    mat = E * S - F - sigma_total
+    mat = (E + 1j*ETA) * S - F - sigma_total
     Gr = inv(mat)
 
     # Compute N from matrix dimensions (matrices are 2N x 2N)
@@ -198,7 +198,7 @@ def _transmission_kernel_spin_block(E, F, S, sigma_total, gamma1, gamma2):
 @jit
 def _dos_kernel(E, F, S, sigma_total):
     """JIT-compiled kernel for density of states calculation."""
-    mat = E * S - F - sigma_total
+    mat = (E + 1j*ETA) * S - F - sigma_total
     Gr = inv(mat)
     dos_per_site = -_Im(jnp.diag(Gr)) / jnp.pi
     total_dos = jnp.sum(dos_per_site)
@@ -331,7 +331,7 @@ def dos_single_energy(E, F_jax, S_jax, sigma_calc, spin=None):
         N = F_jax.shape[0] // 2
 
         # Calculate Green's function
-        mat = E * S_jax - F_jax - sigma_total_jax
+        mat = (E + 1j*ETA) * S_jax - F_jax - sigma_total_jax
         Gr = inv(mat)
         Gr = np.asarray(Gr)
 
@@ -358,7 +358,7 @@ def dos_single_energy(E, F_jax, S_jax, sigma_calc, spin=None):
         N = F_jax.shape[0] // 2
 
         # Calculate Green's function
-        mat = E * S_jax - F_jax - sigma_total_jax
+        mat = (E + 1j*ETA) * S_jax - F_jax - sigma_total_jax
         Gr = inv(mat)
         Gr = np.asarray(Gr)
 
