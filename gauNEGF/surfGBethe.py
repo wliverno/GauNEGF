@@ -1188,10 +1188,14 @@ class surfGBAt:
         return sigSurf
 
     def crossTermQ(self, E, sigInds=None, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5):
-        """Symmetrized cross-term Q_sym = sum_k (B_k g S_k + S_k g B_k^dagger) / 2.
+        """Symmetrized cross-term Q_sym = sum_k (B_k g_k S_k + S_k g_k B_k^bar) / 2.
 
         sigInds: list of surface direction indices to include (default: all 9).
-        Uses the shared converged surface Green's function g_surf = inv(A - sigTot).
+        Uses the neighbor Green's function g_k = inv(A - sigTot + sigSurf[pair_k])
+        for each direction k, not the center atom's own Green's function.
+        For out-of-plane UP directions (3,4,5) whose pairs (9,10,11) are not
+        surface directions, g_k = inv(A - sigTot) since the pair self-energy
+        is already absent from sigTot.
         """
         if sigInds is None:
             sigInds = list(range(9))
@@ -1201,14 +1205,41 @@ class surfGBAt:
         E_eff = E - self.dFermi + self.eta * 1j
         A = E_eff * jnp.eye(self.dim) - self.H0
         sigTot = jnp.sum(sigSurf, axis=0)
-        g_surf = LA.inv(A - sigTot)
 
         Q = jnp.zeros((self.dim, self.dim), dtype=complex)
         for k in sigInds:
+            pair_k = (k + 6) % 12
+            if pair_k < 9:
+                g_k = LA.inv(A - sigTot + sigSurf[pair_k])
+            else:
+                g_k = LA.inv(A - sigTot)
             B_k = E_eff * self.Slist[k] - self.Vlist0[k]
             B_k_bar = E_eff * self.Slist[k].conj().T - self.Vlist0[k].conj().T
-            Q_fwd = B_k @ g_surf @ self.Slist[k].conj().T
-            Q_rev = self.Slist[k] @ g_surf @ B_k_bar
+            Q_fwd = B_k @ g_k @ self.Slist[k].conj().T
+            Q_rev = self.Slist[k] @ g_k @ B_k_bar
+            Q = Q + (Q_fwd + Q_rev) / 2
+        return Q
+
+    def crossTermQBulk(self, E, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5):
+        """Bulk cross-term Q_sym over all 12 directions.
+
+        Uses g_k = inv(A - sigTot + sigK[pair_k]) for each direction k,
+        i.e. the neighbor's Green's function excluding the coupling back
+        to the center atom.
+        """
+        sigK = self.sigmaK(E, conv, mix)  # 12 bulk self-energies
+        E_eff = E - self.dFermi + self.eta * 1j
+        A = E_eff * jnp.eye(self.dim) - self.H0
+        sigTot = jnp.sum(sigK, axis=0)
+
+        Q = jnp.zeros((self.dim, self.dim), dtype=complex)
+        for k in range(12):
+            pair_k = (k + 6) % 12
+            g_k = LA.inv(A - sigTot + sigK[pair_k])
+            B_k = E_eff * self.Slist[k] - self.Vlist0[k]
+            B_k_bar = E_eff * self.Slist[k].conj().T - self.Vlist0[k].conj().T
+            Q_fwd = B_k @ g_k @ self.Slist[k].conj().T
+            Q_rev = self.Slist[k] @ g_k @ B_k_bar
             Q = Q + (Q_fwd + Q_rev) / 2
         return Q
 
