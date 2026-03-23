@@ -219,10 +219,10 @@ class surfGB:
         self.S = S
         self.eta = eta
 
-        # JIT compile sigma method with i as static argument (like in surfG1D.py)
-        # This compiles separate versions for each contact (i=0, i=1, etc.)
-        # The expensive iterative calculation gets fully optimized
-        self.sigma = jit(self.sigma, static_argnums=(1,2))  # i is argument 1 (after self)
+        # Note: JIT compilation is on surfGBAt.sigma/sigmaK (the expensive Dyson
+        # iteration).  surfGB.sigma is NOT JIT'd so it can access dFermi and shift
+        # E before calling the atomic methods -- keeping dFermi outside the JIT
+        # boundary avoids stale-closure bugs and unnecessary recompilation.
 
     def genNeighbors(self, plane_normal, first_neighbor):
         """
@@ -530,7 +530,10 @@ class surfGB:
             The Journal of Chemical Physics, 134(4), 044118.
             DOI: 10.1063/1.3526044
         """
-        sigSurf = self.gList[i].sigma(E, conv)
+        # Shift E to reference frame of immutable H0/Vlist0 (keeps dFermi
+        # outside the JIT boundary of surfGBAt.sigma)
+        E_shifted = E - self.gList[i].dFermi
+        sigSurf = self.gList[i].sigma(E_shifted, conv)
 
         # Get contact-specific data for this static contact index
         nIndLists_i = self.nIndLists[i]
@@ -617,10 +620,11 @@ class surfGB:
         nIndLists_i = self.nIndLists[i]
         indsLists_i = self.indsLists[i]
 
+        E_shifted = E - self.gList[i].dFermi
         sig = jnp.zeros((self.N, self.N), dtype=complex)
         for nInds, Finds in zip(nIndLists_i, indsLists_i):
             sigInds = list(set(range(9)) - {int(x) for x in nInds})
-            Q_atom = self.gList[i].crossTermQ(E, sigInds=sigInds, conv=conv)
+            Q_atom = self.gList[i].crossTermQ(E_shifted, sigInds=sigInds, conv=conv)
             sig = sig.at[jnp.ix_(Finds, Finds)].set(Q_atom)
 
         # Apply de-orthonormalization if orthonormal basis (same as sigma)
@@ -1067,7 +1071,10 @@ class surfGBAt:
         #    sigmaK = self.sigmaKprev.copy()
         #else:
         sigmaK = jnp.array([jnp.eye(self.dim)*-1j for k in range(self.NN)], dtype=complex)
-        E_eff = E - self.dFermi + self.eta*1j
+        # E is pre-shifted by the caller (wrapper subtracts dFermi before entering
+        # the JIT boundary).  Using E directly keeps H0/Vlist0 as immutable
+        # constants in the compiled code, eliminating JIT recompilation during SCF.
+        E_eff = E + self.eta*1j
         A = E_eff*jnp.eye(self.dim) - self.H0
 
         #Self-consistency loop using jax.lax.while_loop
@@ -1153,7 +1160,7 @@ class surfGBAt:
 
         #Self-consistency loop using jax.lax.while_loop
         maxIter = 1000
-        E_eff = E - self.dFermi + self.eta*1j
+        E_eff = E + self.eta*1j
         A = E_eff*jnp.eye(self.dim) - self.H0
         planeVec = [0,1,2,6,7,8] # Location of vectors in plane
 
@@ -1201,8 +1208,9 @@ class surfGBAt:
             sigInds = list(range(9))
 
         # Get converged surface self-energies (9 self-energies for surface)
+        # E is pre-shifted by the caller
         sigSurf = self.sigma(E, conv, mix)  # shape (9, dim, dim)
-        E_eff = E - self.dFermi + self.eta * 1j
+        E_eff = E + self.eta * 1j
         A = E_eff * jnp.eye(self.dim) - self.H0
         sigTot = jnp.sum(sigSurf, axis=0)
 
@@ -1227,8 +1235,9 @@ class surfGBAt:
         i.e. the neighbor's Green's function excluding the coupling back
         to the center atom.
         """
+        # E is pre-shifted by the caller
         sigK = self.sigmaK(E, conv, mix)  # 12 bulk self-energies
-        E_eff = E - self.dFermi + self.eta * 1j
+        E_eff = E + self.eta * 1j
         A = E_eff * jnp.eye(self.dim) - self.H0
         sigTot = jnp.sum(sigK, axis=0)
 
@@ -1264,7 +1273,7 @@ class surfGBAt:
     # Wrapper function for compatibility with density.py methods
     def sigmaTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
         sig = jnp.zeros(((self.NN + 1)*self.dim, (self.NN+1)*self.dim), dtype=complex)
-        sigK = self.sigmaK(E, conv)
+        sigK = self.sigmaK(E - self.dFermi, conv)
         sigTot = jnp.sum(sigK, axis=0)
         for k in range(self.NN):
             pair_k = (k + 6)%12 # Opposite direction vector
@@ -1286,7 +1295,8 @@ class surfGBAt:
         float
             Density of states at energy E
         """
-        Gr = LA.inv((E - self.dFermi + 1j*self.eta)*jnp.eye(self.dim) - self.H0 - jnp.sum(self.sigma(E), axis=0))
+        E_shifted = E - self.dFermi
+        Gr = LA.inv((E_shifted + 1j*self.eta)*jnp.eye(self.dim) - self.H0 - jnp.sum(self.sigma(E_shifted), axis=0))
         return -jnp.trace(Gr).imag/jnp.pi
 
     

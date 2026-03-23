@@ -430,12 +430,14 @@ class surfG3:
             The Journal of Chemical Physics, 134(4), 044118.
             DOI: 10.1063/1.3526044  
         """
+        # Shift E to reference frame of immutable H0/Vlist0
+        E_shifted = E - self.gList[i].dFermi
         sig = jnp.zeros((self.N, self.N), dtype=complex)
-        G_AB = self.gList[i].gSurf(E, conv)
+        G_AB = self.gList[i].gSurf(E_shifted, conv)
         # Apply self energies in first 9 directions that aren't attached to atom
         for nInds, Finds in zip(self.nIndLists[i], self.indsLists[i]):
             sigInds = list(set(range(9)) - {int(x) for x in nInds})
-            sigAtom = self.gList[i].sigma(E, active_dirs=sigInds, G_AB=G_AB)
+            sigAtom = self.gList[i].sigma(E_shifted, active_dirs=sigInds, G_AB=G_AB)
             sig = sig.at[jnp.ix_(Finds, Finds)].set(sigAtom)
         # Apply de-orthonormalization technique from ANT.Gaussian if orthonormal
         if self.Sdict['sss'] == 0:
@@ -483,11 +485,12 @@ class surfG3:
         Mirrors surfG3.sigma: computes G_AB via gSurf, then for each atom
         in contact i assembles Q using active directions, applies Xi.
         """
+        E_shifted = E - self.gList[i].dFermi
         sig = jnp.zeros((self.N, self.N), dtype=complex)
-        G_AB = self.gList[i].gSurf(E, conv)
+        G_AB = self.gList[i].gSurf(E_shifted, conv)
         for nInds, Finds in zip(self.nIndLists[i], self.indsLists[i]):
             sigInds = list(set(range(9)) - {int(x) for x in nInds})
-            Q_atom = self.gList[i].crossTermQ(E, active_dirs=sigInds, G_AB=G_AB)
+            Q_atom = self.gList[i].crossTermQ(E_shifted, active_dirs=sigInds, G_AB=G_AB)
             sig = sig.at[jnp.ix_(Finds, Finds)].set(Q_atom)
 
         if self.Sdict['sss'] == 0:
@@ -1027,8 +1030,8 @@ class surfGAt3D:
 
         # Direct inversion: g(k) = [(E + i*eta)S(k) - H(k)]^-1
         # Vectorized over all k-points, automatically parallelized across devices
-        E_eff = E - self.dFermi
-        g_k = jax.vmap(lambda H, S: LA.inv((E_eff + self.eta*1j)*S - H))(Hk_sharded, Sk_sharded)
+        # E is pre-shifted by the caller (wrapper subtracts dFermi)
+        g_k = jax.vmap(lambda H, S: LA.inv((E + self.eta*1j)*S - H))(Hk_sharded, Sk_sharded)
 
         # Inverse FT: build 108x108 real-space propagator G_AB
         # G_AB[A,B] = (1/Nk) sum_k exp(+ik*R_A) * g_k * exp(-ik*R_B)
@@ -1067,8 +1070,8 @@ class surfGAt3D:
 
             # Build tau: horizontal concat of phase-free couplings
             # active_dirs must be a static Python list (not a traced JAX value)
-            E_eff = E - self.dFermi
-            z = E_eff + self.eta*1j
+            # E is pre-shifted by the caller
+            z = E + self.eta*1j
             tau_blocks = [z * self.Slist[a] - self.Vlist0[a] for a in active_dirs]
             tau = jnp.concatenate(tau_blocks, axis=1)  # dim x (11*dim)
             bar_tau_blocks = [z * self.Slist[a].conj().T - self.Vlist0[a].conj().T for a in active_dirs]
@@ -1089,7 +1092,7 @@ class surfGAt3D:
         Flist = self.expList_2D[:, :, None, None]*self.Vlist0[None, :, :, :]# nK**2 x NN x dim x dim
         Slist = self.expList_2D[:, :, None, None]*self.Slist[None, :, :, :]# nK**2 x NN x dim x dim
 
-        E_eff = E - self.dFermi
+        # E is pre-shifted by the caller (wrapper subtracts dFermi)
         # A matrix: in-plane neighbors only (vecs 0,1,2,6,7,8)
         # These are the 6 in-plane directions with z=0
         in_plane_indices = jnp.array([0, 1, 2, 6, 7, 8])
@@ -1097,14 +1100,14 @@ class surfGAt3D:
                 jnp.repeat(self.H0[None, :, :], self.kPoints**2, axis=0)
         Sak = jnp.sum(Slist[:, in_plane_indices, :, :], axis=1) + \
                 jnp.repeat(jnp.eye(dim)[None, :, :], self.kPoints**2, axis=0)
-        A = (E_eff + self.eta*1j)*Sak - Fak
+        A = (E + self.eta*1j)*Sak - Fak
 
         # B matrix: out-of-plane neighbors pointing UP (vecs 3,4,5)
         # These connect surface to bulk above
         out_plane_indices = jnp.array([3, 4, 5])
         Fbk = jnp.sum(Flist[:, out_plane_indices, :, :], axis=1)
         Sbk = jnp.sum(Slist[:, out_plane_indices, :, :], axis=1)
-        z = E_eff + self.eta*1j
+        z = E + self.eta*1j
         B = z*Sbk - Fbk
         B_bar = z*jnp.conj(Sbk).transpose(0,2,1) - jnp.conj(Fbk).transpose(0,2,1)
 
@@ -1204,8 +1207,8 @@ class surfGAt3D:
 
         # Build tau: horizontal concat of phase-free coupling matrices
         # active_dirs must be a static Python list (not a traced JAX value)
-        E_eff = E - self.dFermi
-        z = E_eff + self.eta*1j
+        # E is pre-shifted by the caller
+        z = E + self.eta*1j
         tau_blocks = [z * self.Slist[a] - self.Vlist0[a] for a in active_dirs]
         tau = jnp.concatenate(tau_blocks, axis=1)  # dim x (nDirs*dim)
         bar_tau_blocks = [z * self.Slist[a].conj().T - self.Vlist0[a].conj().T for a in active_dirs]
@@ -1233,9 +1236,10 @@ class surfGAt3D:
         if G_AB is None:
             G_AB = self.gSurf(E, conv, mix)
 
-        E_eff = E - self.dFermi
+        # E is pre-shifted by the caller
+        z = E + self.eta * 1j
 
-        tau_blocks = [(E_eff + self.eta * 1j) * self.Slist[a] - self.Vlist0[a]
+        tau_blocks = [z * self.Slist[a] - self.Vlist0[a]
                       for a in active_dirs]
         tau = jnp.concatenate(tau_blocks, axis=1)  # (dim, nDirs*dim)
 
@@ -1244,7 +1248,7 @@ class surfGAt3D:
         # S_DL: row stack of S[a] for each active direction, shape (dim, nDirs*dim)
         S_DL = jnp.concatenate([self.Slist[a] for a in active_dirs], axis=1)
         # bar_tau: right-side coupling, uses z (not z*) with S^H, V^H
-        bar_tau = jnp.concatenate([(E_eff + self.eta * 1j) * self.Slist[a].conj().T
+        bar_tau = jnp.concatenate([z * self.Slist[a].conj().T
                                     - self.Vlist0[a].conj().T
                                     for a in active_dirs], axis=0)
 
@@ -1296,7 +1300,8 @@ class surfGAt3D:
         sig = jnp.zeros(((self.NN + 1)*dim, (self.NN+1)*dim), dtype=complex)
 
         # sigmaBulk returns 12 self-energies, each from 11 dirs (excluding reverse)
-        sigList = self.sigmaBulk(E)  # 12 x dim x dim
+        # Shift E to reference frame of immutable H0/Vlist0
+        sigList = self.sigmaBulk(E - self.dFermi)  # 12 x dim x dim
 
         # Place each on the diagonal of the extended system
         for k in range(self.NN):
@@ -1323,8 +1328,9 @@ class surfGAt3D:
         float
             Density of states at energy E
         """
-        sig = self.sigma(E, conv=conv, mix=mix)  # dim x dim
-        Gr = LA.inv((E - self.dFermi + self.eta*1j)*jnp.eye(dim) - self.H0 - sig)
+        E_shifted = E - self.dFermi
+        sig = self.sigma(E_shifted, conv=conv, mix=mix)  # dim x dim
+        Gr = LA.inv((E_shifted + self.eta*1j)*jnp.eye(dim) - self.H0 - sig)
         return -jnp.trace(Gr).imag / jnp.pi
 
     def generate_band_plot(self, E_fermi=0.0, n_points=40, plot=True, save_path=None):
