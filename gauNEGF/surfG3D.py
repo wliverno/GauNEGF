@@ -133,6 +133,7 @@ class surfG3:
         fermi = self.gList[0].calcFermi(self.ne/2)
         for g in self.gList:
             g.fermi = fermi
+            g.fermi0 = fermi
 
         # Store variables
         self.cList = cList #first contact coords, used for testing
@@ -1525,5 +1526,7 @@ class surfGAt3D:
         """
         print('Calculating Bulk Lattice Fermi Energy...')
         self.fermi = getFermiContact(self, ne, conv=tol, maxcycles=1000, T=self.T, nOrbs=dim)
+        if self.fermi0 is None:
+            self.fermi0 = self.fermi
         return self.fermi
 
