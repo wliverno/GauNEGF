@@ -212,6 +212,7 @@ class surfGB:
         fermi = self.gList[0].calcFermi(ne_fermi)
         for g in self.gList:
             g.fermi = fermi
+            g.fermi0 = fermi
 
         # Store variables
         self.cList = cList #first contact coords, used for testing
@@ -1329,6 +1330,8 @@ class surfGBAt:
         """
         print('Calculating Bulk Bethe Lattice Fermi level...')
         self.fermi = getFermiContact(self, ne, conv=tol, maxcycles=1000, T=self.T, nOrbs=self.dim)
+        if self.fermi0 is None:
+            self.fermi0 = self.fermi
         return self.fermi
 
 
