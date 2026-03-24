@@ -281,8 +281,8 @@ class NEGFE(NEGF):
         print('SETTING INTEGRATION LIMITS... ')
         self.Emin, self.N1, self.N2 = integralFit(self.F*har_to_eV, self.S, self.g,
                                                   self.fermi, self.Eminf, self.tol)
-        PLower = densityRealN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, self.T)
-        nLower = np.trace(self.S@PLower).real
+        PLower, delta_N_lower = densityRealN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, self.T)
+        nLower = np.trace(self.S@PLower).real + delta_N_lower
         if self.mu1 != self.mu2:
             self.Nnegf = integralFitNEGF(self.F*har_to_eV, self.S, self.g, self.fermi, 
                                          self.qV, self.Eminf, self.tol, self.T)
@@ -355,10 +355,10 @@ class NEGFE(NEGF):
         print('Calculating lower density matrix:')
         if self.N2 is None:
             self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, Emin=self.Emin)
-            P, _ = densityComplex(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
+            P, _delta_N_lower = densityComplex(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
         else:
-            P = densityRealN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
-        nLower = np.trace(self.S@P).real
+            P, _delta_N_lower = densityRealN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
+        nLower = np.trace(self.S@P).real + _delta_N_lower
         # Helper function for densityComplex()
         def compContourP2(mu):
                 if self.N1 is not None:
@@ -407,6 +407,8 @@ class NEGFE(NEGF):
                 P += compContourP2(self.mu1)
 
                 # Fix number of electrons
+                # TODO: nActual omits cross-term delta_N; acceptable since predict
+                # uses constant-sigma approximation (delta_N << approximation error)
                 nActual = np.real(np.trace(P @ self.S))
                 P *= ne/nActual
 
