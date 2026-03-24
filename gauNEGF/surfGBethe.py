@@ -220,7 +220,7 @@ class surfGB:
         self.S = S
         self.eta = eta
 
-        # Note: JIT compilation is on surfGBAt.sigma/sigmaK (the expensive Dyson
+        # Note: JIT compilation is on surfGBAt.sigmaSurf/sigmaK (the expensive Dyson
         # iteration).  surfGB.sigma is NOT JIT'd so it can access dFermi and shift
         # E before calling the atomic methods -- keeping dFermi outside the JIT
         # boundary avoids stale-closure bugs and unnecessary recompilation.
@@ -534,7 +534,7 @@ class surfGB:
         # Shift E to reference frame of immutable H0/Vlist0 (keeps dFermi
         # outside the JIT boundary of surfGBAt.sigma)
         E_shifted = E - self.gList[i].dFermi
-        sigSurf = self.gList[i].sigma(E_shifted, conv)
+        sigSurf = self.gList[i].sigmaSurf(E_shifted, conv)
 
         # Get contact-specific data for this static contact index
         nIndLists_i = self.nIndLists[i]
@@ -625,7 +625,7 @@ class surfGB:
         sig = jnp.zeros((self.N, self.N), dtype=complex)
         for nInds, Finds in zip(nIndLists_i, indsLists_i):
             sigInds = list(set(range(9)) - {int(x) for x in nInds})
-            Q_atom = self.gList[i].crossTermQ(E_shifted, sigInds=sigInds, conv=conv)
+            Q_atom = self.gList[i].crossTermQSurf(E_shifted, sigInds=sigInds, conv=conv)
             sig = sig.at[jnp.ix_(Finds, Finds)].set(Q_atom)
 
         # Apply de-orthonormalization if orthonormal basis (same as sigma)
@@ -985,33 +985,24 @@ class surfGBAt:
         self.Vlist0 = jnp.array(Vlist)  # immutable reference (never mutated)
         self.fermi0 = None               # reference Fermi level
         self.dFermi = 0.0               # shift from reference
+        self.num_contacts = 1
 
         self.updateH()
 
         # JIT compile methods with self as static argument
         self.sigmaK = jit(self.sigmaK, static_argnums=(1,2))
-        self.sigma = jit(self.sigma, static_argnums=(1,2))
+        self.sigmaSurf = jit(self.sigmaSurf, static_argnums=(1,2))
 
     def updateH(self, fermi=None):
         """
-        Update Hamiltonian and extended matrices.
+        Update Hamiltonian and Fock matrix.
 
-        Updates onsite and hopping matrices, as well as extended lattice matrices.
-        The extended matrices H0x and S0x include 13 sites total (12 neighbor sites
-        followed by 1 onsite term). These are stored as F and S for compatibility
-        with density.py functions.
+        Sets F = H (9x9) and S = I for protocol compatibility with density.py.
 
         Parameters
         ----------
         fermi : float, optional
             New Fermi energy setpoint in eV (default: None)
-
-        Notes
-        -----
-        When fermi is provided and different from current value:
-        - Shifts onsite energies by the Fermi level difference
-        - Updates hopping matrices with overlap contributions
-        - Rebuilds extended matrices for the full system
         """
         if fermi is not None and fermi != self.fermi:
             self.fermi = fermi
@@ -1024,15 +1015,8 @@ class surfGBAt:
         self.Vlist = jnp.array([self.Vlist0[j] + self.dFermi * self.Slist[j]
                                  for j in range(self.NN)])
 
-        H0x = jnp.kron(jnp.eye(self.NN+1), self.H)
-        S0x = jnp.eye(self.dim*(self.NN+1))
-        for i in range(self.NN):
-            S0x = S0x.at[-self.dim:, i*self.dim:(i+1)*self.dim].set(self.Slist[i])
-            S0x = S0x.at[i*self.dim:(i+1)*self.dim, -self.dim:].set(self.Slist[i].T)
-            H0x = H0x.at[-self.dim:, i*self.dim:(i+1)*self.dim].set(self.Vlist[i])
-            H0x = H0x.at[i*self.dim:(i+1)*self.dim, -self.dim:].set(self.Vlist[i].conj().T)
-        self.F = H0x
-        self.S = S0x
+        self.F = self.H    # 9x9
+        self.S = jnp.eye(self.dim)
 
     # Calculate sigmaK for the bulk
     def sigmaK(self, E, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5):
@@ -1115,7 +1099,7 @@ class surfGBAt:
 
         return sigmaK
 
-    def sigma(self, E, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5): 
+    def sigmaSurf(self, E, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5):
         """
         Calculate surface self-energies for an FCC lattice.
 
@@ -1195,7 +1179,7 @@ class surfGBAt:
         
         return sigSurf
 
-    def crossTermQ(self, E, sigInds=None, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5):
+    def crossTermQSurf(self, E, sigInds=None, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5):
         """Symmetrized cross-term Q_sym = sum_k (B_k g_k S_k + S_k g_k B_k^bar) / 2.
 
         sigInds: list of surface direction indices to include (default: all 9).
@@ -1210,7 +1194,7 @@ class surfGBAt:
 
         # Get converged surface self-energies (9 self-energies for surface)
         # E is pre-shifted by the caller
-        sigSurf = self.sigma(E, conv, mix)  # shape (9, dim, dim)
+        sigSurf = self.sigmaSurf(E, conv, mix)  # shape (9, dim, dim)
         E_eff = E + self.eta * 1j
         A = E_eff * jnp.eye(self.dim) - self.H0
         sigTot = jnp.sum(sigSurf, axis=0)
@@ -1271,15 +1255,20 @@ class surfGBAt:
         """
         pass # Bethe lattice bulk properties are intrinsic (dependent on TB parameters)
     
-    # Wrapper function for compatibility with density.py methods
     def sigmaTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
-        sig = jnp.zeros(((self.NN + 1)*self.dim, (self.NN+1)*self.dim), dtype=complex)
-        sigK = self.sigmaK(E - self.dFermi, conv)
-        sigTot = jnp.sum(sigK, axis=0)
-        for k in range(self.NN):
-            pair_k = (k + 6)%12 # Opposite direction vector
-            sig = sig.at[k*self.dim:(k+1)*self.dim,k*self.dim:(k+1)*self.dim].set(sigTot - sigK[pair_k])
-        return sig
+        return jnp.sum(self.sigmaK(E - self.dFermi, conv), axis=0)
+
+    def sigma(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
+        """Self-energy for contact i (only i=0, single bulk contact)."""
+        return self.sigmaTot(E, conv)
+
+    def crossTermQ(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
+        """Cross-term Q_sym for contact i (delegates to crossTermQBulk)."""
+        return self.crossTermQBulk(E - self.dFermi, conv)
+
+    def crossTermQTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
+        """Total cross-term Q_sym (single contact = crossTermQ)."""
+        return self.crossTermQ(E, 0, conv)
 
     # Get the surface DOS of the Bethe lattice
     def DOS(self, E):
@@ -1297,7 +1286,7 @@ class surfGBAt:
             Density of states at energy E
         """
         E_shifted = E - self.dFermi
-        Gr = LA.inv((E_shifted + 1j*self.eta)*jnp.eye(self.dim) - self.H0 - jnp.sum(self.sigma(E_shifted), axis=0))
+        Gr = LA.inv((E_shifted + 1j*self.eta)*jnp.eye(self.dim) - self.H0 - jnp.sum(self.sigmaSurf(E_shifted), axis=0))
         return -jnp.trace(Gr).imag/jnp.pi
 
     
@@ -1329,7 +1318,7 @@ class surfGBAt:
         integration. Current version uses simpler bisection method from density.py.
         """
         print('Calculating Bulk Bethe Lattice Fermi level...')
-        self.fermi = getFermiContact(self, ne, conv=tol, maxcycles=1000, T=self.T, nOrbs=self.dim)
+        self.fermi = getFermiContact(self, ne, conv=tol, maxcycles=1000, T=self.T)
         if self.fermi0 is None:
             self.fermi0 = self.fermi
         return self.fermi

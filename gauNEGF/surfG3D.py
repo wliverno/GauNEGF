@@ -438,7 +438,7 @@ class surfG3:
         # Apply self energies in first 9 directions that aren't attached to atom
         for nInds, Finds in zip(self.nIndLists[i], self.indsLists[i]):
             sigInds = list(set(range(9)) - {int(x) for x in nInds})
-            sigAtom = self.gList[i].sigma(E_shifted, active_dirs=sigInds, G_AB=G_AB)
+            sigAtom = self.gList[i].sigmaSurf(E_shifted, active_dirs=sigInds, G_AB=G_AB)
             sig = sig.at[jnp.ix_(Finds, Finds)].set(sigAtom)
         # Apply de-orthonormalization technique from ANT.Gaussian if orthonormal
         if self.Sdict['sss'] == 0:
@@ -491,7 +491,7 @@ class surfG3:
         G_AB = self.gList[i].gSurf(E_shifted, conv)
         for nInds, Finds in zip(self.nIndLists[i], self.indsLists[i]):
             sigInds = list(set(range(9)) - {int(x) for x in nInds})
-            Q_atom = self.gList[i].crossTermQ(E_shifted, active_dirs=sigInds, G_AB=G_AB)
+            Q_atom = self.gList[i].crossTermQSurf(E_shifted, active_dirs=sigInds, G_AB=G_AB)
             sig = sig.at[jnp.ix_(Finds, Finds)].set(Q_atom)
 
         if self.Sdict['sss'] == 0:
@@ -861,6 +861,7 @@ class surfGAt3D:
         self.fermi = None
         self.fermi0 = None    # reference Fermi level
         self.dFermi = 0.0    # shift from reference
+        self.num_contacts = 1
 
         # Pre-compute k-mesh for surface (2D) and bulk (3D)
         self._setup_kmesh_2D()
@@ -870,12 +871,12 @@ class surfGAt3D:
 
     def updateH(self, fermi=None):
         """
-        Update Hamiltonian and extended matrices.
+        Update Hamiltonian and protocol matrices F/S.
 
-        Updates onsite and hopping matrices, as well as extended lattice matrices.
-        The extended matrices H0x and S0x include 13 sites total (12 neighbor sites
-        followed by 1 onsite term). These are stored as F and S for compatibility
-        with density.py functions.
+        Updates onsite and hopping matrices. F and S are the 9x9 single-atom
+        Hamiltonian and identity overlap, compatible with density.py and the
+        SurfGProtocol interface. Self-energies from bulk neighbors are provided
+        via sigmaTot()/sigma().
 
         Parameters
         ----------
@@ -887,7 +888,6 @@ class surfGAt3D:
         When fermi is provided and different from current value:
         - Shifts onsite energies by the Fermi level difference
         - Updates hopping matrices with overlap contributions
-        - Rebuilds extended matrices for the full system
         """
         if fermi is not None and fermi != self.fermi:
             self.fermi = fermi
@@ -900,15 +900,8 @@ class surfGAt3D:
         self.Vlist = jnp.array([self.Vlist0[j] + self.dFermi * self.Slist[j]
                                  for j in range(self.NN)])
 
-        H0x = jnp.kron(jnp.eye(self.NN+1), self.H)
-        S0x = jnp.eye(dim*(self.NN+1))
-        for i in range(self.NN):
-            S0x = S0x.at[-dim:, i*dim:(i+1)*dim].set(self.Slist[i])
-            S0x = S0x.at[i*dim:(i+1)*dim, -dim:].set(self.Slist[i].T)
-            H0x = H0x.at[-dim:, i*dim:(i+1)*dim].set(self.Vlist[i])
-            H0x = H0x.at[i*dim:(i+1)*dim, -dim:].set(self.Vlist[i].conj().T)
-        self.F = H0x
-        self.S = S0x
+        self.F = self.H          # 9x9 (dim x dim)
+        self.S = jnp.eye(dim)
 
     def _setup_kmesh_2D(self):
         """
@@ -1044,47 +1037,31 @@ class surfGAt3D:
 
     def sigmaBulk(self, E):
         """
-        Calculate bulk self-energies for all 12 directions using G_AB propagator.
+        Total bulk self-energy for the center atom (dim x dim).
 
-        For each direction k, computes the self-energy from 11 directions
-        (all except the reverse direction pair_k = (k+6)%12):
-            Sigma_k = tau_k @ G_sub_k @ tau_k'
-        where tau_k is the horizontal concat of phase-free coupling matrices
-        and G_sub_k is the sub-block of G_AB for those 11 directions.
+        Uses G_AB propagator with all 12 neighbors:
+            Sigma = tau @ G_AB @ bar_tau
+        where tau = [tau_0 | tau_1 | ... | tau_11] is the horizontal
+        concatenation of all 12 phase-free coupling matrices.
 
         Parameters
         ----------
         E : float
-            Energy point for self-energy calculation (in eV)
+            Energy point for self-energy calculation (in eV), pre-shifted
+            by the caller to remove dFermi.
 
         Returns
         -------
         ndarray
-            Array of 12 self-energy matrices (shape: 12 x dim x dim)
+            Total self-energy matrix (shape: dim x dim)
         """
         G_AB = self.gBulk(E)  # 108 x 108
-
-        sigList = []
-        for k in range(12):
-            pair_k = (k + 6) % 12  # Reverse direction
-            active_dirs = [d for d in range(12) if d != pair_k]  # 11 dirs
-
-            # Build tau: horizontal concat of phase-free couplings
-            # active_dirs must be a static Python list (not a traced JAX value)
-            # E is pre-shifted by the caller
-            z = E + self.eta*1j
-            tau_blocks = [z * self.Slist[a] - self.Vlist0[a] for a in active_dirs]
-            tau = jnp.concatenate(tau_blocks, axis=1)  # dim x (11*dim)
-            bar_tau_blocks = [z * self.Slist[a].conj().T - self.Vlist0[a].conj().T for a in active_dirs]
-            bar_tau = jnp.concatenate(bar_tau_blocks, axis=0)  # (11*dim) x dim
-
-            # Extract sub-block of G_AB for active directions
-            row_idx = jnp.concatenate([jnp.arange(a*dim, (a+1)*dim) for a in active_dirs])
-            G_sub = G_AB[jnp.ix_(row_idx, row_idx)]  # (11*dim) x (11*dim)
-
-            sigList.append(tau @ G_sub @ bar_tau)
-
-        return jnp.array(sigList)  # 12 x dim x dim
+        z = E + self.eta * 1j
+        tau = jnp.concatenate([z * self.Slist[k] - self.Vlist0[k]
+                                for k in range(12)], axis=1)         # dim x 108
+        bar_tau = jnp.concatenate([z * self.Slist[k].conj().T - self.Vlist0[k].conj().T
+                                   for k in range(12)], axis=0)      # 108 x dim
+        return tau @ G_AB @ bar_tau                                   # dim x dim
 
     # Calculate Green's function for the surface
     def gSurf(self, E, conv=1e-4, mix=0.1, maxIter=5000):
@@ -1171,7 +1148,7 @@ class surfGAt3D:
         G_AB = G_AB_blocks.transpose(0, 2, 1, 3).reshape(9 * dim, 9 * dim)
         return G_AB
 
-    def sigma(self, E, active_dirs=None, conv=1e-4, mix=0.1, G_AB=None):
+    def sigmaSurf(self, E, active_dirs=None, conv=1e-4, mix=0.1, G_AB=None):
         """
         Calculate surface self-energy using G_AB propagator.
 
@@ -1224,7 +1201,7 @@ class surfGAt3D:
         # Self-energy: tau @ G_sub @ bar_tau
         return tau @ G_sub @ bar_tau  # dim x dim
 
-    def crossTermQ(self, E, active_dirs=None, conv=1e-4, mix=0.1, G_AB=None):
+    def crossTermQSurf(self, E, active_dirs=None, conv=1e-4, mix=0.1, G_AB=None):
         """Symmetrized cross-term Q_sym using G_AB propagator.
 
         Q_sym = (tau @ G_sub @ S_LD + S_DL @ G_sub @ tau^dagger) / 2
@@ -1280,13 +1257,10 @@ class surfGAt3D:
     
     def sigmaTot(self, E):
         """
-        Calculate total self-energy matrix for the extended system.
+        Total self-energy for the center atom (dim x dim).
 
-        Computes self-energies for the full extended system including 12 neighbor sites
-        plus 1 central site. For each neighbor site k, applies the bulk self-energy
-        from 11 directions (excluding the direction back to center).
-
-        Used for calculating Fermi energy of the bulk system.
+        Delegates to sigmaBulk after removing the Fermi shift so that
+        H0/Vlist0 (immutable reference frame) are used.
 
         Parameters
         ----------
@@ -1296,20 +1270,90 @@ class surfGAt3D:
         Returns
         -------
         ndarray
-            Total self-energy matrix for the extended system ((NN+1)*dim, (NN+1)*dim)
+            Total self-energy matrix (shape: dim x dim)
         """
-        sig = jnp.zeros(((self.NN + 1)*dim, (self.NN+1)*dim), dtype=complex)
+        return self.sigmaBulk(E - self.dFermi)
 
-        # sigmaBulk returns 12 self-energies, each from 11 dirs (excluding reverse)
-        # Shift E to reference frame of immutable H0/Vlist0
-        sigList = self.sigmaBulk(E - self.dFermi)  # 12 x dim x dim
+    def sigma(self, E, i):
+        """Self-energy for contact i (only i=0, single bulk contact).
 
-        # Place each on the diagonal of the extended system
-        for k in range(self.NN):
-            sig = sig.at[k*dim:(k+1)*dim, k*dim:(k+1)*dim].set(sigList[k])
+        Parameters
+        ----------
+        E : float
+            Energy point in eV
+        i : int
+            Contact index (must be 0)
 
-        # Center site (site 12) has zero self-energy
-        return sig
+        Returns
+        -------
+        ndarray
+            Self-energy matrix (shape: dim x dim)
+        """
+        return self.sigmaTot(E)
+
+    def crossTermQBulk(self, E):
+        """Bulk cross-term Q_sym using G_AB propagator (dim x dim).
+
+        Computes the symmetrized cross-term for Mulliken population correction:
+            Q_sym = (tau @ G_AB @ S_LD + S_DL @ G_AB @ bar_tau) / 2
+
+        where tau and bar_tau use all 12 neighbor directions.
+
+        Parameters
+        ----------
+        E : float
+            Energy point in eV, pre-shifted by the caller to remove dFermi.
+
+        Returns
+        -------
+        ndarray
+            Symmetrized cross-term matrix (shape: dim x dim)
+        """
+        G_AB = self.gBulk(E)  # 108 x 108
+        z = E + self.eta * 1j
+        tau = jnp.concatenate([z * self.Slist[k] - self.Vlist0[k]
+                                for k in range(12)], axis=1)
+        bar_tau = jnp.concatenate([z * self.Slist[k].conj().T - self.Vlist0[k].conj().T
+                                   for k in range(12)], axis=0)
+        S_LD = jnp.concatenate([self.Slist[k].conj().T
+                                 for k in range(12)], axis=0)
+        S_DL = jnp.concatenate([self.Slist[k]
+                                 for k in range(12)], axis=1)
+        Q_fwd = tau @ G_AB @ S_LD
+        Q_rev = S_DL @ G_AB @ bar_tau
+        return (Q_fwd + Q_rev) / 2
+
+    def crossTermQ(self, E, i):
+        """Cross-term Q_sym for contact i (delegates to crossTermQBulk).
+
+        Parameters
+        ----------
+        E : float
+            Energy point in eV
+        i : int
+            Contact index (must be 0)
+
+        Returns
+        -------
+        ndarray
+            Symmetrized cross-term matrix (shape: dim x dim)
+        """
+        return self.crossTermQBulk(E - self.dFermi)
+
+    def crossTermQTot(self, E):
+        """Total cross-term Q_sym (single bulk contact).
+
+        Parameters
+        ----------
+        E : float
+            Energy point in eV
+
+        Returns
+        -------
+        ndarray
+            Symmetrized cross-term matrix (shape: dim x dim)
+        """
+        return self.crossTermQ(E, 0)
 
     def DOS(self, E, conv=1e-4, mix=0.1):
         """
@@ -1330,7 +1374,7 @@ class surfGAt3D:
             Density of states at energy E
         """
         E_shifted = E - self.dFermi
-        sig = self.sigma(E_shifted, conv=conv, mix=mix)  # dim x dim
+        sig = self.sigmaSurf(E_shifted, conv=conv, mix=mix)  # dim x dim
         Gr = LA.inv((E_shifted + self.eta*1j)*jnp.eye(dim) - self.H0 - sig)
         return -jnp.trace(Gr).imag / jnp.pi
 
@@ -1525,7 +1569,7 @@ class surfGAt3D:
         integration. Current version uses simpler bisection method from density.py.
         """
         print('Calculating Bulk Lattice Fermi Energy...')
-        self.fermi = getFermiContact(self, ne, conv=tol, maxcycles=1000, T=self.T, nOrbs=dim)
+        self.fermi = getFermiContact(self, ne, conv=tol, maxcycles=1000, T=self.T)
         if self.fermi0 is None:
             self.fermi0 = self.fermi
         return self.fermi

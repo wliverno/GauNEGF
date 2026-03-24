@@ -1,8 +1,9 @@
-"""Protocol definitions for the surfG interface hierarchy.
+"""Protocol definitions for the surfG interface.
 
-Two-level design:
-- SurfGAtomicProtocol: atomic-level calculators (surfGAt3D, surfGBAt)
-- SurfGProtocol: wrapper-level calculators (surfG, surfG3, surfGB, surfGTest)
+SurfGProtocol: the single interface that density.py and integrate.py
+interact with.
+
+Implemented by: surfG, surfG3, surfGB, surfGTest, surfGAt3D, surfGBAt
 
 These are structural (duck-typed) protocols -- classes do NOT need to
 inherit from them. They exist for documentation and optional type-checking
@@ -19,45 +20,12 @@ import numpy as np
 
 
 @runtime_checkable
-class SurfGAtomicProtocol(Protocol):
-    """Protocol for atomic-level surface Green's function calculators.
-
-    Implemented by: surfGAt3D, surfGBAt
-
-    These classes compute self-energy and cross-term Q for a single atom's
-    orbital space. The wrapper classes (surfG3, surfGB) delegate to these
-    and map results into the full device basis.
-
-    Callers are responsible for shifting E by dFermi before calling
-    sigma() or crossTermQ().
-    """
-
-    H0: np.ndarray          # reference onsite Hamiltonian (immutable)
-    dFermi: float            # current Fermi shift from reference
-
-    def updateH(self, fermi: float = None) -> None:
-        """Update Fermi shift. Does NOT mutate H0 or Vlist0."""
-        ...
-
-    def sigma(self, E: complex, *args, **kwargs) -> np.ndarray:
-        """Self-energy at energy E."""
-        ...
-
-    def crossTermQ(self, E: complex, *args, **kwargs) -> Optional[np.ndarray]:
-        """Cross-term Q_sym at energy E.
-
-        Returns None if the contact basis is orthogonal (S_DL = 0).
-        """
-        ...
-
-
-@runtime_checkable
 class SurfGProtocol(Protocol):
-    """Protocol for wrapper-level surface Green's function calculators.
+    """Protocol for surface Green's function calculators.
 
     This is the interface that density.py and integrate.py interact with.
 
-    Implemented by: surfG, surfG3, surfGB, surfGTest
+    Implemented by: surfG, surfG3, surfGB, surfGTest, surfGAt3D, surfGBAt
 
     Note: Parameter names for setF() vary across implementations
     (mu1/mu2 vs muL/muR). This does not affect structural typing.

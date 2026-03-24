@@ -228,6 +228,8 @@ def integratePointsAdaptiveANT(computePoint, tol=ADAPTIVE_INTEGRATION_TOL, maxN=
     prev_x = None
     prev_sumW = None
     P = None
+    accum = None
+    is_tuple = None
     N = 2
     maxDP = 1e10
     while N<=maxN:
@@ -235,7 +237,12 @@ def integratePointsAdaptiveANT(computePoint, tol=ADAPTIVE_INTEGRATION_TOL, maxN=
 
         if prev_x is None:
             # first level: no reuse
-            P = computePoint(x[0:2], w[0:2])
+            result = computePoint(x[0:2], w[0:2])
+            is_tuple = isinstance(result, tuple)
+            if is_tuple:
+                P, accum = result
+            else:
+                P = result
         else:
             # mark old nodes robustly by value
             old_mask = np.isin(np.round(x, 14), np.round(prev_x, 14))
@@ -247,18 +254,29 @@ def integratePointsAdaptiveANT(computePoint, tol=ADAPTIVE_INTEGRATION_TOL, maxN=
 
             # scale previous integral + add only new-node contributions
             new_mask = ~old_mask
-            new_P = P*ratio
-            new_P += computePoint(x[new_mask], w[new_mask])
+            new_result = computePoint(x[new_mask], w[new_mask])
+            if is_tuple:
+                new_mat, new_scl = new_result
+                new_P = P * ratio + new_mat
+                new_accum = accum * ratio + new_scl
+            else:
+                new_P = P*ratio + new_result
+
             maxDP = np.max(np.abs(new_P-P))
             if debug:
-                P_debug = computePoint(x, w)
+                full_result = computePoint(x, w)
+                P_debug = full_result[0] if is_tuple else full_result
                 maxDP_debug = np.max(np.abs(P_debug-P))
                 maxDiff = np.max(np.abs(P_debug-new_P))
                 print(f"N={N}, nested-weight ratio ~ {ratio:.3f}, maxDP={maxDP:.3e}")
                 print(f"Direct Calculation: N={N}, maxDP={maxDP_debug:.3e}, maxDiff={maxDiff:.3e}")
             P = new_P.copy()
+            if is_tuple:
+                accum = new_accum
             if maxDP<tol:
                 print(f'Adaptive integration converged to {maxDP:.3e} in {N} points.')
+                if is_tuple:
+                    return (new_P, new_accum)
                 return new_P
 
         # update state for next level
@@ -267,6 +285,8 @@ def integratePointsAdaptiveANT(computePoint, tol=ADAPTIVE_INTEGRATION_TOL, maxN=
         N *= 3
     N/=3
     print(f'Adaptive integration reached full grid ({N} points), final error {maxDP:.3e}')
+    if is_tuple:
+        return (new_P, new_accum)
     return new_P
 
 ## ENERGY INDEPENDENT DENSITY FUNCTIONS
@@ -409,31 +429,32 @@ def densityRealN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True):
 
     Returns
     -------
-    ndarray
-        Density matrix
+    tuple (ndarray, float)
+        (P, delta_N) where P is the density matrix and delta_N is the
+        Mulliken cross-term correction from device-lead overlap.
     """
     nKT = N_KT
     kT = kB*T
     Emax = mu + nKT*kT
     mid = (Emax-Emin)/2
-    lineInt = np.array(np.zeros(np.shape(F)), dtype=complex)
     x,w = roots_legendre(N)
     x = np.real(x)
-    
+
     Elist = mid*(x + 1) + Emin
     weights = mid*w*fermi(Elist, mu, T)
-    
+
     if showText:
         print(f'Integrating {N} points along real axis...')
 
-    lineInt = GrInt(F, S, g, Elist, weights)
+    lineInt, cross_scalar = GrIntCross(F, S, g, Elist, weights)
 
     if showText:
         print('Integration done!')
-    
 
-    # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19) 
-    return (1j/(2*jnp.pi)) * (lineInt - lineInt.conj().T)
+    # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19)
+    P = (1j/(2*jnp.pi)) * (lineInt - lineInt.conj().T)
+    delta_N = float(-(1/jnp.pi) * jnp.imag(cross_scalar))
+    return P, delta_N
 
 def densityReal(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, maxN=MAX_CYCLES, debug=False):
     """
@@ -464,24 +485,26 @@ def densityReal(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, 
 
     Returns
     -------
-    ndarray
-        Density matrix
+    tuple (ndarray, float)
+        (P, delta_N) where P is the density matrix and delta_N is the
+        Mulliken cross-term correction from device-lead overlap.
     """
     P = np.zeros_like(F)
+    delta_N = 0.0
     N = 1
     maxDP = 1e9
     while N<maxN:
         P_ = P.copy()
 
-        P = densityRealN(F, S, g, Emin, mu, N, T, showText=False)
+        P, delta_N = densityRealN(F, S, g, Emin, mu, N, T, showText=False)
         maxDP = np.max(np.abs(P - P_))
         if maxDP< tol:
             print(f'Adaptive integration converged to {maxDP:.3e} in {N} points.')
-            return P
+            return P, delta_N
         N *= 2
 
     print(f'Warning: adaptive integration not converged after {maxN} points: maxDP={maxDP:.2E}')
-    return P
+    return P, delta_N
    
 
 def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=TEMPERATURE, showText=True):
@@ -789,9 +812,9 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
 
     Notes
     -----
-    Uses adaptive integration for the density matrix P, then a fixed-N
-    GrIntCross pass for the cross-term scalar (the adaptive framework
-    cannot co-accumulate tuple returns).
+    Uses adaptive integration with GrIntCross to co-accumulate both the
+    density matrix and cross-term scalar in a single pass. The cross-term
+    converges at the same adaptive grid as the density matrix.
     """
     #Construct circular contour
     nKT= 10
@@ -801,15 +824,16 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
     r = (Emax-Emin)/2
 
     # For ANT adaptive integration, compute from point-weight pairs
+    # Returns (matrix, scalar) tuple for co-accumulated cross-term
     def computePoint(x, w):
         theta = np.pi/2 * (x + 1)
         z = center + r*np.exp(1j*theta)
         dz = 1j * r * np.exp(1j*theta)
         weights = (np.pi/2)*w*dz*fermi(z, mu, T)
-        return GrInt(F, S, g, z, weights)
+        return GrIntCross(F, S, g, z, weights)
 
     print('Complex Contour Integration:')
-    lineInt = integratePointsAdaptiveANT(computePoint, tol=tol, debug=debug)
+    lineInt, cross_scalar = integratePointsAdaptiveANT(computePoint, tol=tol, debug=debug)
 
     #Add integration points for Fermi Broadening
     if T>0:
@@ -817,31 +841,14 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
         def computePointBroadening(x, w):
             E = broadening * (x) + mu
             weights = broadening*w*fermi(E, mu, T)
-            return GrInt(F, S, g, E, weights)
+            return GrIntCross(F, S, g, E, weights)
 
-        lineInt += integratePointsAdaptiveANT(computePointBroadening, tol=tol, debug=debug)
+        broad_lineInt, broad_cross = integratePointsAdaptiveANT(computePointBroadening, tol=tol, debug=debug)
+        lineInt += broad_lineInt
+        cross_scalar += broad_cross
 
     # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19)
     P = (-1j/(2*jnp.pi)) * (lineInt - lineInt.conj().T)
-
-    # Cross-term scalar: fixed-N pass (adaptive framework can't co-accumulate tuples)
-    cross_scalar = 0.0 + 0j
-    if hasattr(g, 'crossTermQTot') and g.crossTermQTot(center + r*1j) is not None:
-        N_cross = 54
-        x_c, w_c = getANTPoints(N_cross)
-        theta_c = np.pi/2 * (x_c + 1)
-        Elist_c = center + r*np.exp(1j*theta_c)
-        dz_c = 1j * r * np.exp(1j*theta_c)
-        weights_c = (np.pi/2)*w_c*fermi(Elist_c, mu, T)*dz_c
-        _, cross_scalar = GrIntCross(F, S, g, Elist_c, weights_c)
-        if T > 0:
-            Nbroad_c = max(N_cross // 8, 6)
-            x_f, w_f = roots_legendre(Nbroad_c)
-            E_broad = broadening * x_f + mu
-            w_broad = broadening * w_f * fermi(E_broad, mu, T)
-            _, cross_broad = GrIntCross(F, S, g, E_broad, w_broad)
-            cross_scalar += cross_broad
-
     delta_N = float(-(1/jnp.pi) * jnp.imag(cross_scalar))
     return P, delta_N
 
@@ -931,7 +938,7 @@ def integralFit(F, S, g, mu, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_TOL, T=TEMP
     rho = np.zeros(np.shape(F))
     while dP > tol and Nreal < maxN:
         Nreal *= 2 # Start with 16 points, double each time
-        rho_ = np.real(densityRealN(F, S, g, Eminf, Emin, Nreal, T=0))
+        rho_ = np.real(densityRealN(F, S, g, Eminf, Emin, Nreal, T=0)[0])
         dP = max(abs(np.diag(rho_ - rho)))
         print(f"MaxDP = {dP:.2E}")
         rho = rho_
@@ -996,7 +1003,7 @@ def integralFitNEGF(F, S, g, fermi, qV, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_
 
 
 def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATION_TOL, Eminf=ENERGY_MIN,
-                   conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE, nOrbs=0):
+                   conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE):
     """
     Calculate Fermi energy for a contact using adaptive integration.
 
@@ -1025,8 +1032,6 @@ def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INT
         Maximum number of iterations (default: FERMI_SEARCH_CYCLES)
     T : float, optional
         Temperature in Kelvin (default: TEMPERATURE)
-    nOrbs : int, optional
-        Number of orbitals to consider (0 for all) (default: 0)
 
     Returns
     -------
@@ -1042,14 +1047,10 @@ def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INT
     # Calculate Emin from DOS if not provided
     if Emin is None:
         Emin = calcEmin(F, S, g, tol=conv, maxN=maxcycles)
-   
-    # Count electrons below Emin 
-    P, _ = densityComplex(F, S, g, Eminf, Emin, tol, T=0)
-    nLower = 0
-    if nOrbs==0:
-        nLower = np.trace(P@g.S).real
-    else:
-        nLower = np.trace((P@g.S)[-nOrbs:, -nOrbs:]).real
+
+    # Count electrons below Emin
+    P, _delta_N_lower = densityComplex(F, S, g, Eminf, Emin, tol, T=0)
+    nLower = np.trace(P@g.S).real + _delta_N_lower
     assert nLower < ne, "ne ({ne}) exceeds mininum number of electrons ({nLower:.2f})"
     print(f"{nLower:.2f} electrons below Emin.")
     ne -= nLower # Subtract from total
@@ -1064,11 +1065,11 @@ def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INT
     Ef = (orbs[int(ne)-1] + orbs[int(ne)])/2
 
     return calcFermi(g, ne, Emin, Ef, lBound=lBound, uBound=uBound,
-                    tol=tol, conv=conv, maxcycles=maxcycles, T=T, nOrbs=nOrbs)
+                    tol=tol, conv=conv, maxcycles=maxcycles, T=T)
 
 # Calculate the fermi energy of the surface Green's Function object
 def calcFermi(g, ne, Emin, Ef, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATION_TOL,
-              conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE, nOrbs=0):
+              conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE):
     """
     Calculate Fermi energy using bisection method with adaptive integration.
 
@@ -1094,9 +1095,6 @@ def calcFermi(g, ne, Emin, Ef, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATIO
         Maximum number of iterations (default: FERMI_SEARCH_CYCLES)
     T : float, optional
         Temperature in Kelvin (default: TEMPERATURE)
-    nOrbs : int, optional
-        Number of orbitals to consider, 0 for all (default: 0)
-
     Returns
     -------
     float
@@ -1114,10 +1112,7 @@ def calcFermi(g, ne, Emin, Ef, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATIO
     # Initial calculation
     g.setF(g.F, E, E)
     P, _delta_N = pMu(E)
-    if nOrbs == 0:
-        Ncurr = np.trace(P@g.S).real + _delta_N
-    else:
-        Ncurr = np.trace((P@g.S)[-nOrbs:, -nOrbs:]).real + _delta_N
+    Ncurr = np.trace(P@g.S).real + _delta_N
 
     # Establish bounds if not provided
     while None in [uBound, lBound] and counter < maxcycles:
@@ -1141,10 +1136,7 @@ def calcFermi(g, ne, Emin, Ef, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATIO
 
         g.setF(g.F, E, E)
         P, _delta_N = pMu(E)
-        if nOrbs == 0:
-            Ncurr = np.trace(P@g.S).real + _delta_N
-        else:
-            Ncurr = np.trace((P@g.S)[-nOrbs:, -nOrbs:]).real + _delta_N
+        Ncurr = np.trace(P@g.S).real + _delta_N
 
     # Bisection search
     print('Calculating Fermi energy using bisection with adaptive integration:')
@@ -1162,10 +1154,7 @@ def calcFermi(g, ne, Emin, Ef, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATIO
         if abs(dN) > conv:
             g.setF(g.F, Ef, Ef)
             P, _delta_N = pMu(Ef)
-            if nOrbs == 0:
-                Ncurr = np.trace(P@g.S).real + _delta_N
-            else:
-                Ncurr = np.trace((P@g.S)[-nOrbs:, -nOrbs:]).real + _delta_N
+            Ncurr = np.trace(P@g.S).real + _delta_N
 
     if counter == maxcycles:
         print(f'Warning: Max cycles reached, convergence = {abs(Ncurr-ne):.2E}')

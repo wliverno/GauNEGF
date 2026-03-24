@@ -197,7 +197,7 @@ def test_surfGBAt_crossTermQ_shape():
     """crossTermQ returns a (dim, dim) matrix."""
     gAt = make_surfGBAt()
     E = -5.0 + 0.1j
-    Q = gAt.crossTermQ(E)
+    Q = gAt.crossTermQSurf(E)
     assert Q is not None
     assert Q.shape == (9, 9), f"Expected (9,9), got {Q.shape}"
 
@@ -205,7 +205,7 @@ def test_surfGBAt_crossTermQ_shape():
 def test_surfGBAt_crossTermQ_orthogonal_limit():
     """When all Slist are zero, crossTermQ should be zero."""
     gAt = make_surfGBAt_zero_overlap()
-    Q = gAt.crossTermQ(-5.0 + 0.1j)
+    Q = gAt.crossTermQSurf(-5.0 + 0.1j)
     np.testing.assert_allclose(np.array(Q), 0.0, atol=1e-10,
         err_msg="crossTermQ should be zero when all overlaps are zero")
 
@@ -214,7 +214,7 @@ def test_surfGBAt_crossTermQ_is_symmetrized():
     """Q_sym should have correct Hermitian-like structure."""
     gAt = make_surfGBAt()
     E = -5.0 + 0.1j
-    Q = gAt.crossTermQ(E)
+    Q = gAt.crossTermQSurf(E)
     assert Q is not None
     # Q_sym is NOT Hermitian in general (only on real axis), but should not be
     # purely upper or lower triangular
@@ -269,7 +269,7 @@ def test_surfGAt3D_crossTermQ_shape():
     """crossTermQ returns a (dim, dim) matrix."""
     gAt = make_surfGAt3D()
     E = -5.0 + 0.1j
-    Q = gAt.crossTermQ(E)
+    Q = gAt.crossTermQSurf(E)
     assert Q is not None
     assert Q.shape == (9, 9), f"Expected (9,9), got {Q.shape}"
 
@@ -277,7 +277,7 @@ def test_surfGAt3D_crossTermQ_shape():
 def test_surfGAt3D_crossTermQ_orthogonal_limit():
     """When all Slist are zero, crossTermQ should be zero."""
     gAt = make_surfGAt3D_zero_overlap()
-    Q = gAt.crossTermQ(-5.0 + 0.1j)
+    Q = gAt.crossTermQSurf(-5.0 + 0.1j)
     np.testing.assert_allclose(np.array(Q), 0.0, atol=1e-10)
 
 
@@ -285,7 +285,7 @@ def test_surfGAt3D_crossTermQ_is_symmetrized():
     """Q_sym should be symmetrized (not purely lower triangular)."""
     gAt = make_surfGAt3D()
     E = -5.0 + 0.1j
-    Q = gAt.crossTermQ(E)
+    Q = gAt.crossTermQSurf(E)
     assert Q is not None
     Q_arr = np.array(Q)
     assert not np.allclose(Q_arr, np.tril(Q_arr)), \
