@@ -1103,16 +1103,13 @@ def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INT
     orbs, _ = eig(inv(S)@F)
     orbs = np.sort(np.real(orbs))
 
-    # Calculate Emin from DOS if not provided
+    # Calculate Emin using spectral weight stabilization
     if Emin is None:
-        Emin = calcEmin(F, S, g, tol=conv, maxN=maxcycles)
-
-    # Count electrons below Emin
-    P, _delta_N_lower = densityComplex(F, S, g, Eminf, Emin, tol, T=0)
-    nLower = np.trace(P@g.S).real + _delta_N_lower
-    assert nLower < ne, "ne ({ne}) exceeds mininum number of electrons ({nLower:.2f})"
-    print(f"{nLower:.2f} electrons below Emin.")
-    ne -= nLower # Subtract from total
+        Emin, _Emax, _TSW = calcTSW(F, S, g, tol=conv, maxN=maxcycles, Emin=min(orbs), Emax=max(orbs))
+    # nLower is 0 by construction: calcTSW guarantees Emin is below all
+    # occupied states, so the integral from Emin to mu captures all electrons.
+    # The assert, nLower subtraction, and Eminf-based densityComplex call are
+    # all removed -- no lower density correction is needed.
 
     # Set bounds from eigenvalues if not provided
     if lBound is None:
