@@ -354,11 +354,16 @@ class NEGFE(NEGF):
         """
         print('Calculating lower density matrix:')
         if self.N2 is None:
-            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, Emin=self.Emin)
-            P, _delta_N_lower = densityComplex(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
+            self.Emin, self.Emax, self.TSW = calcTSW(
+                self.F*har_to_eV, self.S, self.g,
+                Emin=self.Emin,
+                Emax=getattr(self, 'Emax', None),
+                TSW=getattr(self, 'TSW', None))
+            nLower = 0.0
+            P = np.zeros_like(self.S, dtype=complex)
         else:
             P, _delta_N_lower = densityRealN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
-        nLower = np.trace(self.S@P).real + _delta_N_lower
+            nLower = np.trace(self.S@P).real + _delta_N_lower
         # Helper function for densityComplex()
         def compContourP2(mu):
                 if self.N1 is not None:
