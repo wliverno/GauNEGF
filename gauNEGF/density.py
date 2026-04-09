@@ -870,6 +870,65 @@ def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES, Emin=None):
     print(f'Calculated Emin: {Emin} eV, DOS = {dP:.2E}')
     return Emin
 
+def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES,
+            Emin=None, Emax=None, TSW=None):
+    """Calculate integration bounds by stabilizing total spectral weight.
+
+    Iteratively expands Emin and Emax until Tr(rho @ S) + delta_N
+    stabilizes, guaranteeing that bounds bracket all occupied states.
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix in eV.
+    S : ndarray
+        Overlap matrix.
+    g : surfG object
+        Surface Green's function calculator.
+    tol : float, optional
+        Convergence tolerance for TSW change (default: FERMI_CALCULATION_TOL).
+    maxN : int, optional
+        Maximum expansion iterations (default: MAX_CYCLES).
+    Emin : float or None, optional
+        Warm-start lower bound in eV. If None, initialized from eigenvalues.
+    Emax : float or None, optional
+        Warm-start upper bound in eV. If None, initialized from eigenvalues.
+    TSW : float or None, optional
+        Warm-start spectral weight. If None, forces at least one iteration.
+
+    Returns
+    -------
+    tuple (float, float, float)
+        (Emin, Emax, TSW) -- converged bounds and final spectral weight.
+    """
+    # Initialize from eigenvalues if no warm-start values
+    if Emin is None or Emax is None:
+        D, _ = eigh(inv(S) @ F)
+        eigs = np.real(D).flatten()
+        if Emin is None:
+            Emin = float(min(eigs))
+        if Emax is None:
+            Emax = float(max(eigs))
+
+    TSW_prev = 0.0 if TSW is None else TSW
+
+    for _ in range(maxN):
+        # Emax is passed as mu: the contour from Emin to Emax encloses all
+        # poles of G^R in that window, yielding the total spectral weight.
+        P, delta_N = densityComplex(F, S, g, Emin, Emax, tol, T=0)
+        TSW_new = np.trace(P @ g.S).real + delta_N
+        if abs(TSW_new - TSW_prev) < tol:
+            print(f'calcTSW converged: Emin={Emin:.2f}, Emax={Emax:.2f}, TSW={TSW_new:.4f}')
+            return Emin, Emax, TSW_new
+        Emin -= 10
+        Emax += 10
+        TSW_prev = TSW_new
+
+    print(f'Warning: calcTSW did not converge after {maxN} iterations '
+          f'(last dTSW={abs(TSW_new - TSW_prev):.2E})')
+    print(f'calcTSW: Emin={Emin:.2f}, Emax={Emax:.2f}, TSW={TSW_new:.4f}')
+    return Emin, Emax, TSW_new
+
 def integralFit(F, S, g, mu, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_TOL, T=TEMPERATURE, maxN=MAX_CYCLES):
     """
     Optimize integration parameters for density calculations.

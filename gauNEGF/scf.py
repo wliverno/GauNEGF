@@ -346,7 +346,7 @@ class NEGF(object):
             homo_lumo = orbs[self.nae+self.nbe-1:self.nae+self.nbe+1].real
         return homo_lumo
                 
-    def setVoltage(self, qV, fermi=np.nan, Emin=None, Eminf=None):
+    def setVoltage(self, qV, fermi=None, Emin=None, Eminf=None):
         """
         Set voltage bias and Fermi energy, updating electric field.
 
@@ -360,7 +360,7 @@ class NEGF(object):
             Voltage bias in eV
         fermi : float, optional
             Fermi energy in eV. If not provided, will be calculated or
-            use existing value (default: np.nan)
+            use existing value (default: None)
         Emin : float, optional
             Minimum energy for integration in eV (default: None)
         Eminf : float, optional
@@ -377,9 +377,9 @@ class NEGF(object):
         assert hasattr(self, 'rInd') and hasattr(self,'lInd'), "Contacts not set!"
 
         # Set Fermi Energy
-        if np.isnan(fermi):
-            self.updFermi = True
+        if fermi is None:
             if self.fermi is None:
+                self.updFermi = True
                 # Set initial fermi energy as (HOMO + LUMO)/2
                 homo_lumo = self.getHOMOLUMO()
                 print(f'Setting initial Fermi energy between HOMO ({homo_lumo[0]:.2f} eV) and LUMO ({homo_lumo[1]:.2f} eV)')
@@ -733,8 +733,6 @@ class NEGF(object):
             coeff = LA.solve(self.pMat, self.pB)[:-1]
             print("Applying Pulay Coeff: ", coeff)
             self.P = sum([self.pList[i, :, :]*coeff[i] for i in range(len(coeff))])
-            #ratio =  self.bar.ne/np.real(np.trace(self.P @ self.S))
-            #self.P *= ratio
             self.pList[0, :, :] = self.P
         else:
             print("Applying Damping value=", damping)
