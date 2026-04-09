@@ -2,8 +2,8 @@
 import sys
 sys.path.insert(0, '..')
 
+import pytest
 import numpy as np
-import jax.numpy as jnp
 
 from gauNEGF.surfGBethe import surfGBAt
 from gauNEGF.density import calcTSW
@@ -15,7 +15,8 @@ dim = 9
 eta = 1e-6
 
 
-def build_au_system():
+@pytest.fixture
+def au_system():
     """Build a surfGBAt for Au single cell -- same fixture as cross-term tests."""
     ne, H0, Sdict, Vdict = read_bethe_params('Au')
     vecs = gen_fcc_111_neighbors()
@@ -25,9 +26,9 @@ def build_au_system():
     return gBAt, ne
 
 
-def test_calcTSW_converges():
+def test_calcTSW_converges(au_system):
     """calcTSW should converge and return bounds that bracket all eigenvalues."""
-    gBAt, ne = build_au_system()
+    gBAt, ne = au_system
     F = gBAt.F
     S = gBAt.S
 
@@ -43,12 +44,11 @@ def test_calcTSW_converges():
         f"Emin {Emin} should be below min eigenvalue {min(eigenvalues)}"
     assert Emax > max(eigenvalues), \
         f"Emax {Emax} should be above max eigenvalue {max(eigenvalues)}"
-    print("test_calcTSW_converges PASSED")
 
 
-def test_calcTSW_warm_start():
+def test_calcTSW_warm_start(au_system):
     """Warm-started calcTSW should converge in zero iterations if bounds are good."""
-    gBAt, ne = build_au_system()
+    gBAt, ne = au_system
     F = gBAt.F
     S = gBAt.S
 
@@ -63,10 +63,16 @@ def test_calcTSW_warm_start():
     assert Emax2 == Emax1, f"Warm-started Emax changed: {Emax1} -> {Emax2}"
     assert abs(TSW2 - TSW1) < 1e-6, \
         f"Warm-started TSW changed: {TSW1} -> {TSW2}"
-    print("test_calcTSW_warm_start PASSED")
 
 
-if __name__ == '__main__':
-    test_calcTSW_converges()
-    test_calcTSW_warm_start()
-    print("All tests passed!")
+def test_getFermiContact_with_calcTSW(au_system):
+    """getFermiContact should still find the correct Au Fermi energy after calcTSW switch."""
+    from gauNEGF.density import getFermiContact
+
+    gBAt, ne = au_system
+    ne_per_spin = ne / 2
+    AU_BULK_FERMI_EV = 2.84
+
+    fermi = getFermiContact(gBAt, ne_per_spin, conv=1e-3, maxcycles=1000, T=0)
+    assert abs(fermi - AU_BULK_FERMI_EV) < 0.02, \
+        f"Au Fermi {fermi:.4f} eV differs from benchmark {AU_BULK_FERMI_EV} eV"
