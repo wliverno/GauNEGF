@@ -197,7 +197,7 @@ class NEGFE(NEGF):
         return inds
 
     # Set up Fermi Search algorithm after setting system Fermi energies
-    def setVoltage(self, qV, fermi=np.nan, Emin=None, Eminf=None, fermiMethod=None):
+    def setVoltage(self, qV, fermi=None, Emin=None, Eminf=None, fermiMethod=None):
         """
         Set voltage bias and Fermi search method.
 
@@ -206,7 +206,7 @@ class NEGFE(NEGF):
         qV : float
             Applied voltage in eV
         fermi : float, optional
-            Fermi energy in eV (default: np.nan)
+            Fermi energy in eV (default: None)
         Emin : float, optional
             Minimum energy for integration (default: None)
         Eminf : float, optional
@@ -224,7 +224,7 @@ class NEGFE(NEGF):
                 self.fermiMethod = 'muller' if fermiMethod is None else fermiMethod
             elif fermiMethod is not None:
                 self.fermiMethod = fermiMethod
-        jax.clear_caches() # reset compiled functions
+        #jax.clear_caches() # reset compiled functions
     
     def setIntegralLimits(self, N1=None, N2=None, Nnegf=None, tol=ADAPTIVE_INTEGRATION_TOL, Emin=None):
 
@@ -468,7 +468,7 @@ class NEGFE(NEGF):
                                                  '\'secant\', \'bisect\' or \'predict\' or \'default\'')
             # Shift Emin, mu1, and mu2 and update contact self-energies
             self.setVoltage(self.qV)
-            self.Emin += self.fermi-fermi_old
+            #self.Emin += self.fermi-fermi_old
             self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
         else:
             print('Calculating equilibrium density matrix:')
