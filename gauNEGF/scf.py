@@ -157,6 +157,7 @@ class NEGF(object):
         
         #Default Integration Limits
         self.Eminf = ENERGY_MIN
+        self.TSW = None
         self.fSearch = None
         self.fermi = None
         self.updFermi = False

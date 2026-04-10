@@ -358,7 +358,7 @@ class surfG:
             g_new = inv(A - B @ g @ B_bar)
 
             # Compute convergence metric
-            dg = jnp.abs(g_new - g) / jnp.maximum(jnp.abs(g_new), 1e-12)
+            dg = jnp.abs(g_new - g) / jnp.maximum(jnp.abs(g_new), conv)
             diff = jnp.max(dg)
 
             # Apply relaxation mixing
@@ -369,11 +369,12 @@ class surfG:
         # Initial state: (count, diff, g)
         init_state = (0, jnp.inf, inv(A))
         count, diff, g = lax.while_loop(cond_fun, body_fun, init_state)
-        #lax.cond(diff > conv, 
-        #        lambda E: jax.debug.print("WARNING: EXCEEDED ITERATIONS at {E:.2f} eV:  count={count}, diff={diff:.2e}", 
-        #                                    E=E, count=count, diff=diff), 
-        #        lambda E:None, E)
-        
+        #lax.cond(diff > conv,
+        #         lambda _: jax.debug.print(
+        #             "WARNING: surfG.g() did not converge at E={E:.4f} eV, diff={d:.2e} (after {n} iters)",
+        #             E=E, d=diff, n=count),
+        #         lambda _: None,
+        #         None)
 
         return g
 
