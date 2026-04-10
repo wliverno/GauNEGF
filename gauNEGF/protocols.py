@@ -33,6 +33,7 @@ class SurfGProtocol(Protocol):
 
     F: np.ndarray            # Fock matrix (N x N)
     S: np.ndarray            # Overlap matrix (N x N)
+    eta: float               # broadening
     num_contacts: int        # Number of contacts
 
     def sigma(self, E: complex, i: int, conv: float = ...) -> np.ndarray:

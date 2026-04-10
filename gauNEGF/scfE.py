@@ -152,7 +152,10 @@ class NEGFE(NEGF):
                 gList.append(surfG(a, Sa, [inds, inds], [b, b.conj().T], [Sb, Sb.conj().T], eta=eta, spin=self.spin))
             if neList is not None:
                 muL = getFermiContact(gList[0], neList[0], maxcycles=100)
-                muR = getFermiContact(gList[-1], neList[-1], maxcycles=100)
+                if symmetrize_contacts:
+                    muR=muL+0.0
+                else:
+                    muR = getFermiContact(gList[-1], neList[-1], maxcycles=100)
             elif muList is not None:
                 muL = muList[0]
                 muR = muList[-1]
@@ -355,9 +358,9 @@ class NEGFE(NEGF):
         """
         print('Calculating lower density matrix:')
         if self.N2 is None:
-            Eminf_ = self.Eminf if self.Eminf != -1e6 else self.Emin
-            self.Eminf, self.TSW = calcTSW(self.F*har_to_eV, self.S, self.g, Eminf=Eminf_, TSW=self.TSW, tol=self.tol)
             self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, Emin=self.Emin)
+            Eminf_ = min(self.Eminf,self.Emin) if self.Eminf != -1e6 else self.Emin
+            self.Eminf, self.TSW = calcTSW(self.F*har_to_eV, self.S, self.g, Eminf=Eminf_, TSW=self.TSW, tol=self.tol)
             P, _delta_N_lower = densityReal(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
         else:
             P, _delta_N_lower = densityRealN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)

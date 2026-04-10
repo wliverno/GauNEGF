@@ -64,18 +64,18 @@ BYTES_TO_GB = 1e9                     # Conversion factor
 
 # Jit G^R function: (g is static)
 @jit
-def _gr_matrix_ops(sigTot, E, F, S):
+def _gr_matrix_ops(sigTot, E, F, S, eta):
     """Retarded Green's function matrix operations (used by both vmap and workers)."""
-    mat = (E + 1j*ETA) * S - F - sigTot
+    mat = (E + 1j*eta) * S - F - sigTot
     return jnp.linalg.solve(mat, jnp.eye(F.shape[0]))
 
 # Jit G< function: (g, ind are static)
 @jit
-def _gless_matrix_ops(sig, sigTot, E, F, S):
+def _gless_matrix_ops(sig, sigTot, E, F, S, eta):
     """Lesser Green's function matrix operations (used by both vmap and workers)."""
     I = jnp.eye(F.shape[0])
-    mat_r = (E + 1j*ETA) * S - F - sigTot
-    mat_a = (E - 1j*ETA) * S - F - jnp.conj(sigTot).T
+    mat_r = (E + 1j*eta) * S - F - sigTot
+    mat_a = (E - 1j*eta) * S - F - jnp.conj(sigTot).T
     Gr_E = jnp.linalg.solve(mat_r, I)
     Ga_E = jnp.linalg.solve(mat_a, I)
     gamma_E = 1j * (sig - jnp.conj(sig).T)
@@ -213,7 +213,8 @@ def GrInt(F, S, g, Elist, weights):
     """
     def weighted_func_Gr(E, weight, F_jax, S_jax, g):
         sigTot = g.sigmaTot(E)
-        Gr = _gr_matrix_ops(sigTot, E, F_jax, S_jax)
+        eta = max(g.eta, ETA)
+        Gr = _gr_matrix_ops(sigTot, E, F_jax, S_jax, eta)
         return weight * Gr
     parallel_logger.info(f"Calculating G^R with GInt...")
     return _GInt(weighted_func_Gr, F, S, g, Elist, weights)
@@ -243,7 +244,8 @@ def _GIntCross(F, S, g, Elist, weights):
 
     def weighted_combined(E, w, F_jax, S_jax, g):
         sigTot = g.sigmaTot(E)
-        Gr = _gr_matrix_ops(sigTot, E, F_jax, S_jax)
+        eta = max(g.eta, ETA)
+        Gr = _gr_matrix_ops(sigTot, E, F_jax, S_jax, eta)
         # Inline crossTermQTot with zero-init (vmappable, no None type change)
         Q_tot = jnp.zeros_like(F_jax, dtype=complex)
         for i in range(num_contacts):
@@ -357,7 +359,8 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
         useTot = (ind is None)
         sigTot = g.sigmaTot(E)
         sigma = sigTot if useTot else g.sigma(E, ind)
-        Gless = _gless_matrix_ops(sigma, sigTot, E, F_jax, S_jax)
+        eta = max(g.eta, ETA)
+        Gless = _gless_matrix_ops(sigma, sigTot, E, F_jax, S_jax, eta)
         return weight * Gless
     parallel_logger.info(f"Calculating G< with GInt...")
     return _GInt(weighted_func_GrLess, F, S, g, Elist, weights, ind)

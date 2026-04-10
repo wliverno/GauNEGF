@@ -6,7 +6,7 @@ This module provides centralized default parameters used throughout the gauNEGF 
 
 # Physical Parameters
 TEMPERATURE = 0.0               # Kelvin - ambient temperature
-ETA = 1e-3                      # eV - broadening parameter  
+ETA = 1e-5                      # eV - broadening parameter  
 ENERGY_STEP = 0.001             # eV - default energy step size
 
 # Contact Tolerances
