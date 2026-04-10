@@ -28,7 +28,7 @@ jax.config.update("jax_enable_x64", True)
 
 # Configuration
 from gauNEGF.config import (TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, FERMI_DEBUG, 
-                            FERMI_SEARCH_CYCLES, N_KT, ENERGY_MIN, MAX_CYCLES, MAX_GRID_POINTS)
+                            FERMI_SEARCH_CYCLES, N_KT, ENERGY_MIN, MAX_CYCLES, MAX_GRID_POINTS, ETA)
 from scipy.special import roots_legendre
 from scipy.special import roots_chebyu
 import matplotlib.pyplot as plt
@@ -46,11 +46,13 @@ from gauNEGF.integrate import GrInt, GrLessInt, GrIntCross
 from gauNEGF.utils import inv, eig, eigh
 
 @jit
-def _compute_dos_at_energy(E, F, S, sigma_total):
+def _compute_dos_at_energy(E, F, S, sigma_total, Qtot):
     """JIT-compiled kernel for DOS calculation at single energy."""
-    mat = E * S - F - sigma_total
+    mat = (E + 1j*ETA)*S - F - sigma_total
     Gr = inv(mat)
-    return -jnp.imag(jnp.trace(Gr)) / jnp.pi
+    Q = jnp.zeros_like(S) if Qtot is None else Qtot
+    mat_sum = Gr@S - Gr@Q
+    return -jnp.imag(jnp.trace(mat_sum)) / jnp.pi
 
 
 # CONSTANTS:
@@ -456,11 +458,14 @@ def densityRealN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True):
     delta_N = float(-(1/jnp.pi) * jnp.imag(cross_scalar))
     return P, delta_N
 
-def densityReal(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, maxN=MAX_CYCLES, debug=False):
+def densityReal(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, debug=False):
     """
-    Calculate equilibrium density matrix using adaptive real-axis integration.
+    Calculate equilibrium density matrix using adaptive real-axis ANT integration.
 
-    Wrapper for densityRealN() using the tol and maxN specification to determine grid size
+    Uses integratePointsAdaptiveANT with the same Gauss-Chebyshev scheme as
+    densityComplex, but integrating along the real axis instead of a complex contour.
+    Suitable for zero-DOS regions (below all occupied states) where Im(G^R)=0
+    and the integral converges trivially in a small number of points.
 
     Parameters
     ----------
@@ -489,21 +494,23 @@ def densityReal(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, 
         (P, delta_N) where P is the density matrix and delta_N is the
         Mulliken cross-term correction from device-lead overlap.
     """
-    P = np.zeros_like(F)
-    delta_N = 0.0
-    N = 1
-    maxDP = 1e9
-    while N<maxN:
-        P_ = P.copy()
+    nKT = N_KT
+    kT = kB * T
+    Emax = mu + nKT * kT
 
-        P, delta_N = densityRealN(F, S, g, Emin, mu, N, T, showText=False)
-        maxDP = np.max(np.abs(P - P_))
-        if maxDP< tol:
-            print(f'Adaptive integration converged to {maxDP:.3e} in {N} points.')
-            return P, delta_N
-        N *= 2
+    mid = (Emax - Emin) / 2
 
-    print(f'Warning: adaptive integration not converged after {maxN} points: maxDP={maxDP:.2E}')
+    def computePoint(x, w):
+        E = mid * (x + 1) + Emin
+        weights = mid * w * fermi(E, mu, T)
+        mat, scl = GrIntCross(F, S, g, E, weights)
+        # Return density matrix contribution so the adaptive integrator tracks
+        # convergence on P directly (G^R - G^A, not the full complex G^R).
+        return (1j / (2 * jnp.pi)) * (mat - mat.conj().T), scl
+
+    print('Real Axis Integration (ANT):')
+    P, cross_scalar = integratePointsAdaptiveANT(computePoint, tol=tol, debug=debug)
+    delta_N = float(-(1 / jnp.pi) * jnp.imag(cross_scalar))
     return P, delta_N
    
 
@@ -859,10 +866,10 @@ def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES, Emin=None):
         D,_ = eigh(inv(S)@F)
         Emin = min(D.real.flatten())-5
     counter = 0
-    dP = _compute_dos_at_energy(Emin, F, S, g.sigmaTot(Emin))
+    dP = _compute_dos_at_energy(Emin, F, S, g.sigmaTot(Emin), g.crossTermQTot(Emin))
     while dP>tol and counter<maxN:
-        Emin -= 1
-        dP = _compute_dos_at_energy(Emin, F, S, g.sigmaTot(Emin))
+        Emin -= 10
+        dP = _compute_dos_at_energy(Emin, F, S, g.sigmaTot(Emin), g.crossTermQTot(Emin))
         #print(Emin, dP)
         counter += 1
     if counter == maxN:
@@ -871,10 +878,10 @@ def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES, Emin=None):
     return Emin
 
 def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES,
-            Emin=None, Emax=None, TSW=None):
+            Eminf=None, TSW=None):
     """Calculate integration bounds by stabilizing total spectral weight.
 
-    Iteratively expands Emin and Emax until Tr(rho @ S) + delta_N
+    Iteratively lowers Eminf until Tr(rho @ S) + delta_N
     stabilizes, guaranteeing that bounds bracket all occupied states.
 
     Parameters
@@ -889,45 +896,43 @@ def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES,
         Convergence tolerance for TSW change (default: FERMI_CALCULATION_TOL).
     maxN : int, optional
         Maximum expansion iterations (default: MAX_CYCLES).
-    Emin : float or None, optional
-        Warm-start lower bound in eV. If None, initialized from eigenvalues.
-    Emax : float or None, optional
-        Warm-start upper bound in eV. If None, initialized from eigenvalues.
+    Eminf : float or None, optional
+        Warm-start lower bound in eV. If None, initialized from min eigenvalue.
     TSW : float or None, optional
-        Warm-start spectral weight. If None, forces at least one iteration.
+        Warm-start spectral weight. If None, recomputes reference TSW from scratch.
 
     Returns
     -------
-    tuple (float, float, float)
-        (Emin, Emax, TSW) -- converged bounds and final spectral weight.
+    tuple (float, float)
+        (Eminf, TSW) -- converged lower bound and final spectral weight.
     """
     # Initialize from eigenvalues if no warm-start values
-    if Emin is None or Emax is None:
+    if Eminf is None:
         D, _ = eigh(inv(S) @ F)
         eigs = np.real(D).flatten()
-        if Emin is None:
-            Emin = float(min(eigs))
-        if Emax is None:
-            Emax = float(max(eigs))
+        Eminf = float(min(eigs))
 
-    TSW_prev = 0.0 if TSW is None else TSW
+    if TSW is None:
+        P, delta_N = densityComplex(F, S, g, -1e6, 1e6, tol, T=0)
+        TSW_ref = np.trace(P @ g.S).real + delta_N
+    else:
+        TSW_ref = TSW+0.0
 
     for _ in range(maxN):
         # Emax is passed as mu: the contour from Emin to Emax encloses all
         # poles of G^R in that window, yielding the total spectral weight.
-        P, delta_N = densityComplex(F, S, g, Emin, Emax, tol, T=0)
+        P, delta_N = densityComplex(F, S, g, Eminf, 1e6, tol, T=0)
         TSW_new = np.trace(P @ g.S).real + delta_N
-        if abs(TSW_new - TSW_prev) < tol:
-            print(f'calcTSW converged: Emin={Emin:.2f}, Emax={Emax:.2f}, TSW={TSW_new:.4f}')
-            return Emin, Emax, TSW_new
-        Emin -= 10
-        Emax += 10
-        TSW_prev = TSW_new
+        print(f'({TSW_new:.2E} versus {TSW_ref:.2E})')
+        if abs((TSW_new - TSW_ref)/TSW_ref) < tol:
+            print(f'calcTSW converged: Eminf={Eminf:.2f}, TSW={TSW_new:.4f}')
+            return Eminf, TSW_new
+        Eminf -= 50
 
     print(f'Warning: calcTSW did not converge after {maxN} iterations '
-          f'(last dTSW={abs(TSW_new - TSW_prev):.2E})')
-    print(f'calcTSW: Emin={Emin:.2f}, Emax={Emax:.2f}, TSW={TSW_new:.4f}')
-    return Emin, Emax, TSW_new
+          f'(last dTSW={abs(TSW_new - TSW_ref):.2E})')
+    print(f'calcTSW: Eminf={Eminf:.2f}, TSW={TSW_new:.4f}')
+    return Eminf, TSW_new
 
 def integralFit(F, S, g, mu, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_TOL, T=TEMPERATURE, maxN=MAX_CYCLES):
     """
@@ -1103,13 +1108,16 @@ def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INT
     orbs, _ = eig(inv(S)@F)
     orbs = np.sort(np.real(orbs))
 
-    # Calculate Emin using spectral weight stabilization
+    # Calculate Emin from DOS if not provided
     if Emin is None:
-        Emin, _Emax, _TSW = calcTSW(F, S, g, tol=conv, maxN=maxcycles, Emin=min(orbs), Emax=max(orbs))
-    # nLower is 0 by construction: calcTSW guarantees Emin is below all
-    # occupied states, so the integral from Emin to mu captures all electrons.
-    # The assert, nLower subtraction, and Eminf-based densityComplex call are
-    # all removed -- no lower density correction is needed.
+        Emin = calcEmin(F, S, g, tol=conv, maxN=maxcycles)
+
+    # Count electrons below Emin (zero-DOS region: real-axis ANT converges in ~6 pts)
+    P, _delta_N_lower = densityReal(F, S, g, Eminf, Emin, tol, T=0)
+    nLower = np.trace(P@g.S).real + _delta_N_lower
+    assert nLower < ne, "ne ({ne}) exceeds mininum number of electrons ({nLower:.2f})"
+    print(f"{nLower:.2f} electrons below Emin.")
+    ne -= nLower # Subtract from total
 
     # Set bounds from eigenvalues if not provided
     if lBound is None:
@@ -1186,7 +1194,7 @@ def calcFermi(g, ne, Emin, Ef, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATIO
             print(f"DEBUG: Ef={Ef:.2f}, dN={ne-Ncurr:.2E}, dE={dE:.2E}")
 
         # Estimate step size using DOS
-        dos = _compute_dos_at_energy(E, g.F, g.S, g.sigmaTot(E))
+        dos = _compute_dos_at_energy(E, g.F, g.S, g.sigmaTot(E), g.crossTermQTot(E))
         dE = max(2*abs(Ncurr-ne)/dos, dE)
         counter += 1
 
@@ -1253,7 +1261,7 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
             E += dE
         if FERMI_DEBUG:
             print(f"DEBUG: Ef={Ef:.2f}, dN={ne-Ncurr:.2E}, dE={dE:.2E}")
-        dos = _compute_dos_at_energy(E, g.F, g.S, g.sigmaTot(E))
+        dos = _compute_dos_at_energy(E, g.F, g.S, g.sigmaTot(E), g.crossTermQTot(E))
         dE = max(2*abs(Ncurr-ne)/dos, dE)
         counter += 1
         g.setF(g.F, E, E)

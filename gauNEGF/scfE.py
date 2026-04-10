@@ -245,10 +245,11 @@ class NEGFE(NEGF):
             Minimum energy for integration (default: None)
         """
         if Emin is None and tol is not None:
-            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g)
+            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, tol=tol)
+            self.Eminf, self.TSW = calcTSW(self.F*har_to_eV, self.S, self.g, Eminf=self.Emin, tol=tol)
+            self.tol = tol
         else:
             self.Emin = Emin
-        self.tol = tol
         self.N1 = N1
         self.N2 = N2
         self.Nnegf = Nnegf
@@ -354,16 +355,13 @@ class NEGFE(NEGF):
         """
         print('Calculating lower density matrix:')
         if self.N2 is None:
-            self.Emin, self.Emax, self.TSW = calcTSW(
-                self.F*har_to_eV, self.S, self.g,
-                Emin=self.Emin,
-                Emax=getattr(self, 'Emax', None),
-                TSW=getattr(self, 'TSW', None))
-            nLower = 0.0
-            P = np.zeros_like(self.S, dtype=complex)
+            Eminf_ = self.Eminf if self.Eminf != -1e6 else self.Emin
+            self.Eminf, self.TSW = calcTSW(self.F*har_to_eV, self.S, self.g, Eminf=Eminf_, TSW=self.TSW, tol=self.tol)
+            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, Emin=self.Emin)
+            P, _delta_N_lower = densityReal(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
         else:
             P, _delta_N_lower = densityRealN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
-            nLower = np.trace(self.S@P).real + _delta_N_lower
+        nLower = np.trace(self.S@P).real + _delta_N_lower
         # Helper function for densityComplex()
         def compContourP2(mu):
                 if self.N1 is not None:
