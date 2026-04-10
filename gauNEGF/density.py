@@ -46,9 +46,9 @@ from gauNEGF.integrate import GrInt, GrLessInt, GrIntCross
 from gauNEGF.utils import inv, eig, eigh
 
 @jit
-def _compute_dos_at_energy(E, F, S, sigma_total, Qtot):
+def _compute_dos_at_energy(E, F, S, sigma_total, Qtot, eta=ETA):
     """JIT-compiled kernel for DOS calculation at single energy."""
-    mat = (E + 1j*ETA)*S - F - sigma_total
+    mat = (E + 1j*eta)*S - F - sigma_total
     Gr = inv(mat)
     Q = jnp.zeros_like(S) if Qtot is None else Qtot
     mat_sum = Gr@S - Gr@Q
@@ -918,21 +918,21 @@ def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES,
     else:
         TSW_ref = TSW+0.0
 
+    print(f'Lower Bound Search: TSW={TSW_ref:.2E}')
     for _ in range(maxN):
         # Emax is passed as mu: the contour from Emin to Emax encloses all
         # poles of G^R in that window, yielding the total spectral weight.
         P, delta_N = densityComplex(F, S, g, Eminf, 1e6, tol, T=0)
         TSW_new = np.trace(P @ g.S).real + delta_N
-        print(f'({TSW_new:.2E} versus {TSW_ref:.2E})')
         if abs((TSW_new - TSW_ref)/TSW_ref) < tol:
-            print(f'calcTSW converged: Eminf={Eminf:.2f}, TSW={TSW_new:.4f}')
-            return Eminf, TSW_new
+            if FERMI_DEBUG:
+                print(f'calcTSW converged: Eminf={Eminf:.2f}, TSW={TSW_new:.4f}')
+            return Eminf, TSW_ref
         Eminf -= 50
 
-    print(f'Warning: calcTSW did not converge after {maxN} iterations '
-          f'(last dTSW={abs(TSW_new - TSW_ref):.2E})')
-    print(f'calcTSW: Eminf={Eminf:.2f}, TSW={TSW_new:.4f}')
-    return Eminf, TSW_new
+    print(f'Warning: calcTSW did not converge after {maxN} iterations ')
+    print(f'calcTSW: Eminf={Eminf:.2f}, dTSW={TSW_new-TSW_ref:.2E}')
+    return Eminf, TSW_ref
 
 def integralFit(F, S, g, mu, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_TOL, T=TEMPERATURE, maxN=MAX_CYCLES):
     """
@@ -1066,12 +1066,12 @@ def integralFitNEGF(F, S, g, fermi, qV, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_
     return N
 
 
-def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATION_TOL, Eminf=ENERGY_MIN,
+def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATION_TOL,
                    conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE):
     """
     Calculate Fermi energy for a contact using adaptive integration.
 
-    Determines the Fermi energy for a contact system (Bethe lattice or 1D chain)
+    Determines the Fermi energy for a contact system (3D lattice or 1D chain)
     by matching the electron count using bisection with adaptive complex contour integration.
 
     Parameters
@@ -1088,8 +1088,6 @@ def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INT
         Upper bound for bisection search in eV. If None, estimated from eigenvalues.
     tol : float, optional
         Tolerance for adaptive integration (default: ADAPTIVE_INTEGRATION_TOL)
-    Eminf : float, optional
-        Lower bound for integration (default: -1e6)
     conv : float, optional
         Convergence tolerance for electron count (default: FERMI_CALCULATION_TOL)
     maxcycles : int, optional
@@ -1113,6 +1111,7 @@ def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INT
         Emin = calcEmin(F, S, g, tol=conv, maxN=maxcycles)
 
     # Count electrons below Emin (zero-DOS region: real-axis ANT converges in ~6 pts)
+    Eminf, _TSW = calcTSW(F, S, g, Eminf=Emin, tol=conv)
     P, _delta_N_lower = densityReal(F, S, g, Eminf, Emin, tol, T=0)
     nLower = np.trace(P@g.S).real + _delta_N_lower
     assert nLower < ne, "ne ({ne}) exceeds mininum number of electrons ({nLower:.2f})"
@@ -1194,7 +1193,7 @@ def calcFermi(g, ne, Emin, Ef, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATIO
             print(f"DEBUG: Ef={Ef:.2f}, dN={ne-Ncurr:.2E}, dE={dE:.2E}")
 
         # Estimate step size using DOS
-        dos = _compute_dos_at_energy(E, g.F, g.S, g.sigmaTot(E), g.crossTermQTot(E))
+        dos = _compute_dos_at_energy(E, g.F, g.S, g.sigmaTot(E), g.crossTermQTot(E), max(g.eta, ETA))
         dE = max(2*abs(Ncurr-ne)/dos, dE)
         counter += 1
 
@@ -1261,7 +1260,7 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
             E += dE
         if FERMI_DEBUG:
             print(f"DEBUG: Ef={Ef:.2f}, dN={ne-Ncurr:.2E}, dE={dE:.2E}")
-        dos = _compute_dos_at_energy(E, g.F, g.S, g.sigmaTot(E), g.crossTermQTot(E))
+        dos = _compute_dos_at_energy(E, g.F, g.S, g.sigmaTot(E), g.crossTermQTot(E), max(g.eta, ETA))
         dE = max(2*abs(Ncurr-ne)/dos, dE)
         counter += 1
         g.setF(g.F, E, E)
