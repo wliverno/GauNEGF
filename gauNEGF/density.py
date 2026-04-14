@@ -877,7 +877,7 @@ def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES, Emin=None):
     print(f'Calculated Emin: {Emin} eV, DOS = {dP:.2E}')
     return Emin
 
-def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES,
+def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=FERMI_SEARCH_CYCLES,
             Eminf=None, TSW=None):
     """Calculate integration bounds by stabilizing total spectral weight.
 
@@ -914,7 +914,7 @@ def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES,
 
     if TSW is None:
         P, delta_N = densityComplex(F, S, g, -1e6, 1e6, tol, T=0)
-        TSW_ref = np.trace(P @ g.S).real + delta_N
+        TSW_ref = np.trace(P @ g.S).real
     else:
         TSW_ref = TSW+0.0
 
@@ -923,12 +923,14 @@ def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES,
         # Emax is passed as mu: the contour from Emin to Emax encloses all
         # poles of G^R in that window, yielding the total spectral weight.
         P, delta_N = densityComplex(F, S, g, Eminf, 1e6, tol, T=0)
-        TSW_new = np.trace(P @ g.S).real + delta_N
-        if abs((TSW_new - TSW_ref)/TSW_ref) < tol:
+        TSW_new = np.trace(P @ g.S).real
+        if ((TSW_new - TSW_ref)/TSW_ref) < tol:
             if FERMI_DEBUG:
                 print(f'calcTSW converged: Eminf={Eminf:.2f}, TSW={TSW_new:.4f}')
             return Eminf, TSW_ref
-        Eminf -= 50
+        elif FERMI_DEBUG:
+            print(f'DEBUG: Eminf={Eminf:.2f}, dTSW={TSW_new-TSW_ref:.2E}')
+        Eminf *= 1.2
 
     print(f'Warning: calcTSW did not converge after {maxN} iterations ')
     print(f'calcTSW: Eminf={Eminf:.2f}, dTSW={TSW_new-TSW_ref:.2E}')
@@ -1112,7 +1114,7 @@ def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INT
 
     # Count electrons below Emin (zero-DOS region: real-axis ANT converges in ~6 pts)
     Eminf, _TSW = calcTSW(F, S, g, Eminf=Emin, tol=conv)
-    P, _delta_N_lower = densityReal(F, S, g, Eminf, Emin, tol, T=0)
+    P, _delta_N_lower = densityComplex(F, S, g, Eminf, Emin, tol, T=0)
     nLower = np.trace(P@g.S).real + _delta_N_lower
     assert nLower < ne, "ne ({ne}) exceeds mininum number of electrons ({nLower:.2f})"
     print(f"{nLower:.2f} electrons below Emin.")
