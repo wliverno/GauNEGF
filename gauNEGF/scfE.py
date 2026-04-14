@@ -361,10 +361,20 @@ class NEGFE(NEGF):
             self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, Emin=self.Emin)
             Eminf_ = min(self.Eminf,self.Emin) if self.Eminf != -1e6 else self.Emin
             self.Eminf, self.TSW = calcTSW(self.F*har_to_eV, self.S, self.g, Eminf=Eminf_, TSW=self.TSW, tol=self.tol)
-            P, _delta_N_lower = densityReal(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
+            P, _delta_N_lower = densityComplex(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
         else:
-            P, _delta_N_lower = densityRealN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
+            P, _delta_N_lower = densityComplexN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
         nLower = np.trace(self.S@P).real + _delta_N_lower
+        if nLower >= 1 and self.N2 is None:
+            print(f'Found {nLower:.2f} electrons below Emin, adjusting integration limits...')
+            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g)
+            Eminf_ = min(self.Eminf,self.Emin)
+            self.Eminf, self.TSW = calcTSW(self.F*har_to_eV, self.S, self.g, Eminf=Eminf_, tol=self.tol)
+            P, _delta_N_lower = densityComplex(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
+            nLower = np.trace(self.S@P).real + _delta_N_lower
+            if nLower >= 1:
+                print(f'WARNING: {nLower:.2f} electrons still below Emin!')
+            
         # Helper function for densityComplex()
         def compContourP2(mu):
                 if self.N1 is not None:
