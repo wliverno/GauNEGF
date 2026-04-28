@@ -88,7 +88,7 @@ class surfG:
     gPrev : list
         Previous surface Green's functions for convergence
     """
-    def __init__(self, Fock, Overlap, indsList, taus=None, staus=None, alphas=None, aOverlaps=None, betas=None, bOverlaps=None, eta=ETA, spin='r', symmetrize_contacts=None):
+    def __init__(self, Fock, Overlap, indsList, taus=None, staus=None, alphas=None, aOverlaps=None, betas=None, bOverlaps=None, eta=ETA, spin='r'):
         """
         Initialize the surface Green's function calculator.
 
@@ -124,18 +124,6 @@ class surfG:
             Overlap matrices between contact unit cells (default: None = zeros)
         eta : float, optional
             Broadening parameter in eV (default: 1e-9)
-        symmetrize_contacts : bool or None, optional
-            Enforce that both contacts use identical on-site parameters during
-            SCF by averaging their Fock blocks.  Required when both contacts
-            represent the same bulk material, because sigma_L and sigma_R carry
-            opposite directional (p-orbital) coupling signs that would otherwise
-            induce asymmetric density and break periodicity.
-            - None (default): auto-detect (True for 2-cell auto-extraction,
-              False otherwise)
-            - True: always symmetrize (use for 3+ cell devices where both
-              contacts are the same material)
-            - False: never symmetrize (use for junctions between different
-              materials)
         """
         # Set up system
         self.F = jnp.array(Fock)
@@ -148,16 +136,6 @@ class surfG:
         self.indsList = [jnp.array(inds) for inds in indsList]
 
         # Set Contact Coupling
-        # _symmetrize_contacts: when True, _setContacts averages the on-site
-        # Fock blocks so both contacts describe the same bulk.  This prevents
-        # SCF from breaking periodicity (sigma_L and sigma_R carry opposite
-        # directional coupling signs, inducing asymmetric density).
-        if symmetrize_contacts is not None:
-            self._symmetrize_contacts = symmetrize_contacts
-        elif taus is None and len(indsList) == 2:
-            self._symmetrize_contacts = True   # 2-cell auto-extraction
-        else:
-            self._symmetrize_contacts = False  # junction or explicit params
         if taus is None:
             taus = [self.indsList[-1], self.indsList[0]]
         taus = [jnp.array(tau) for tau in taus]
@@ -201,12 +179,6 @@ class surfG:
         contactFromFock=True: extracts alpha/Salpha from self.F and self.S_orig.
         contactFromFock=False: uses provided alphas/aOverlaps/betas/bOverlaps.
 
-        For 2-cell periodic systems (_periodic_2cell=True), enforces that both
-        contacts use identical on-site parameters.  This is necessary because
-        sigma_L and sigma_R carry opposite s-p coupling signs, which induces an
-        asymmetric density and Fock matrix during SCF even though the underlying
-        bulk is periodic.
-
         Calls _regularizeContacts() after setting lists.
         """
         if self.contactFromFock:
@@ -215,12 +187,6 @@ class surfG:
             for inds in self.indsList:
                 alphas.append(self.F[jnp.ix_(inds, inds)])
                 aOverlaps.append(self.S_orig[jnp.ix_(inds, inds)])
-            # Enforce periodicity for 2-cell auto-extracted contacts
-            if self._symmetrize_contacts:
-                alpha_avg = (alphas[0] + alphas[1]) / 2
-                alphas = [alpha_avg, alpha_avg]
-                aOverlap_avg = (aOverlaps[0] + aOverlaps[1]) / 2
-                aOverlaps = [aOverlap_avg, aOverlap_avg]
             self.aList = alphas
             self.aSList = aOverlaps
             self.bList = [jnp.array(tau) for tau in self.tauList]
@@ -251,7 +217,7 @@ class surfG:
         """
         
         if not hasattr(self, "CList"):
-            self.CList = [jnp.eye(len(A)*3) for A in self.aList]
+            self.CList = [jnp.eye(len(A)*2) for A in self.aList]
             for i in range(len(self.indsList)):
                 S0 = self.aSList[i]
                 S1 = self.bSList[i]
@@ -289,7 +255,7 @@ class surfG:
             zeros = jnp.zeros_like(H0)
             n=len(H0)
             H2 = jnp.block([[H0, H1],
-                            [H1.conj().T, H0]
+                            [H1.conj().T, H0]])
             C = self.CList[i]
             H2_reg = C.conj().T@H2@C
             self.aList[i]  = (H2_reg[n:, n:]+H2_reg[:n, :n])/2
@@ -448,7 +414,8 @@ class surfG:
         tau = self.tauList[i]
         t = (-tau) if stau is None else (E*stau - tau)
         bar_t = (-tau.conj().T) if stau is None else (E*stau.conj().T - tau.conj().T)
-        C_mid = self.CList[i][len(t):-len(t), len(t):-len(t)]
+        n = len(self.aList[i])
+        C_mid = self.CList[i][:n, :n]
         t_reg = t @ C_mid
         bar_t_reg = C_mid.conj().T @ bar_t
         sig = t_reg @ self.g(E, i, conv) @ bar_t_reg
@@ -464,9 +431,10 @@ class surfG:
     def crossTermQ(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
         """Symmetrized cross-term matrix Q_sym_i in full device basis.
 
-        Q_sym = (t_eff @ g_surf @ S_LD + S_DL @ g_surf @ t_eff^dagger) / 2
+        Q_sym = (t_eff @ g_surf @ S_LD + S_DL @ g_surf @ bar_t_eff) / 2
 
-        where t_eff is the same regularized coupling used in sigma(). Returns
+        where t_eff is the regularized tau_DL and bar_t_eff is the regularized
+        tau_LD (EOM coupling with unconjugated E, NOT t_eff^dagger). Returns
         None if contact i has orthogonal coupling (stauList[i] is None).
         """
         stau = self.stauList[i]
@@ -474,9 +442,9 @@ class surfG:
             return None
         inds = self.indsList[i]
         tau = self.tauList[i]
-        n = len(tau)
+        n = len(self.aList[i])
         t = E * stau - tau
-        C_mid = self.CList[i][n:-n, n:-n]
+        C_mid = self.CList[i][:n, :n]
         t_reg = t @ C_mid
         g_surf = self.g(E, i, conv)
         bar_t = E * stau.conj().T - tau.conj().T
