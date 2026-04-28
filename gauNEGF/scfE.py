@@ -135,6 +135,22 @@ class NEGFE(NEGF):
         inds = super().setContacts(contactList[0], contactList[-1])
         self.lInd = inds[0]
         self.rInd = inds[1]
+        # Auto-detect symmetrization: True only when tauList not provided
+        if symmetrize_contacts is not None:
+            self._symmetrize_contacts = symmetrize_contacts
+        else:
+            self._symmetrize_contacts = (tauList is None)
+
+        # One-time overlap check -- warn if contact overlap blocks differ
+        if self._symmetrize_contacts:
+            lInd, rInd = self.lInd, self.rInd
+            SL = self.S[np.ix_(lInd, lInd)]
+            SR = self.S[np.ix_(rInd, rInd)]
+            if not np.allclose(np.array(SL), np.array(SR)):
+                print(
+                    'WARNING: symmetrize_contacts=True but contact overlap blocks differ. '
+                    'Contacts may not be equivalent materials.'
+                )
         # if tauList is a list of atom numbers (rather than a matrix), generate orbital indices
         if tauList is not None:
             if len(np.shape(tauList[0])) == 1:
@@ -143,7 +159,7 @@ class NEGFE(NEGF):
                 tauList = (ind1, ind2)
 
         # Generate surfG() object for the molecule + contacts and initialize variables
-        self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eta, self.spin, symmetrize_contacts)
+        self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eta, self.spin)
 
         if alphas is not None:
             gList = []
@@ -152,7 +168,7 @@ class NEGFE(NEGF):
                 gList.append(surfG(a, Sa, [inds, inds], [b, b.conj().T], [Sb, Sb.conj().T], eta=eta, spin=self.spin))
             if neList is not None:
                 muL = getFermiContact(gList[0], neList[0], maxcycles=100)
-                if symmetrize_contacts:
+                if self._symmetrize_contacts:
                     muR=muL+0.0
                 else:
                     muR = getFermiContact(gList[-1], neList[-1], maxcycles=100)
@@ -166,7 +182,16 @@ class NEGFE(NEGF):
         self.setIntegralLimits()
         self.T = T
         return inds
-   
+
+    def _symmetrize_F(self):
+        if not getattr(self, '_symmetrize_contacts', False):
+            return
+        lInd = self.lInd
+        rInd = self.rInd
+        avg = (self.F[np.ix_(lInd, lInd)] + self.F[np.ix_(rInd, rInd)]) / 2
+        self.F[np.ix_(lInd, lInd)] = avg
+        self.F[np.ix_(rInd, rInd)] = avg
+
     # Set constant sigma contact for testing or adding non-zero temperature
     def setSigma(self, lContact=None, rContact=None, sig=-0.1j, sig2=None, T=TEMPERATURE):
         """
@@ -356,6 +381,7 @@ class NEGFE(NEGF):
         tuple
             (energies, occupations) - Sorted jnp.linalg.eigenvalues and occupations
         """
+        self._symmetrize_F()
         print('Calculating lower density matrix:')
         if self.N2 is None:
             self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, Emin=self.Emin)
@@ -531,6 +557,7 @@ class NEGFE(NEGF):
         Fock_old = self.F.copy()
         dE = super().PToFock()
         self.F, self.locs = getFock(self.bar, self.spin)
+        self._symmetrize_F()
         self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
         return dE
     
