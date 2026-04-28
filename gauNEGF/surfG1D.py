@@ -256,16 +256,15 @@ class surfG:
                 S0 = self.aSList[i]
                 S1 = self.bSList[i]
                 zeros = jnp.zeros_like(S0)
-                S3 = jnp.block([[S0, S1, zeros],
-                                [S1.T, S0, S1],
-                                [zeros, S1.T, S0]])
+                S2 = jnp.block([[S0, S1],
+                                [S1.T, S0]])
                 n = S1.shape[0]
-                eigvals, U = eigh(S3)
+                eigvals, U = eigh(S2)
                 lam_max = jnp.max(eigvals)
                 lam_min_thresh = OVERLAP_EIGENVALUE_RATIO * lam_max
 
                 # Turning off regularization for now 
-                if True:#jnp.min(eigvals) >= lam_min_thresh:
+                if jnp.min(eigvals) >= lam_min_thresh:
                     # Already PSD -- no transform needed
                     continue
 
@@ -274,10 +273,10 @@ class surfG:
                 C = C.astype(self.aSList[i].dtype)
                 self.CList[i] = C.copy()
 
-                S3_reg = C.conj().T@S3@C
+                S2_reg = C.conj().T@S2@C
 
-                self.aSList[i] = S3_reg[n:-n, n:-n]#(S3_reg[:n, :n] + S2_reg[n:, n:])/2
-                self.bSList[i] = (S3_reg[:n, n:-n] + S3_reg[n:-n, -n:])/2
+                self.aSList[i] = (S2_reg[:n, :n] + S2_reg[n:, n:])/2
+                self.bSList[i] = S2_reg[:n, n:]#(S3_reg[:n, n:-n] + S3_reg[n:-n, -n:])/2
 
                 print(f'Contact overlap regularized (contact {i}): '
                       f'min_eig {eigvals[0]:.4e} -> {lam_min_thresh:.4e}')
@@ -289,13 +288,12 @@ class surfG:
             H1 = self.bList[i]
             zeros = jnp.zeros_like(H0)
             n=len(H0)
-            H3 = jnp.block([[H0, H1, zeros],
-                            [H1.conj().T, H0, H1],
-                            [zeros, H1.conj().T, H0]])
+            H2 = jnp.block([[H0, H1],
+                            [H1.conj().T, H0]
             C = self.CList[i]
-            H3_reg = C.conj().T@H3@C
-            self.aList[i]  = H3_reg[n:-n, n:-n]
-            self.bList[i] = (H3_reg[:n, n:-n] + H3_reg[n:-n, -n:])/2 
+            H2_reg = C.conj().T@H2@C
+            self.aList[i]  = (H2_reg[n:, n:]+H2_reg[:n, :n])/2
+            self.bList[i] = H2_reg[:n, n:]#(H3_reg[:n, n:-n] + H3_reg[n:-n, -n:])/2 
          
 
     def _rejit(self):

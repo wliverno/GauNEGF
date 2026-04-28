@@ -924,16 +924,16 @@ def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=FERMI_SEARCH_CYCLES,
         # poles of G^R in that window, yielding the total spectral weight.
         P, delta_N = densityComplex(F, S, g, Eminf, 1e6, tol, T=0)
         TSW_new = np.trace(P @ g.S).real
-        if ((TSW_new - TSW_ref)/TSW_ref) < tol:
+        if ((TSW_ref - TSW_new)/TSW_ref) < tol:
             if FERMI_DEBUG:
                 print(f'calcTSW converged: Eminf={Eminf:.2f}, TSW={TSW_new:.4f}')
             return Eminf, TSW_ref
         elif FERMI_DEBUG:
-            print(f'DEBUG: Eminf={Eminf:.2f}, dTSW={TSW_new-TSW_ref:.2E}')
+            print(f'DEBUG: Eminf={Eminf:.2f}, dTSW={TSW_ref-TSW_new:.2E}')
         Eminf *= 1.2
 
     print(f'Warning: calcTSW did not converge after {maxN} iterations ')
-    print(f'calcTSW: Eminf={Eminf:.2f}, dTSW={TSW_new-TSW_ref:.2E}')
+    print(f'calcTSW: Eminf={Eminf:.2f}, dTSW={TSW_ref-TSW_new:.2E}')
     return Eminf, TSW_ref
 
 def integralFit(F, S, g, mu, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_TOL, T=TEMPERATURE, maxN=MAX_CYCLES):
