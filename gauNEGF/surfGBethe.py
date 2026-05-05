@@ -615,29 +615,47 @@ class surfGB:
         """Cross-term Q_sym for contact i in full device basis.
 
         Mirrors surfGB.sigma: iterates atoms in contact i, calls
-        gList[i].crossTermQ with per-atom active directions, assembles result,
+        gList[i].crossTermQSurf with per-atom active directions, assembles result,
         then applies de-orthonormalization (same as sigma).
         """
         nIndLists_i = self.nIndLists[i]
         indsLists_i = self.indsLists[i]
 
         E_shifted = E - self.gList[i].dFermi
-        sig = jnp.zeros((self.N, self.N), dtype=complex)
-        for nInds, Finds in zip(nIndLists_i, indsLists_i):
-            sigInds = list(set(range(9)) - {int(x) for x in nInds})
-            Q_atom = self.gList[i].crossTermQSurf(E_shifted, sigInds=sigInds, conv=conv)
-            sig = sig.at[jnp.ix_(Finds, Finds)].set(Q_atom)
 
-        # Apply de-orthonormalization if orthonormal basis (same as sigma)
-        sig = lax.cond(self.Sdict['sss'] == 0,
-                       lambda s: self.Xi @ s @ self.Xi,
-                       lambda s: s,
-                       sig)
+        if self.SOC:
+            # SOC matrices are 18x18 (spin already included, interleaved ordering)
+            sig = jnp.zeros((2*self.N, 2*self.N), dtype=complex)
+            for nInds, Finds in zip(nIndLists_i, indsLists_i):
+                sigInds = list(set(range(9)) - {int(x) for x in nInds})
+                Q_atom = self.gList[i].crossTermQSurf(E_shifted, sigInds=sigInds, conv=conv)
+                # Expand orbital indices to spin-orbital: k -> [2*k, 2*k+1]
+                socFinds = jnp.array([idx for k in Finds for idx in (2*k, 2*k+1)])
+                sig = sig.at[jnp.ix_(socFinds, socFinds)].set(Q_atom)
 
-        if self.spin == 'u' or self.spin == 'ro':
-            sig = jnp.kron(jnp.eye(2), sig)
-        elif self.spin == 'g':
-            sig = jnp.kron(sig, jnp.eye(2))
+            # De-orthonormalization with expanded Xi (same condition as sigma)
+            sig = lax.cond(self.Sdict['sss'] == 0,
+                           lambda s: jnp.kron(self.Xi, jnp.eye(2)) @ s @ jnp.kron(self.Xi, jnp.eye(2)),
+                           lambda s: s,
+                           sig)
+            # No trailing spin kron -- spin already in SOC matrices
+        else:
+            sig = jnp.zeros((self.N, self.N), dtype=complex)
+            for nInds, Finds in zip(nIndLists_i, indsLists_i):
+                sigInds = list(set(range(9)) - {int(x) for x in nInds})
+                Q_atom = self.gList[i].crossTermQSurf(E_shifted, sigInds=sigInds, conv=conv)
+                sig = sig.at[jnp.ix_(Finds, Finds)].set(Q_atom)
+
+            # Apply de-orthonormalization if orthonormal basis (same as sigma)
+            sig = lax.cond(self.Sdict['sss'] == 0,
+                           lambda s: self.Xi @ s @ self.Xi,
+                           lambda s: s,
+                           sig)
+
+            if self.spin == 'u' or self.spin == 'ro':
+                sig = jnp.kron(jnp.eye(2), sig)
+            elif self.spin == 'g':
+                sig = jnp.kron(sig, jnp.eye(2))
 
         return sig
 
