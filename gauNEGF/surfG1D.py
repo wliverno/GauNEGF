@@ -438,7 +438,7 @@ class surfG:
         None if contact i has orthogonal coupling (stauList[i] is None).
         """
         stau = self.stauList[i]
-        if stau is None or not jnp.any(stau):
+        if stau is None:
             return None
         inds = self.indsList[i]
         tau = self.tauList[i]

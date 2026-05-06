@@ -912,10 +912,28 @@ class NEGF(object):
     def writeChk(self):
         """
         Write current state to Gaussian checkpoint file.
+
+        gauopen's bar.writefile(<name>.chk) is broken: it invokes
+        Gaussian's unfchk utility directly on a binary array file, but
+        unfchk expects a formatted checkpoint (.fchk) as input. The
+        supported path is BAF -> .fchk (via mat2fchk, gauopen's
+        writefile(.fchk)) -> .chk (via unfchk). This method does both
+        steps and cleans up the intermediate .fchk.
         """
-        print('Writing to checkpoint file...') 
-        self.bar.writefile(self.chkfile)
-        print(self.chkfile+' written!') 
+        fchkfile = self.chkfile[:-4] + ".fchk" if self.chkfile.endswith(".chk") else self.chkfile + ".fchk"
+        print('Writing formatted checkpoint file...')
+        self.bar.writefile(fchkfile)
+        print(f'Converting {fchkfile} -> {self.chkfile}...')
+        ret = os.system(f'unfchk {fchkfile} {self.chkfile}')
+        if ret == 0:
+            try:
+                os.unlink(fchkfile)
+            except OSError:
+                pass
+            print(self.chkfile+' written!')
+        else:
+            print(f'WARNING: unfchk failed (return code {ret}); '
+                  f'kept {fchkfile} as fallback')
     
     def saveMAT(self, matfile="out.mat"):
         """
