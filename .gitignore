@@ -1,4 +1,6 @@
 *.ipynb
+*/slurm-*
+slurm-*
 __pycache__/*.pyc
 .vscode/settings.json
 gpu_benchmark.out

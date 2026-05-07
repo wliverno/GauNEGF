@@ -228,8 +228,8 @@ def test_readBetheParams_soc_stores_H0():
     assert soc_params is not None, "SOC params not found in AuSOC.bethe"
     assert len(soc_params) == 3
     assert soc_params[0] == 0.0  # s orbital has no SOC
-    assert soc_params[1] > 0  # p SOC
-    assert soc_params[2] > 0  # d SOC
+    assert soc_params[1] == 0.0  # p SOC: AuSOC.bethe uses d-only SOC (commit 2f71ea6)
+    assert soc_params[2] > 0  # d SOC (dominant for Au)
 
 
 def test_readBetheParams_soc_h0_shape():
@@ -299,8 +299,7 @@ def test_surfGBAt_soc_sigma_retarded():
     """Surface sigma with SOC should be retarded: Im(diag) <= 0."""
     g, ne = build_soc_surfGBAt()
     E = 0.0
-    sigSurf = g.sigma(E)
-    sigTot = jnp.sum(sigSurf, axis=0)
+    sigTot = g.sigmaTot(E)
     imag_diag = jnp.diag(sigTot).imag
     assert jnp.all(imag_diag <= 1e-10), \
         f"Sigma not retarded, max Im(diag) = {jnp.max(imag_diag)}"

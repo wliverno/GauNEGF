@@ -135,6 +135,22 @@ class NEGFE(NEGF):
         inds = super().setContacts(contactList[0], contactList[-1])
         self.lInd = inds[0]
         self.rInd = inds[1]
+        # Auto-detect symmetrization: True only when tauList not provided
+        if symmetrize_contacts is not None:
+            self._symmetrize_contacts = symmetrize_contacts
+        else:
+            self._symmetrize_contacts = (tauList is None)
+
+        # One-time overlap check -- warn if contact overlap blocks differ
+        if self._symmetrize_contacts:
+            lInd, rInd = self.lInd, self.rInd
+            SL = self.S[np.ix_(lInd, lInd)]
+            SR = self.S[np.ix_(rInd, rInd)]
+            if not np.allclose(np.array(SL), np.array(SR)):
+                print(
+                    'WARNING: symmetrize_contacts=True but contact overlap blocks differ. '
+                    'Contacts may not be equivalent materials.'
+                )
         # if tauList is a list of atom numbers (rather than a matrix), generate orbital indices
         if tauList is not None:
             if len(np.shape(tauList[0])) == 1:
@@ -143,7 +159,7 @@ class NEGFE(NEGF):
                 tauList = (ind1, ind2)
 
         # Generate surfG() object for the molecule + contacts and initialize variables
-        self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eta, self.spin, symmetrize_contacts)
+        self.g = surfG(self.F*har_to_eV, self.S, inds, tauList, stauList, alphas, aOverlaps, betas, bOverlaps, eta, self.spin)
 
         if alphas is not None:
             gList = []
@@ -152,7 +168,10 @@ class NEGFE(NEGF):
                 gList.append(surfG(a, Sa, [inds, inds], [b, b.conj().T], [Sb, Sb.conj().T], eta=eta, spin=self.spin))
             if neList is not None:
                 muL = getFermiContact(gList[0], neList[0], maxcycles=100)
-                muR = getFermiContact(gList[-1], neList[-1], maxcycles=100)
+                if self._symmetrize_contacts:
+                    muR=muL+0.0
+                else:
+                    muR = getFermiContact(gList[-1], neList[-1], maxcycles=100)
             elif muList is not None:
                 muL = muList[0]
                 muR = muList[-1]
@@ -163,7 +182,16 @@ class NEGFE(NEGF):
         self.setIntegralLimits()
         self.T = T
         return inds
-   
+
+    def _symmetrize_F(self):
+        if not getattr(self, '_symmetrize_contacts', False):
+            return
+        lInd = self.lInd
+        rInd = self.rInd
+        avg = (self.F[np.ix_(lInd, lInd)] + self.F[np.ix_(rInd, rInd)]) / 2
+        self.F[np.ix_(lInd, lInd)] = avg
+        self.F[np.ix_(rInd, rInd)] = avg
+
     # Set constant sigma contact for testing or adding non-zero temperature
     def setSigma(self, lContact=None, rContact=None, sig=-0.1j, sig2=None, T=TEMPERATURE):
         """
@@ -197,7 +225,7 @@ class NEGFE(NEGF):
         return inds
 
     # Set up Fermi Search algorithm after setting system Fermi energies
-    def setVoltage(self, qV, fermi=np.nan, Emin=None, Eminf=None, fermiMethod=None):
+    def setVoltage(self, qV, fermi=None, Emin=None, Eminf=None, fermiMethod=None):
         """
         Set voltage bias and Fermi search method.
 
@@ -206,7 +234,7 @@ class NEGFE(NEGF):
         qV : float
             Applied voltage in eV
         fermi : float, optional
-            Fermi energy in eV (default: np.nan)
+            Fermi energy in eV (default: None)
         Emin : float, optional
             Minimum energy for integration (default: None)
         Eminf : float, optional
@@ -224,7 +252,7 @@ class NEGFE(NEGF):
                 self.fermiMethod = 'muller' if fermiMethod is None else fermiMethod
             elif fermiMethod is not None:
                 self.fermiMethod = fermiMethod
-        jax.clear_caches() # reset compiled functions
+        #jax.clear_caches() # reset compiled functions
     
     def setIntegralLimits(self, N1=None, N2=None, Nnegf=None, tol=ADAPTIVE_INTEGRATION_TOL, Emin=None):
 
@@ -245,10 +273,11 @@ class NEGFE(NEGF):
             Minimum energy for integration (default: None)
         """
         if Emin is None and tol is not None:
-            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g)
+            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, tol=tol)
+            self.Eminf, self.TSW = calcTSW(self.F*har_to_eV, self.S, self.g, Eminf=self.Emin, tol=tol)
+            self.tol = tol
         else:
             self.Emin = Emin
-        self.tol = tol
         self.N1 = N1
         self.N2 = N2
         self.Nnegf = Nnegf
@@ -281,8 +310,8 @@ class NEGFE(NEGF):
         print('SETTING INTEGRATION LIMITS... ')
         self.Emin, self.N1, self.N2 = integralFit(self.F*har_to_eV, self.S, self.g,
                                                   self.fermi, self.Eminf, self.tol)
-        PLower = densityRealN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, self.T)
-        nLower = np.trace(self.S@PLower).real
+        PLower, delta_N_lower = densityRealN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, self.T)
+        nLower = np.trace(self.S@PLower).real + delta_N_lower
         if self.mu1 != self.mu2:
             self.Nnegf = integralFitNEGF(self.F*har_to_eV, self.S, self.g, self.fermi, 
                                          self.qV, self.Eminf, self.tol, self.T)
@@ -352,21 +381,35 @@ class NEGFE(NEGF):
         tuple
             (energies, occupations) - Sorted jnp.linalg.eigenvalues and occupations
         """
+        self._symmetrize_F()
         print('Calculating lower density matrix:')
         if self.N2 is None:
             self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, Emin=self.Emin)
-            P = densityComplex(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
+            Eminf_ = min(self.Eminf,self.Emin) if self.Eminf != -1e6 else self.Emin
+            self.Eminf, self.TSW = calcTSW(self.F*har_to_eV, self.S, self.g, Eminf=Eminf_, TSW=self.TSW, tol=self.tol)
+            P, _delta_N_lower = densityComplex(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
         else:
-            P = densityRealN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
-        nLower = np.trace(self.S@P).real
+            P, _delta_N_lower = densityComplexN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
+        nLower = np.trace(self.S@P).real + _delta_N_lower
+        if nLower >= 1 and self.N2 is None:
+            print(f'Found {nLower:.2f} electrons below Emin, adjusting integration limits...')
+            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g)
+            Eminf_ = min(self.Eminf,self.Emin)
+            self.Eminf, self.TSW = calcTSW(self.F*har_to_eV, self.S, self.g, Eminf=Eminf_, tol=self.tol)
+            P, _delta_N_lower = densityComplex(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
+            nLower = np.trace(self.S@P).real + _delta_N_lower
+            if nLower >= 1:
+                print(f'WARNING: {nLower:.2f} electrons still below Emin!')
+            
         # Helper function for densityComplex()
         def compContourP2(mu):
                 if self.N1 is not None:
-                    return densityComplexN(self.F*har_to_eV, self.S, self.g, self.Emin, 
+                    P, _ = densityComplexN(self.F*har_to_eV, self.S, self.g, self.Emin,
                                                     mu, N=self.N1, T=self.T)
                 else:
-                    return densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin, 
+                    P, _ = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin,
                                                     mu, tol=self.tol, T=self.T)
+                return P
 
         # Fermi Energy Update using local self-energy approximation
         if self.updFermi:
@@ -406,6 +449,8 @@ class NEGFE(NEGF):
                 P += compContourP2(self.mu1)
 
                 # Fix number of electrons
+                # TODO: nActual omits cross-term delta_N; acceptable since predict
+                # uses constant-sigma approximation (delta_N << approximation error)
                 nActual = np.real(np.trace(P @ self.S))
                 P *= ne/nActual
 
@@ -465,7 +510,7 @@ class NEGFE(NEGF):
                                                  '\'secant\', \'bisect\' or \'predict\' or \'default\'')
             # Shift Emin, mu1, and mu2 and update contact self-energies
             self.setVoltage(self.qV)
-            self.Emin += self.fermi-fermi_old
+            #self.Emin += self.fermi-fermi_old
             self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
         else:
             print('Calculating equilibrium density matrix:')
@@ -512,6 +557,7 @@ class NEGFE(NEGF):
         Fock_old = self.F.copy()
         dE = super().PToFock()
         self.F, self.locs = getFock(self.bar, self.spin)
+        self._symmetrize_F()
         self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
         return dE
     

@@ -43,10 +43,10 @@ def genOrbList(l: int):
         if mi == 0:
             V[i, l] = 1.0
         elif mi > 0:
-            V[i, l+mi] = (-1.0**mi)/np.sqrt(2)
+            V[i, l+mi] = ((-1.0)**mi)/np.sqrt(2)
             V[i, l-mi] = 1.0/np.sqrt(2)
         else:
-            V[i, l+mi] = -(-1.0**mi)*1j/np.sqrt(2)
+            V[i, l+mi] = -((-1.0)**mi)*1j/np.sqrt(2)
             V[i, l-mi] = 1j/np.sqrt(2)
     return V
 
