@@ -23,7 +23,7 @@ import scipy.io as io
 from scipy.integrate import trapezoid
 
 # IMPORTANT: Import config BEFORE jax to set up JAX environment
-from gauNEGF.config import ENERGY_STEP, N_KT, TEMPERATURE, shard_array
+from gauNEGF.config import ENERGY_STEP, ETA, N_KT, TEMPERATURE, shard_array
 from gauNEGF.utils import inv
 
 import jax
@@ -105,6 +105,30 @@ class SigmaCalculator:
 
         return sigma_total
 
+    def get_Q_tot(self, E, spin=None, matrix_size=None):
+        """Get cross-term Q_tot at energy E, with spin expansion matching get_sigma_total.
+
+        Returns None for energy-independent sigma or when surfG has no overlap coupling.
+        Returns a JAX array of zeros_like(S) shape if Q is explicitly zero.
+        """
+        if not self.energy_dependent or not hasattr(self.sig1, 'crossTermQTot'):
+            return None
+        Q_tot = self.sig1.crossTermQTot(E)
+        if Q_tot is None:
+            return None
+
+        Q_arr = np.asarray(Q_tot)
+
+        if spin in ['u', 'ro', 'g'] and matrix_size is not None:
+            Q_size = Q_arr.shape[0]
+            if matrix_size == 2 * Q_size:
+                if spin in ['u', 'ro']:
+                    return np.kron(np.eye(2), Q_arr)
+                elif spin == 'g':
+                    return np.kron(Q_arr, np.eye(2))
+
+        return Q_arr
+
     def get_sigma(self, E, contact_index, spin=None, matrix_size=None):
         """Get contact-specific self-energy at energy E."""
         if self.energy_dependent:
@@ -164,7 +188,7 @@ def _Im(A):
 @jit
 def _transmission_kernel_restricted(E, F, S, sigma_total, gamma1, gamma2):
     """JIT-compiled kernel for restricted transmission calculation."""
-    mat = E * S - F - sigma_total
+    mat = (E + 1j*ETA) * S - F - sigma_total
     Gr = inv(mat)
     Ga = jnp.conj(Gr).T
     temp = gamma1 @ Gr @ gamma2
@@ -173,7 +197,7 @@ def _transmission_kernel_restricted(E, F, S, sigma_total, gamma1, gamma2):
 @jit
 def _transmission_kernel_spin_block(E, F, S, sigma_total, gamma1, gamma2):
     """JIT-compiled kernel for spin-resolved block transmission calculation."""
-    mat = E * S - F - sigma_total
+    mat = (E + 1j*ETA) * S - F - sigma_total
     Gr = inv(mat)
 
     # Compute N from matrix dimensions (matrices are 2N x 2N)
@@ -196,11 +220,16 @@ def _transmission_kernel_spin_block(E, F, S, sigma_total, gamma1, gamma2):
     return jnp.sum(T_spin), T_spin
 
 @jit
-def _dos_kernel(E, F, S, sigma_total):
-    """JIT-compiled kernel for density of states calculation."""
-    mat = E * S - F - sigma_total
+def _dos_kernel(E, F, S, sigma_total, Q):
+    """JIT-compiled kernel for density of states calculation.
+
+    Computes DOS = -1/pi * Im[Tr(G^R @ (S - Q_tot))]
+    where Q_tot is the cross-term correction (zeros for orthogonal contacts).
+    """
+    mat = (E + 1j*ETA) * S - F - sigma_total
     Gr = inv(mat)
-    dos_per_site = -_Im(jnp.diag(Gr)) / jnp.pi
+    GS_eff = Gr @ (S - Q)
+    dos_per_site = -jnp.imag(jnp.diag(GS_eff)) / jnp.pi
     total_dos = jnp.sum(dos_per_site)
     return total_dos, dos_per_site
 
@@ -322,65 +351,47 @@ def dos_single_energy(E, F_jax, S_jax, sigma_calc, spin=None):
     sigma_total_jax = jnp.asarray(sigma_total)
 
     if spin == 'r':
-        # Use JIT-compiled DOS kernel
-        total_dos, dos_per_site = _dos_kernel(E, F_jax, S_jax, sigma_total_jax)
+        Q_tot = sigma_calc.get_Q_tot(E, spin='r', matrix_size=matrix_size)
+        Q_jax = jnp.zeros_like(S_jax) if Q_tot is None else jnp.asarray(Q_tot)
+
+        # DOS = -1/pi * Im[Tr(G^R @ (S - Q_tot))]
+        total_dos, dos_per_site = _dos_kernel(E, F_jax, S_jax, sigma_total_jax, Q_jax)
         return float(total_dos), np.array(dos_per_site)
 
     elif spin in ['u', 'ro']:
-        # Unrestricted/restricted open - split into spin up and down blocks
         N = F_jax.shape[0] // 2
+        Q_tot = sigma_calc.get_Q_tot(E, spin=spin, matrix_size=matrix_size)
+        Q_jax = jnp.zeros_like(S_jax) if Q_tot is None else jnp.asarray(Q_tot)
 
-        # Calculate Green's function
-        mat = E * S_jax - F_jax - sigma_total_jax
-        Gr = inv(mat)
-        Gr = np.asarray(Gr)
+        mat = (E + 1j*ETA) * S_jax - F_jax - sigma_total_jax
+        Gr = np.asarray(inv(mat))
+        S_eff = np.asarray(S_jax - Q_jax)
+        GS_eff = Gr @ S_eff
 
-        # Extract spin-resolved Green's functions
-        Gr_up = Gr[:N, :N]      # Up-up block
-        Gr_down = Gr[N:, N:]    # Down-down block
-
-        # Calculate spin-resolved DOS
-        dos_up_per_site = -_Im(np.diag(Gr_up)) / np.pi
-        dos_down_per_site = -_Im(np.diag(Gr_down)) / np.pi
-
-        # Total DOS per site (both spins)
+        dos_up_per_site = -np.imag(np.diag(GS_eff[:N, :N])) / np.pi
+        dos_down_per_site = -np.imag(np.diag(GS_eff[N:, N:])) / np.pi
         dos_per_site = np.concatenate([dos_up_per_site, dos_down_per_site])
-
-        # Totals
-        total_dos_up = np.sum(dos_up_per_site)
-        total_dos_down = np.sum(dos_down_per_site)
-        total_dos = total_dos_up + total_dos_down
+        total_dos = float(np.sum(dos_per_site))
 
         return total_dos, dos_per_site, dos_up_per_site, dos_down_per_site
 
     elif spin == 'g':
-        # Generalized case - extract spinor components
         N = F_jax.shape[0] // 2
+        Q_tot = sigma_calc.get_Q_tot(E, spin=spin, matrix_size=matrix_size)
+        Q_jax = jnp.zeros_like(S_jax) if Q_tot is None else jnp.asarray(Q_tot)
 
-        # Calculate Green's function
-        mat = E * S_jax - F_jax - sigma_total_jax
-        Gr = inv(mat)
-        Gr = np.asarray(Gr)
-
-        # Extract alpha and beta spinor indices
         alpha_indices = np.arange(0, 2*N, 2)
         beta_indices = np.arange(1, 2*N, 2)
 
-        # Extract spin-resolved Green's functions
-        Gr_alpha = Gr[np.ix_(alpha_indices, alpha_indices)]
-        Gr_beta = Gr[np.ix_(beta_indices, beta_indices)]
+        mat = (E + 1j*ETA) * S_jax - F_jax - sigma_total_jax
+        Gr = np.asarray(inv(mat))
+        S_eff = np.asarray(S_jax - Q_jax)
+        GS_eff = Gr @ S_eff
 
-        # Calculate spin-resolved DOS
-        dos_alpha_per_site = -_Im(np.diag(Gr_alpha)) / np.pi
-        dos_beta_per_site = -_Im(np.diag(Gr_beta)) / np.pi
-
-        # Total DOS per site (both spins)
-        dos_per_site = -_Im(np.diag(Gr)) / np.pi
-
-        # Totals
-        total_dos_alpha = np.sum(dos_alpha_per_site)
-        total_dos_beta = np.sum(dos_beta_per_site)
-        total_dos = np.sum(dos_per_site)
+        dos_per_site = -np.imag(np.diag(GS_eff)) / np.pi
+        dos_alpha_per_site = dos_per_site[alpha_indices]
+        dos_beta_per_site = dos_per_site[beta_indices]
+        total_dos = float(np.sum(dos_per_site))
 
         return total_dos, dos_per_site, dos_alpha_per_site, dos_beta_per_site
 
@@ -666,7 +677,7 @@ def calculate_current(F, S, sigma_calculator, fermi, qV, T=TEMPERATURE, spin=Non
     
     # Handle negative qV by making dE negative (matches legacy behavior)
     if np.allclose(0, qV):
-        return 0.0 if spin == 'r' else [0.0, 0.0, 0.0, 0.0]
+        return 0.0 if spin == 'r' else (0.0, [0.0, 0.0, 0.0, 0.0])
     elif qV < 0:
         dE = -1 * abs(dE)
     else:

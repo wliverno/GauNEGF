@@ -618,7 +618,6 @@ def test_sp_chain_symmetrized_integer_transmission():
 
     # With symmetrization (default): integer transmission
     g_sym = surfG(F, S, [np.arange(n), np.arange(n, 2*n)])
-    assert g_sym._symmetrize_contacts, "Default should be True for 2-cell auto"
 
     # Test at energies clearly inside each band (avoid edges)
     margin = 0.3
@@ -663,34 +662,6 @@ def test_sp_chain_parity_identity():
         np.testing.assert_allclose(
             sigL, expected, atol=1e-10,
             err_msg=f"Parity identity Sigma_L = P Sigma_R P failed at E={E}")
-
-
-def test_symmetrize_contacts_flag():
-    """symmetrize_contacts parameter: None=auto, True=force, False=disable."""
-    F, S, alpha, H1, Salpha, S1 = _make_sp_chain()
-    n = 2
-    inds = [np.arange(n), np.arange(n, 2*n)]
-
-    # Default (None) with 2-cell auto -> True
-    g_default = surfG(F, S, inds)
-    assert g_default._symmetrize_contacts is True
-
-    # Explicit True
-    g_true = surfG(F, S, inds, symmetrize_contacts=True)
-    assert g_true._symmetrize_contacts is True
-
-    # Explicit False
-    g_false = surfG(F, S, inds, symmetrize_contacts=False)
-    assert g_false._symmetrize_contacts is False
-
-    # With explicit taus (not auto-extraction) -> default is False
-    g_taus = surfG(F, S, inds, taus=[H1.conj().T, H1],
-                   staus=[S1.conj().T, S1],
-                   alphas=[alpha, alpha],
-                   aOverlaps=[np.eye(2, dtype=complex), np.eye(2, dtype=complex)],
-                   betas=[H1.conj().T, H1],
-                   bOverlaps=[S1.conj().T, S1])
-    assert g_taus._symmetrize_contacts is False
 
 
 

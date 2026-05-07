@@ -81,7 +81,9 @@ class surfGTest:
         self.spin = spin
         self.N = len(Fock)
         self.indsList = indsList
-        self.sig = [np.array(np.zeros((self.N, self.N)), dtype=complex)]*2
+        self.num_contacts = len(indsList)
+        self.sig = [np.zeros((self.N, self.N), dtype=complex),
+                    np.zeros((self.N, self.N), dtype=complex)]
         if sig1 is not None:
             self.sig[0] = formSigma(indsList[0], sig1, self.N, self.S)
             if sig2 is None:
@@ -89,8 +91,8 @@ class surfGTest:
             else:
                 self.sig[1] = formSigma(indsList[1], sig2, self.N, self.S)
         else:
-            self.sig[0][np.ix_(indsList[0], indsList[0])]= np.diag([-0.05j]*self.N)
-            self.sig[1][np.ix_(indsList[1], indsList[1])]= np.diag([-0.05j]*self.N)
+            self.sig[0][np.ix_(indsList[0], indsList[0])] = np.diag([-0.05j]*len(indsList[0]))
+            self.sig[1][np.ix_(indsList[1], indsList[1])] = np.diag([-0.05j]*len(indsList[1]))
     
     def sigma(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
         """
@@ -151,3 +153,11 @@ class surfGTest:
         Green's function calculators.
         """
         self.F = F
+
+    def crossTermQ(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
+        """Cross-term Q_sym for surfGTest. Always None (orthogonal basis)."""
+        return None
+
+    def crossTermQTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
+        """Total cross-term Q_sym for surfGTest. Always None (orthogonal basis)."""
+        return None
