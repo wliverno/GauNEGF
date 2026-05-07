@@ -930,7 +930,7 @@ def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=FERMI_SEARCH_CYCLES,
             return Eminf, TSW_ref
         elif FERMI_DEBUG:
             print(f'DEBUG: Eminf={Eminf:.2f}, dTSW={TSW_ref-TSW_new:.2E}')
-        Eminf *= 1.2
+        Eminf *= 2.0
 
     print(f'Warning: calcTSW did not converge after {maxN} iterations ')
     print(f'calcTSW: Eminf={Eminf:.2f}, dTSW={TSW_ref-TSW_new:.2E}')

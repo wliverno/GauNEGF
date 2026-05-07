@@ -142,10 +142,12 @@ class surfG:
         if len(jnp.shape(taus[0])) == 1:
             self.tauFromFock = True
             self.tauInds = taus
-            taus = [self.F[jnp.ix_(self.tauInds[0],self.indsList[0])], 
+            taus = [self.F[jnp.ix_(self.tauInds[0],self.indsList[0])],
                     self.F[jnp.ix_(self.tauInds[1],self.indsList[-1])]]
-            staus = [self.S[jnp.ix_(self.tauInds[0],self.indsList[0])], 
+            staus = [self.S[jnp.ix_(self.tauInds[0],self.indsList[0])],
                      self.S[jnp.ix_(self.tauInds[1],self.indsList[-1])]]
+            # Canonicalize all-zero overlap blocks to None (orthogonal-contact sentinel)
+            staus = [None if not bool(jnp.any(stau)) else stau for stau in staus]
         else:
             self.tauFromFock = False
         self.tauList = taus
@@ -366,6 +368,8 @@ class surfG:
             # Rebuild coupling arrays from new F
             tau_temp = [self.F[jnp.ix_(taus[0],indsList[0])], self.F[jnp.ix_(taus[1],indsList[-1])]]
             stau_temp = [self.S[jnp.ix_(taus[0],indsList[0])], self.S[jnp.ix_(taus[1],indsList[-1])]]
+            # Canonicalize all-zero overlap blocks to None (orthogonal-contact sentinel)
+            stau_temp = [None if not bool(jnp.any(stau)) else stau for stau in stau_temp]
             self.tauList = tau_temp
             self.stauList = stau_temp
         if self.contactFromFock:
