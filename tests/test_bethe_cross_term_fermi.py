@@ -150,8 +150,9 @@ def test_cross_term_symmetrization_consistency(au_params):
     print(f"delta_N (full formula) = {delta_N_full:.6f}")
     print(f"Im(delta_N_full) = {delta_N_imag:.6e} (should be ~0)")
 
-    # Symmetrized and full formulas must agree
-    assert abs(delta_N_sym - delta_N_full) < 1e-10, \
+    # Symmetrized and full formulas must agree (tolerance accommodates FP noise
+    # from different reduction orders: JIT'd vmap vs Python loop over 12 dirs x N_pts)
+    assert abs(delta_N_sym - delta_N_full) < 1e-6, \
         (f"Symmetrized ({delta_N_sym:.6f}) vs full ({delta_N_full:.6f}) "
          f"differ by {abs(delta_N_sym - delta_N_full):.6e}")
 

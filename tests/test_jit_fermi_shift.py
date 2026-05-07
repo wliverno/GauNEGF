@@ -58,23 +58,28 @@ def make_test_surfGAt3D():
 # surfGBAt equivalence tests (Task 1)
 # ---------------------------------------------------------------------------
 
-def test_surfGBAt_sigmaK_fermi_shift_equivalence():
-    """sigmaK with dFermi=dF at E should equal sigmaK with dFermi=0 at E-dF."""
+def test_surfGBAt_sigmaK_invariant_under_updateH():
+    """sigmaK uses immutable H0/Vlist0, so updateH should not change its output.
+
+    The dFermi shift is applied by the caller (sigmaTot wraps sigmaK as
+    sigmaK(E - dFermi)) -- not inside sigmaK itself. This keeps H0/Vlist0
+    as JIT constants and avoids recompilation when dFermi changes during SCF.
+    """
     E = -5.0 + 0.1j
     dF = 0.3
 
-    # Method A: set dFermi, call sigmaK at original E
+    # Method A: set dFermi via updateH, then call sigmaK
     gAt_A = make_test_surfGBAt()
-    gAt_A.updateH(fermi=dF)  # sets dFermi = dF (fermi0 = dF)
+    gAt_A.updateH(fermi=dF)  # mutates self.H/self.Vlist, but NOT H0/Vlist0
     sig_A = np.array(gAt_A.sigmaK(E))
 
-    # Method B: keep dFermi=0, shift E down
+    # Method B: no updateH, sigmaK at the same E
     gAt_B = make_test_surfGBAt()
-    sig_B = np.array(gAt_B.sigmaK(E - dF))
+    sig_B = np.array(gAt_B.sigmaK(E))
 
     np.testing.assert_allclose(
-        sig_A, sig_B, rtol=1e-5,
-        err_msg="sigmaK: dFermi shift at E != original at E-dF"
+        sig_A, sig_B, rtol=1e-12,
+        err_msg="sigmaK should be invariant under updateH (uses H0/Vlist0)"
     )
 
 
@@ -85,10 +90,10 @@ def test_surfGBAt_sigma_fermi_shift_equivalence():
 
     gAt_A = make_test_surfGBAt()
     gAt_A.updateH(fermi=dF)
-    sig_A = np.array(gAt_A.sigma(E))
+    sig_A = np.array(gAt_A.sigma(E, 0))
 
     gAt_B = make_test_surfGBAt()
-    sig_B = np.array(gAt_B.sigma(E - dF))
+    sig_B = np.array(gAt_B.sigma(E - dF, 0))
 
     np.testing.assert_allclose(
         sig_A, sig_B, rtol=1e-5,
@@ -115,11 +120,11 @@ def test_surfGBAt_updateH_updates_dFermi():
     dF = 0.3
 
     gAt_ref = make_test_surfGBAt()
-    sig_ref = np.array(gAt_ref.sigma(E - dF))
+    sig_ref = np.array(gAt_ref.sigma(E - dF, 0))
 
     gAt = make_test_surfGBAt()
     gAt.updateH(fermi=dF)  # set fermi shift
-    sig_shifted = np.array(gAt.sigma(E))
+    sig_shifted = np.array(gAt.sigma(E, 0))
 
     np.testing.assert_allclose(
         sig_shifted, sig_ref, rtol=1e-5,
@@ -138,10 +143,10 @@ def test_surfGAt3D_sigma_fermi_shift_equivalence():
 
     gAt_A = make_test_surfGAt3D()
     gAt_A.updateH(fermi=dF)
-    sig_A = np.array(gAt_A.sigma(E))
+    sig_A = np.array(gAt_A.sigma(E, 0))
 
     gAt_B = make_test_surfGAt3D()
-    sig_B = np.array(gAt_B.sigma(E - dF))
+    sig_B = np.array(gAt_B.sigma(E - dF, 0))
 
     np.testing.assert_allclose(
         sig_A, sig_B, rtol=1e-5,
@@ -167,11 +172,11 @@ def test_surfGAt3D_updateH_updates_dFermi():
     dF = 0.3
 
     gAt_ref = make_test_surfGAt3D()
-    sig_ref = np.array(gAt_ref.sigma(E - dF))
+    sig_ref = np.array(gAt_ref.sigma(E - dF, 0))
 
     gAt = make_test_surfGAt3D()
     gAt.updateH(fermi=dF)
-    sig_shifted = np.array(gAt.sigma(E))
+    sig_shifted = np.array(gAt.sigma(E, 0))
 
     np.testing.assert_allclose(
         sig_shifted, sig_ref, rtol=1e-5,
