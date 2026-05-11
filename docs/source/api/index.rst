@@ -57,6 +57,14 @@ Bethe Lattice
    :undoc-members:
    :show-inheritance:
 
+3D Contacts
+----------
+
+.. automodule:: gauNEGF.surfG3D
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Constant Self Energy
 -------------------
 
@@ -82,4 +90,36 @@ Integration Tools
 .. automodule:: gauNEGF.integrate
    :members:
    :undoc-members:
-   :show-inheritance: 
+   :show-inheritance:
+
+Spin Tools
+---------
+
+.. automodule:: gauNEGF.spinTools
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+JIT / Linear Algebra Helpers
+---------------------------
+
+.. automodule:: gauNEGF.utils
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Configuration Reference
+======================
+
+.. automodule:: gauNEGF.config
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Developer / Extensibility Reference
+==================================
+
+.. automodule:: gauNEGF.protocols
+   :members:
+   :undoc-members:
+   :show-inheritance:

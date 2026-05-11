@@ -51,13 +51,68 @@ def fractional_matrix_power(S, power):
 
 @jit
 def inv(A):
+    """
+    Compute matrix inverse using JAX linalg solve.
+
+    Solves the linear system A @ X = I for X, which is equivalent to
+    computing the inverse A^(-1). This method is more numerically stable
+    than direct inversion for ill-conditioned matrices.
+
+    Parameters
+    ----------
+    A : jax array
+        Square invertible matrix (NxN).
+
+    Returns
+    -------
+    jax array
+        Inverse matrix A^(-1) (NxN).
+    """
     return jnp.linalg.solve(A, jnp.eye(A.shape[0]))
 
 @jit
 def eig(A):
+    """
+    Compute eigenvalues and eigenvectors of a square matrix.
+
+    Wrapper around JAX's general eigenvalue decomposition for non-Hermitian
+    matrices. For Hermitian matrices, prefer eigh() which uses a more stable
+    algorithm.
+
+    Parameters
+    ----------
+    A : jax array
+        Square matrix (NxN), may be complex or non-Hermitian.
+
+    Returns
+    -------
+    eigenvalues : jax array of shape (N,)
+        Eigenvalues of A (may be complex).
+    eigenvectors : jax array of shape (NxN)
+        Eigenvectors as columns, with A @ eigenvectors = eigenvectors @ diag(eigenvalues).
+    """
     return jnp.linalg.eig(A)
 
 @jit
 def eigh(A):
+    """
+    Compute eigenvalues and eigenvectors of a Hermitian matrix.
+
+    Wrapper around JAX's Hermitian eigenvalue decomposition. Assumes the
+    input matrix is Hermitian (A = A^H) and uses a more stable algorithm
+    than eig().
+
+    Parameters
+    ----------
+    A : jax array
+        Hermitian matrix (NxN).
+
+    Returns
+    -------
+    eigenvalues : jax array of shape (N,)
+        Real-valued eigenvalues of A in ascending order.
+    eigenvectors : jax array of shape (NxN)
+        Eigenvectors as columns, with A @ eigenvectors = eigenvectors @ diag(eigenvalues).
+    """
     return jnp.linalg.eigh(A)
 

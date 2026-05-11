@@ -872,7 +872,7 @@ def currentE(F, S, g, fermi, qV, T=TEMPERATURE, spin="r",dE=ENERGY_STEP):
 
 def currentF(fn, dE=ENERGY_STEP, T=TEMPERATURE):
     """
-    Calculate current from saved SCF matrix file. 
+    Calculate current from saved SCF matrix file.
 
     Parameters
     ----------
@@ -880,6 +880,8 @@ def currentF(fn, dE=ENERGY_STEP, T=TEMPERATURE):
         Filename of .mat file containing SCF data
     dE : float, optional
         Energy step for integration in eV (default: 0.01)
+    T : float, optional
+        Temperature in Kelvin (default: TEMPERATURE from gauNEGF.config)
 
     Returns
     -------

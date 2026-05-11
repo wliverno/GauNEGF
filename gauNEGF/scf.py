@@ -106,6 +106,8 @@ class NEGF(object):
         Whether to run full SCF or use Harris approximation (default: True)
     route : str, optional
         Additional Gaussian route commands (default: '')
+    section : str, optional
+        Gaussian input section specification (default: None)
     nPulay : int, optional
         Number of previous iterations to use in Pulay mixing
         (default: PULAY_MIXING_SIZE from gauNEGF.config)

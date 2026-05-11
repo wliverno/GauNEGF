@@ -1,3 +1,25 @@
+"""
+Surface Green's function implementation for 1D chain contacts.
+
+This module provides a surface Green's function calculator for quasi-1D chain
+contacts in quantum transport calculations. It supports three usage patterns for
+specifying contact parameters: fully automatic extraction from Fock/Overlap
+matrices, custom coupling matrices with automatic onsite parameters, or fully
+specified contact parameters. The implementation uses iterative solvers with JAX
+JIT compilation for efficient computation.
+
+The surfG class handles:
+- Semi-infinite 1D chain Green's function calculations
+- Multiple contact geometries and coupling specifications
+- Orthogonal and non-orthogonal contact overlap matrices
+- De-orthonormalization for proper self-energy contributions
+- Contact regularization via congruent eigenvalue clipping
+- Self-energy and cross-term calculations with convergence control
+
+Key exports:
+- surfG: Main surface Green's function calculator class
+"""
+
 # Python packages
 import jax
 import jax.numpy as jnp
