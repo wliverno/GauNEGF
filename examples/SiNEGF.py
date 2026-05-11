@@ -8,6 +8,8 @@ jax.config.update("jax_enable_x64", True)
 # Use JAX functions directly
 from scipy import io
 
+from gauopen import QCBinAr as qcb
+
 from gauNEGF.matTools import *
 from gauNEGF.scfE import NEGFE
 from gauNEGF.surfG1D import surfG

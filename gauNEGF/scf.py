@@ -94,7 +94,7 @@ class NEGF(object):
     basis : str, optional
         Gaussian basis set name (default: 'chkbasis')
     func : str, optional
-        DFT functional to use (default: 'b3pw91')
+        DFT functional to use (default: 'hf')
     spin : {'r', 'u', 'ro', 'g'}, optional
         Spin configuration:
         - 'r': restricted
@@ -107,12 +107,13 @@ class NEGF(object):
     route : str, optional
         Additional Gaussian route commands (default: '')
     nPulay : int, optional
-        Number of previous iterations to use in Pulay mixing (default: 4)
+        Number of previous iterations to use in Pulay mixing
+        (default: PULAY_MIXING_SIZE from gauNEGF.config)
 
     Attributes
     ----------
     F : ndarray
-        Fock matrix in eV
+        Fock matrix in Hartree (multiply by 27.211386 for eV)
     P : ndarray
         Density matrix
     S : ndarray
@@ -272,7 +273,7 @@ class NEGF(object):
 
     def setFock(self, F_):
         """
-        Set the Fock matrix, converting from Hartree to eV units.
+        Set the Fock matrix, converting from eV to Hartree units.
 
         Parameters
         ----------
@@ -297,7 +298,7 @@ class NEGF(object):
             If True, extract and lock spin orientations from the density matrix.
             This is an advanced feature for specialized use cases. Default: False
         spinLockList : list, optional
-            List of atoms to apply sp
+            List of atoms to apply spin-locking to
         """
         self.P = P_ 
         storeDen(self.bar, self.P, self.spin)

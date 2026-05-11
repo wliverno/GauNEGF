@@ -124,6 +124,8 @@ class surfG:
             Overlap matrices between contact unit cells (default: None = zeros)
         eta : float, optional
             Broadening parameter in eV (default: 1e-9)
+        spin : str, optional
+            Spin configuration ('r' for restricted) (default: 'r')
         """
         # Set up system
         self.F = jnp.array(Fock)
@@ -289,7 +291,7 @@ class surfG:
         E : float
             Energy point in eV
         i : int
-            Contact index
+            Contact index (static argument for JAX JIT compilation)
         conv : float, optional
             Convergence criterion for iteration (default: 1e-5)
         relFactor : float, optional

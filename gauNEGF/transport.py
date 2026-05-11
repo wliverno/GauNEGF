@@ -766,7 +766,7 @@ def current(F, S, sig1, sig2, fermi, qV, T=TEMPERATURE, spin="r",dE=ENERGY_STEP)
     qV : float
         Applied bias voltage in eV
     T : float
-        Temperature in Kelvin (default: 0)
+        Temperature in Kelvin (default: TEMPERATURE from gauNEGF.config)
     spin : str, optional
         Spin configuration ('r' for restricted) (default: 'r')
     dE : float, optional
@@ -815,9 +815,9 @@ def currentSpin(F, S, sig1, sig2, fermi, qV, T=TEMPERATURE, spin="r",dE=ENERGY_S
     qV : float
         Applied bias voltage in eV
     T : float
-        Temperature in Kelvin (default: 0)
+        Temperature in Kelvin (default: TEMPERATURE from gauNEGF.config)
     spin : str, optional
-        Spin configuration ('r' for restricted) (default: 'r')
+        Spin configuration for spin-dependent calculations (default: 'r')
     dE : float, optional
         Energy step for integration in eV (default: 0.01)
 
@@ -855,7 +855,7 @@ def currentE(F, S, g, fermi, qV, T=TEMPERATURE, spin="r",dE=ENERGY_STEP):
     qV : float
         Applied bias voltage in eV
     T : float
-        Temperature in Kelvin (default: 0)
+        Temperature in Kelvin (default: TEMPERATURE from gauNEGF.config)
     spin : str, optional
         Spin configuration ('r' for restricted) (default: 'r')
     dE : float, optional

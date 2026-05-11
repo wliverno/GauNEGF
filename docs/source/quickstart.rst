@@ -55,7 +55,7 @@ Run a basic NEGF-DFT calculation:
     )
     
     # Attach contacts to carbon atoms
-    negf.setSigma([1], [2], -0.05j)
+    negf.setSigma(lContact=[1], rContact=[2], sig=-0.05j)
     
     # Set Voltage to zero
     negf.setVoltage(0.0)
