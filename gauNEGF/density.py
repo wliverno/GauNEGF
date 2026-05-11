@@ -483,8 +483,6 @@ def densityReal(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, 
         Convergence tolerance (default: 1e-3)
     T : float, optional
         Temperature in Kelvin (default: TEMPERATURE from gauNEGF.config)
-    maxN : int, optional
-        Maximum number of integration points (default: 1000)
     debug : bool, optional
         Whether to print per-iteration diagnostics (default: False)
 
@@ -862,6 +860,41 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
 ## INTEGRATION LIMIT FUNCTIONS
 # Calculate Emin using DOS
 def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES, Emin=None):
+    """
+    Calculate minimum energy bound for numerical integration.
+
+    Finds the lower energy bound for density matrix integration by iteratively
+    lowering Emin until the density of states at that energy falls below the
+    specified tolerance. This ensures the integration bounds capture all occupied
+    states without including energies too far below the band edge.
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix in eV.
+    S : ndarray
+        Overlap matrix.
+    g : surfG object
+        Surface Green's function calculator providing sigmaTot() and
+        crossTermQTot() methods for energy-dependent self-energies.
+    tol : float, optional
+        Convergence tolerance for density of states (default: FERMI_CALCULATION_TOL).
+    maxN : int, optional
+        Maximum number of expansion iterations (default: MAX_CYCLES).
+    Emin : float or None, optional
+        Initial lower bound in eV. If None, initialized from minimum eigenvalue
+        of inv(S)@F minus 5 eV offset (default: None).
+
+    Returns
+    -------
+    float
+        Lower energy bound in eV where DOS is below tolerance.
+
+    Notes
+    -----
+    Prints warning if maximum iterations reached without achieving convergence.
+    Prints final Emin value and corresponding DOS for debugging purposes.
+    """
     if Emin is None:
         D,_ = eigh(inv(S)@F)
         Emin = min(D.real.flatten())-5
