@@ -180,15 +180,24 @@ def genOrthRots(spinVec):
 
     Given an input spin quantization axis, constructs 7 rotation matrices
     mapping to: the original axis (identity), two pairs of orthogonal axes
-    (+/-vec1, +/-vec2), and two independent 180 degree rotations to the 
-    anti-parallel directions (-original via vec1, -original via vec2). The 
-    orthogonal basis is built to avoid singularities when the input is aligned 
+    (+/-vec1, +/-vec2), and two independent 180 degree rotations to the
+    anti-parallel directions (-original via vec1, -original via vec2). The
+    orthogonal basis is built to avoid singularities when the input is aligned
     with any coordinate axis.
+
+    Returns
+    -------
+    rotations : list of ndarray, each of shape (2, 2)
+        7 SU(2) rotation matrices in order:
+        [identity, +vec1, -vec1, +vec2, -vec2,
+        -original (via vec1), -original (via vec2)].
+    directions : ndarray of shape (7, 3)
+        Unit vectors corresponding to each rotation target.
 
     Notes
     -----
     Indices 5 and 6 both target -original but rotate around different axes
-    (vec1 and vec2 respectively). 
+    (vec1 and vec2 respectively).
     """
     unitVec = np.array(spinVec, dtype=float)
     unitVec = unitVec / LA.norm(unitVec)

@@ -87,7 +87,7 @@ Energy-Independent Case (NEGF):
     
     # Initialize with constant self-energies
     negf = NEGF('molecule', basis='lanl2dz')
-    negf.setSigma([1], [6])  # Simple constant self-energy
+    negf.setSigma(lContact=[1], rContact=[6], sig=-0.1j)  # Simple constant self-energy
     
 
 Energy-Dependent Case (NEGFE):

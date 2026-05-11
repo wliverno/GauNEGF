@@ -482,7 +482,7 @@ def densityReal(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, 
     tol : float, optional
         Convergence tolerance (default: 1e-3)
     T : float, optional
-        Temperature in Kelvin (default: 300)
+        Temperature in Kelvin (default: TEMPERATURE from gauNEGF.config)
     maxN : int, optional
         Maximum number of integration points (default: 1000)
     debug : bool, optional
