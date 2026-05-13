@@ -677,7 +677,10 @@ def calculate_current(F, S, sigma_calculator, fermi, qV, T=TEMPERATURE, spin=Non
     
     # Handle negative qV by making dE negative (matches legacy behavior)
     if np.allclose(0, qV):
-        return 0.0 if spin == 'r' else (0.0, [0.0, 0.0, 0.0, 0.0])
+        if spin == 'r':
+            return 0.0
+        else:
+            return 0.0, [0.0, 0.0, 0.0, 0.0]
     elif qV < 0:
         dE = -1 * abs(dE)
     else:

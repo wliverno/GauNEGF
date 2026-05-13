@@ -264,12 +264,12 @@ def integratePointsAdaptiveANT(computePoint, tol=ADAPTIVE_INTEGRATION_TOL, maxN=
             else:
                 new_P = P*ratio + new_result
 
-            maxDP = np.max(np.abs(new_P-P))
+            maxDP = jnp.max(jnp.abs(new_P-P))
             if debug:
                 full_result = computePoint(x, w)
                 P_debug = full_result[0] if is_tuple else full_result
-                maxDP_debug = np.max(np.abs(P_debug-P))
-                maxDiff = np.max(np.abs(P_debug-new_P))
+                maxDP_debug = jnp.max(jnp.abs(P_debug-P))
+                maxDiff = jnp.max(jnp.abs(P_debug-new_P))
                 print(f"N={N}, nested-weight ratio ~ {ratio:.3f}, maxDP={maxDP:.3e}")
                 print(f"Direct Calculation: N={N}, maxDP={maxDP_debug:.3e}, maxDiff={maxDiff:.3e}")
             P = new_P.copy()
@@ -283,7 +283,7 @@ def integratePointsAdaptiveANT(computePoint, tol=ADAPTIVE_INTEGRATION_TOL, maxN=
 
         # update state for next level
         prev_x = x
-        prev_sumW = float(np.sum(w))
+        prev_sumW = float(jnp.sum(w))
         N *= 3
     N/=3
     print(f'Adaptive integration reached full grid ({N} points), final error {maxDP:.3e}')

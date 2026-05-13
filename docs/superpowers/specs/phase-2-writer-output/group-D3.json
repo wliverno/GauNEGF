@@ -1,0 +1,51 @@
+{
+  "group": "D3",
+  "modules_processed": [
+    "gauNEGF/matTools.py",
+    "gauNEGF/integrate.py",
+    "gauNEGF/spinTools.py",
+    "gauNEGF/utils.py",
+    "gauNEGF/protocols.py",
+    "gauNEGF/config.py",
+    "gauNEGF/fermiSearch.py"
+  ],
+  "entries": [
+    {
+      "file_path": "gauNEGF/utils.py",
+      "symbol": "inv",
+      "kind": "insert",
+      "anchor_line": 53,
+      "anchor_text": "@jit\ndef inv(A):\n    return jnp.linalg.solve(A, jnp.eye(A.shape[0]))",
+      "docstring": "    \"\"\"\n    Compute matrix inverse using JAX linalg solve.\n\n    Solves the linear system A @ X = I for X, which is equivalent to\n    computing the inverse A^(-1). This method is more numerically stable\n    than direct inversion for ill-conditioned matrices.\n\n    Parameters\n    ----------\n    A : jax array\n        Square invertible matrix (NxN).\n\n    Returns\n    -------\n    jax array\n        Inverse matrix A^(-1) (NxN).\n    \"\"\"",
+      "style": "numpy",
+      "todo_count_so_far": 0
+    },
+    {
+      "file_path": "gauNEGF/utils.py",
+      "symbol": "eig",
+      "kind": "insert",
+      "anchor_line": 57,
+      "anchor_text": "@jit\ndef eig(A):\n    return jnp.linalg.eig(A)",
+      "docstring": "    \"\"\"\n    Compute eigenvalues and eigenvectors of a square matrix.\n\n    Wrapper around JAX's general eigenvalue decomposition for non-Hermitian\n    matrices. For Hermitian matrices, prefer eigh() which uses a more stable\n    algorithm.\n\n    Parameters\n    ----------\n    A : jax array\n        Square matrix (NxN), may be complex or non-Hermitian.\n\n    Returns\n    -------\n    eigenvalues : jax array of shape (N,)\n        Eigenvalues of A (may be complex).\n    eigenvectors : jax array of shape (NxN)\n        Eigenvectors as columns, with A @ eigenvectors = eigenvectors @ diag(eigenvalues).\n    \"\"\"",
+      "style": "numpy",
+      "todo_count_so_far": 0
+    },
+    {
+      "file_path": "gauNEGF/utils.py",
+      "symbol": "eigh",
+      "kind": "insert",
+      "anchor_line": 61,
+      "anchor_text": "@jit\ndef eigh(A):\n    return jnp.linalg.eigh(A)",
+      "docstring": "    \"\"\"\n    Compute eigenvalues and eigenvectors of a Hermitian matrix.\n\n    Wrapper around JAX's Hermitian eigenvalue decomposition. Assumes the\n    input matrix is Hermitian (A = A^H) and uses a more stable algorithm\n    than eig().\n\n    Parameters\n    ----------\n    A : jax array\n        Hermitian matrix (NxN).\n\n    Returns\n    -------\n    eigenvalues : jax array of shape (N,)\n        Real-valued eigenvalues of A in ascending order.\n    eigenvectors : jax array of shape (NxN)\n        Eigenvectors as columns, with A @ eigenvectors = eigenvectors @ diag(eigenvalues).\n    \"\"\"",
+      "style": "numpy",
+      "todo_count_so_far": 0
+    }
+  ],
+  "summary": {
+    "total_entries": 3,
+    "inserts": 3,
+    "replaces": 0,
+    "todos": 0,
+    "modules_with_todo_overflow": []
+  }
+}

@@ -17,6 +17,14 @@ NEGF Base Class
 Energy-Dependent NEGF
 -------------------
 
+.. seealso::
+
+   :doc:`/guides/contacts_1d` -- 1D chain contact setup via NEGFE.setContact1D
+
+   :doc:`/guides/contacts_bethe` -- Bethe lattice contact setup via NEGFE.setContactBethe
+
+   :doc:`/guides/contact_choice` -- Choosing between contact types
+
 .. automodule:: gauNEGF.scfE
    :members:
    :undoc-members:
@@ -33,6 +41,10 @@ Density Module
 Transport Module
 --------------
 
+.. seealso::
+
+   :doc:`/guides/workflow_recipes` -- IV curve sweep, checkpointing, multi-temperature workflows
+
 .. automodule:: gauNEGF.transport
    :members:
    :undoc-members:
@@ -44,6 +56,10 @@ Contact Models
 Bethe Lattice
 ------------
 
+.. seealso::
+
+   :doc:`/guides/contacts_bethe` -- Full Bethe lattice contact guide (Au, AuSOC, SOC workflows)
+
 .. automodule:: gauNEGF.surfGBethe
    :members:
    :undoc-members:
@@ -51,6 +67,10 @@ Bethe Lattice
 
 1D Chain
 -------
+
+.. seealso::
+
+   :doc:`/guides/contacts_1d` -- 1D chain contact setup guide (three usage patterns)
 
 .. automodule:: gauNEGF.surfG1D
    :members:
@@ -82,7 +102,7 @@ Matrix Tools
 .. automodule:: gauNEGF.matTools
    :members:
    :undoc-members:
-   :show-inheritance: 
+   :show-inheritance:
 
 Integration Tools
 -----------
@@ -110,6 +130,10 @@ JIT / Linear Algebra Helpers
 
 Configuration Reference
 ======================
+
+.. seealso::
+
+   :doc:`/guides/config_tuning` -- When to change ETA, SCF_DAMPING, fermiMethod, and TEMPERATURE
 
 .. automodule:: gauNEGF.config
    :members:

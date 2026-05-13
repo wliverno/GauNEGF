@@ -47,6 +47,10 @@ import multiprocessing
 # GPU memory settings
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = str(JAX_PREALLOCATE).lower()
 os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = str(JAX_GPU_MEMORY_FRACTION)
+# On older GPUs the BFC allocator can OOM on large matrix ops despite sufficient VRAM;
+# use cudaMalloc directly instead by uncommenting the line below (set in job script instead
+# to avoid impacting performance on newer GPUs where BFC is preferable):
+# os.environ['XLA_PYTHON_CLIENT_ALLOCATOR'] = 'platform'
 
 # CPU threading settings (may improve multi-core utilization)
 CPU_THREADS = multiprocessing.cpu_count()

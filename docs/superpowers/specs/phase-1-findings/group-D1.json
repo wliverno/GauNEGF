@@ -1,0 +1,89 @@
+{
+  "group": "D1",
+  "files_audited": [
+    "gauNEGF/scf.py",
+    "gauNEGF/scfE.py",
+    "gauNEGF/density.py",
+    "gauNEGF/transport.py"
+  ],
+  "findings": [
+    {
+      "file_path": "gauNEGF/scf.py",
+      "line_range": [273, 282],
+      "current_snippet": "    def setFock(self, F_):\n        \"\"\"\n        Set the Fock matrix, converting from Hartree to eV units.\n\n        Parameters\n        ----------\n        F_ : ndarray\n            Fock matrix in eV units",
+      "issue": "Docstring says input is in eV units but code divides by har_to_eV, indicating input should be in Hartree units.",
+      "proposed_fix": "        F_ : ndarray\n            Fock matrix in Hartree units",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "gauNEGF/scf.py",
+      "line_range": [95, 110],
+      "current_snippet": "    func : str, optional\n        DFT functional to use (default: 'b3pw91')",
+      "issue": "Docstring claims default functional is 'b3pw91' but actual default in __init__ signature is 'hf'.",
+      "proposed_fix": "    func : str, optional\n        DFT functional to use (default: 'hf')",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "gauNEGF/scf.py",
+      "line_range": [108, 111],
+      "current_snippet": "    nPulay : int, optional\n        Number of previous iterations to use in Pulay mixing (default: 4)",
+      "issue": "Docstring claims default is 4 but actual default is PULAY_MIXING_SIZE from config, and __init__ parameter name is nPulay not nPulay.",
+      "proposed_fix": "    nPulay : int, optional\n        Number of previous iterations to use in Pulay mixing (default: PULAY_MIXING_SIZE)",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "gauNEGF/scf.py",
+      "line_range": [293, 302],
+      "current_snippet": "        spinLockList : list, optional\n            List of atoms to apply sp",
+      "issue": "Docstring is incomplete - text cuts off mid-word 'sp'.",
+      "proposed_fix": "        spinLockList : list, optional\n            List of atoms to apply spin-locking to",
+      "confidence": "judgment",
+      "code_bug": false
+    },
+    {
+      "file_path": "gauNEGF/density.py",
+      "line_range": [486, 496],
+      "current_snippet": "    T : float, optional\n        Temperature in Kelvin (default: 300)",
+      "issue": "Docstring says default temperature is 300K but this is false. densityReal has no T parameter in its signature - it uses T=TEMPERATURE from config, which is typically 0K not 300K.",
+      "proposed_fix": "    T : float, optional\n        Temperature in Kelvin (default: TEMPERATURE from config)",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "gauNEGF/density.py",
+      "line_range": [715, 717],
+      "current_snippet": "    showText : bool, optional\n        Whether to print progress messages (default: True)",
+      "issue": "Parameter showText is documented in densityComplexN docstring but is absent from the function signature.",
+      "proposed_fix": "Remove showText from Parameters section or add it to function signature.",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "gauNEGF/transport.py",
+      "line_range": [750, 774],
+      "current_snippet": "def current(F, S, sig1, sig2, fermi, qV, T=TEMPERATURE, spin=\"r\",dE=ENERGY_STEP):\n    \"\"\"\n    Calculate coherent current using NEGF with energy-independent self-energies.\n\n    Parameters\n    ----------\n    F : ndarray\n        Fock matrix\n    S : ndarray\n        Overlap matrix\n    sig1 : ndarray\n        Left contact self-energy (vector or matrix)\n    sig2 : ndarray\n        Right contact self-energy (vector or matrix)\n    fermi : float\n        Fermi energy in eV\n    qV : float\n        Applied bias voltage in eV\n    T : float\n        Temperature in Kelvin (default: 0)",
+      "issue": "Docstring says T default is 0 but signature has T=TEMPERATURE from config. Also docstring claims spin default is 'r' for restricted but signature shows spin='r' which is correct - this is consistent actually. However, the T parameter docstring is wrong.",
+      "proposed_fix": "    T : float\n        Temperature in Kelvin (default: TEMPERATURE from config)",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "gauNEGF/transport.py",
+      "line_range": [799, 823],
+      "current_snippet": "def currentSpin(F, S, sig1, sig2, fermi, qV, T=TEMPERATURE, spin=\"r\",dE=ENERGY_STEP):\n    \"\"\"\n    Calculate coherent spin current using NEGF with energy-independent self-energies.\n\n    Parameters\n    ----------\n    F : ndarray\n        Fock matrix\n    S : ndarray\n        Overlap matrix\n    sig1 : ndarray\n        Left contact self-energy (vector or matrix)\n    sig2 : ndarray\n        Right contact self-energy (vector or matrix)\n    fermi : float\n        Fermi energy in eV\n    qV : float\n        Applied bias voltage in eV\n    T : float\n        Temperature in Kelvin (default: 0)\n    spin : str, optional\n        Spin configuration ('r' for restricted) (default: 'r')",
+      "issue": "Docstring lists spin default as 'r' (restricted) but function is called 'currentSpin' for spin-dependent calculations and signature shows spin='r'. The docstring should clarify this is for spin-dependent (unrestricted) calculations.",
+      "proposed_fix": "    spin : str, optional\n        Spin configuration for spin-dependent calculations (default: 'r')",
+      "confidence": "judgment",
+      "code_bug": false
+    }
+  ],
+  "summary": {
+    "total_findings": 8,
+    "mechanical_count": 6,
+    "judgment_count": 2,
+    "code_bug_count": 0
+  }
+}
