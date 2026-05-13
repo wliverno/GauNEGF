@@ -1,0 +1,83 @@
+{
+  "group": "B-recheck",
+  "files_audited": [
+    "/gscratch/anantram/willll/NEGFCode/docs/source/quickstart.rst",
+    "/gscratch/anantram/willll/NEGFCode/docs/source/installation.rst",
+    "/gscratch/anantram/willll/NEGFCode/docs/source/theory/introduction.rst",
+    "/gscratch/anantram/willll/NEGFCode/docs/source/theory/negf_dft.rst",
+    "/gscratch/anantram/willll/NEGFCode/docs/source/theory/transport.rst",
+    "/gscratch/anantram/willll/NEGFCode/docs/source/theory/best_practices.rst"
+  ],
+  "findings": [
+    {
+      "file_path": "/gscratch/anantram/willll/NEGFCode/docs/source/theory/negf_dft.rst",
+      "line_range": "182-183",
+      "current_snippet": "negf = NEGF('molContact', basis='lanl2dz')\n    negf.setContacts([1], [2], sig=-0.05j)",
+      "issue": "setContacts() does not have sig parameter; truth table shows only (self, lContact=None, rContact=None). This appears to be trying to call setSigma()",
+      "proposed_fix": "Split into two calls: negf.setContacts(lContact=[1], rContact=[2]) and negf.setSigma(lContact=[1], rContact=[2], sig=-0.05j)",
+      "confidence": "high",
+      "code_bug": true
+    },
+    {
+      "file_path": "/gscratch/anantram/willll/NEGFCode/docs/source/theory/negf_dft.rst",
+      "line_range": "101",
+      "current_snippet": "negf.setContactBethe([1,2,3], [4,5,6], latFile='Au', T=300)",
+      "issue": "setContactBethe() signature is (self, contactList, latFile='Au', eta=ETA, T=TEMPERATURE); [1,2,3] and [4,5,6] passed as separate args instead of single contactList arg",
+      "proposed_fix": "negf.setContactBethe(contactList=[[1,2,3], [4,5,6]], latFile='Au', T=300) or negf.setContactBethe([[1,2,3], [4,5,6]], latFile='Au', T=300)",
+      "confidence": "high",
+      "code_bug": true
+    },
+    {
+      "file_path": "/gscratch/anantram/willll/NEGFCode/docs/source/theory/negf_dft.rst",
+      "line_range": "199",
+      "current_snippet": "negf.setContactBethe([1,2,3], [4,5,6], latFile='Au2', T=300)",
+      "issue": "Same as line 101 - setContactBethe() takes single contactList arg, not two separate contact lists",
+      "proposed_fix": "negf.setContactBethe(contactList=[[1,2,3], [4,5,6]], latFile='Au2', T=300)",
+      "confidence": "high",
+      "code_bug": true
+    },
+    {
+      "file_path": "/gscratch/anantram/willll/NEGFCode/docs/source/theory/best_practices.rst",
+      "line_range": "54",
+      "current_snippet": "inds = setContactBethe([[1,2,3],[6,7,8]], latFile='Au2', eta=1e-5, T=300)",
+      "issue": "Missing 'negf.' prefix - setContactBethe is not a standalone function, must be called as instance method negf.setContactBethe()",
+      "proposed_fix": "inds = negf.setContactBethe(contactList=[[1,2,3],[6,7,8]], latFile='Au2', eta=1e-5, T=300)",
+      "confidence": "high",
+      "code_bug": true
+    },
+    {
+      "file_path": "/gscratch/anantram/willll/NEGFCode/docs/source/theory/transport.rst",
+      "line_range": "225",
+      "current_snippet": "negf.setContactBethe([1,2,3], [6,7,8], 'Au2')",
+      "issue": "setContactBethe() called with 3 positional args [1,2,3], [6,7,8], 'Au2' but signature is (self, contactList, latFile='Au', eta=ETA, T=TEMPERATURE) - should be contactList as single arg and latFile as kwarg",
+      "proposed_fix": "negf.setContactBethe(contactList=[[1,2,3], [6,7,8]], latFile='Au2')",
+      "confidence": "high",
+      "code_bug": true
+    },
+    {
+      "file_path": "/gscratch/anantram/willll/NEGFCode/docs/source/theory/transport.rst",
+      "line_range": "234",
+      "current_snippet": "T = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist + negf.fermi)",
+      "issue": "SigmaCalculator() expects (sig1, sig2=None, energy_dependent=None) but receives negf.g which is a green's function object, not sigma matrices",
+      "proposed_fix": "Should use sig1, sig2 = negf.getSigma(); then SigmaCalculator(sig1, sig2)",
+      "confidence": "high",
+      "code_bug": true
+    },
+    {
+      "file_path": "/gscratch/anantram/willll/NEGFCode/docs/source/theory/transport.rst",
+      "line_range": "237",
+      "current_snippet": "dos, _ = calculate_dos(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist + negf.fermi)",
+      "issue": "Same as line 234 - SigmaCalculator(negf.g) is incorrect; needs sig1, sig2 pair",
+      "proposed_fix": "dos, _ = calculate_dos(negf.F*har_to_eV, negf.S, SigmaCalculator(sig1, sig2), Elist + negf.fermi)",
+      "confidence": "high",
+      "code_bug": true
+    }
+  ],
+  "summary": {
+    "total_findings": 7,
+    "mechanical_count": 2,
+    "judgment_count": 0,
+    "code_bug_count": 7,
+    "notes": "The 3 setSigma fixes are confirmed clean. Major issues found in setContactBethe argument structure (treating two separate contact lists as single contactList arg) and SigmaCalculator usage (passing green's function instead of sigma matrices)."
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "group": "D-recheck",
+  "files_audited": [
+    "gauNEGF/scf.py",
+    "gauNEGF/scfE.py",
+    "gauNEGF/density.py",
+    "gauNEGF/transport.py",
+    "gauNEGF/surfG1D.py",
+    "gauNEGF/surfG3D.py",
+    "gauNEGF/surfGBethe.py",
+    "gauNEGF/surfGTester.py",
+    "gauNEGF/matTools.py",
+    "gauNEGF/integrate.py",
+    "gauNEGF/spinTools.py",
+    "gauNEGF/utils.py",
+    "gauNEGF/protocols.py",
+    "gauNEGF/config.py",
+    "gauNEGF/fermiSearch.py"
+  ],
+  "findings": [
+    {
+      "file": "gauNEGF/transport.py",
+      "line_or_symbol": "currentSpin",
+      "type": "mechanical",
+      "severity": "high",
+      "code": "param-default-mismatch",
+      "finding": "currentSpin docstring says T default is '0' but function signature uses T=TEMPERATURE",
+      "docstring_claim": "T : float, Temperature in Kelvin (default: 0)",
+      "signature_reality": "T=TEMPERATURE (from gauNEGF.config)",
+      "impact": "Documentation inconsistency; code uses TEMPERATURE but docstring says 0",
+      "recommendation": "Update docstring to say 'default: TEMPERATURE from gauNEGF.config' or verify intended behavior matches other current* functions"
+    }
+  ],
+  "six_named_fixes_verified": {
+    "1_scf_NEGF_init_func_default": "CONFIRMED - class docstring line 97 shows 'func : str, optional' with 'DFT functional to use (default: hf)'",
+    "2_scf_NEGF_init_nPulay_default": "CONFIRMED - class docstring line 111 shows 'nPulay : int, optional' with 'default: PULAY_MIXING_SIZE from gauNEGF.config'",
+    "3_density_densityReal_T_default": "CONFIRMED - docstring correctly references TEMPERATURE from gauNEGF.config",
+    "4_transport_current_T_default": "CONFIRMED - docstring correctly references TEMPERATURE from gauNEGF.config",
+    "5_surfG1D_surfG_init_spin_parameter": "CONFIRMED - spin parameter documented in __init__ docstring with 'spin : str, optional'",
+    "6_spinTools_genOrthRots_Returns_section": "CONFIRMED - Returns section present documenting 'rotations : list' and 'directions : ndarray'"
+  },
+  "summary": {
+    "total_findings": 1,
+    "mechanical_count": 1,
+    "judgment_count": 0,
+    "code_bug_count": 0,
+    "six_fixes_clean": true,
+    "deferred_findings_ignored": true
+  }
+}

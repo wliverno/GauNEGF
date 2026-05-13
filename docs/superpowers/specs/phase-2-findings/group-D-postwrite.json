@@ -1,0 +1,59 @@
+{
+  "phase": "II-postwrite",
+  "files_audited": [
+    "gauNEGF/scf.py",
+    "gauNEGF/scfE.py",
+    "gauNEGF/density.py",
+    "gauNEGF/transport.py",
+    "gauNEGF/surfG1D.py",
+    "gauNEGF/surfG3D.py",
+    "gauNEGF/surfGBethe.py",
+    "gauNEGF/surfGTester.py",
+    "gauNEGF/matTools.py",
+    "gauNEGF/integrate.py",
+    "gauNEGF/spinTools.py",
+    "gauNEGF/utils.py",
+    "gauNEGF/protocols.py",
+    "gauNEGF/config.py",
+    "gauNEGF/fermiSearch.py"
+  ],
+  "findings": [
+    {
+      "file_path": "gauNEGF/scf.py",
+      "line_range": [90, 111],
+      "current_snippet": "    Parameters\n    ----------\n    fn : str\n        Base filename for Gaussian input/output files (without extension)\n    basis : str, optional\n        Gaussian basis set name (default: 'chkbasis')\n    func : str, optional\n        DFT functional to use (default: 'hf')\n    spin : {'r', 'u', 'ro', 'g'}, optional\n        Spin configuration:\n        - 'r': restricted\n        - 'u': unrestricted\n        - 'ro': restricted open-shell\n        - 'g': generalized open-shell (non-collinear)\n        (default: 'r')\n    fullSCF : bool, optional\n        Whether to run full SCF or use Harris approximation (default: True)\n    route : str, optional\n        Additional Gaussian route commands (default: '')\n    nPulay : int, optional\n        Number of previous iterations to use in Pulay mixing\n        (default: PULAY_MIXING_SIZE from gauNEGF.config)",
+      "issue": "NEGF class docstring Parameters section is missing the 'section' parameter documented in __init__ signature.",
+      "proposed_fix": "    Parameters\n    ----------\n    fn : str\n        Base filename for Gaussian input/output files (without extension)\n    basis : str, optional\n        Gaussian basis set name (default: 'chkbasis')\n    func : str, optional\n        DFT functional to use (default: 'hf')\n    spin : {'r', 'u', 'ro', 'g'}, optional\n        Spin configuration:\n        - 'r': restricted\n        - 'u': unrestricted\n        - 'ro': restricted open-shell\n        - 'g': generalized open-shell (non-collinear)\n        (default: 'r')\n    fullSCF : bool, optional\n        Whether to run full SCF or use Harris approximation (default: True)\n    route : str, optional\n        Additional Gaussian route commands (default: '')\n    section : str, optional\n        Gaussian input section specification (default: None)\n    nPulay : int, optional\n        Number of previous iterations to use in Pulay mixing\n        (default: PULAY_MIXING_SIZE from gauNEGF.config)",
+      "confidence": "mechanical",
+      "degrading_fix": false,
+      "code_bug": false
+    },
+    {
+      "file_path": "gauNEGF/density.py",
+      "line_range": [486, 487],
+      "current_snippet": "    maxN : int, optional\n        Maximum number of integration points (default: 1000)",
+      "issue": "densityReal docstring has extraneous 'maxN' parameter that does not exist in function signature (line 461).",
+      "proposed_fix": "Remove lines 486-487 entirely. The function passes tol and debug to integratePointsAdaptiveANT, not maxN.",
+      "confidence": "mechanical",
+      "degrading_fix": false,
+      "code_bug": false
+    },
+    {
+      "file_path": "gauNEGF/transport.py",
+      "line_range": [877, 882],
+      "current_snippet": "    Parameters\n    ----------\n    fn : str\n        Filename of .mat file containing SCF data\n    dE : float, optional\n        Energy step for integration in eV (default: 0.01)",
+      "issue": "currentF docstring Parameters section is missing the 'T' parameter which appears in function signature (line 873) and is used in function body (line 901).",
+      "proposed_fix": "    Parameters\n    ----------\n    fn : str\n        Filename of .mat file containing SCF data\n    dE : float, optional\n        Energy step for integration in eV (default: 0.01)\n    T : float, optional\n        Temperature in Kelvin (default: TEMPERATURE from gauNEGF.config)",
+      "confidence": "mechanical",
+      "degrading_fix": false,
+      "code_bug": false
+    }
+  ],
+  "summary": {
+    "total_findings": 3,
+    "mechanical_count": 3,
+    "judgment_count": 0,
+    "code_bug_count": 0,
+    "degrading_fix_count": 0
+  }
+}

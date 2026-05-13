@@ -1,0 +1,35 @@
+{
+  "group": "D2",
+  "files_audited": [
+    "gauNEGF/surfG1D.py",
+    "gauNEGF/surfG3D.py",
+    "gauNEGF/surfGBethe.py",
+    "gauNEGF/surfGTester.py"
+  ],
+  "findings": [
+    {
+      "file_path": "gauNEGF/surfG1D.py",
+      "line_range": [91, 127],
+      "current_snippet": "def __init__(self, Fock, Overlap, indsList, taus=None, staus=None, alphas=None, aOverlaps=None, betas=None, bOverlaps=None, eta=ETA, spin='r'):\n        \"\"\"\n        Initialize the surface Green's function calculator.\n\n        The initialization follows one of three patterns:\n        a) Fully automatic: Only provide Fock, Overlap, indsList, and connection indices in taus\n        b) Custom coupling: Provide Fock, Overlap, indsList, coupling matrices in taus\n           - staus=None (default) means orthonormal coupling -> de-ortho applied in sigma()\n        c) Fully specified: Provide all parameters including alphas, aOverlaps, betas, bOverlaps\n           - aOverlaps=None defaults to identity (orthonormal onsite)\n           - bOverlaps=None defaults to zeros (orthonormal hopping)\n\n        Parameters\n        ----------\n        Fock : ndarray\n            Fock matrix for the extended system\n        Overlap : ndarray\n            Overlap matrix for the extended system\n        indsList : list of lists\n            Lists of orbital indices for each contact region\n        taus : list or None, optional\n            Either coupling matrices or connection indices (default: None)\n            - If indices: [[contact1connection], [contact2connection]]\n            - If matrices: [tau1, tau2]\n        staus : list or None, optional\n            Overlap matrices for coupling (default: None = orthonormal)\n        alphas : list of ndarray or None, optional\n            On-site energies for contacts, required for pattern (c) (default: None)\n        aOverlaps : list of ndarray or None, optional\n            On-site overlap matrices for contacts (default: None = identity)\n        betas : list of ndarray or None, optional\n            Hopping matrices between contact unit cells, required for pattern (c) (default: None)\n        bOverlaps : list of ndarray or None, optional\n            Overlap matrices between contact unit cells (default: None = zeros)\n        eta : float, optional\n            Broadening parameter in eV (default: 1e-9)\n        \"\"\"",
+      "issue": "Parameter 'spin' in docstring Parameters section missing from list but present in function signature.",
+      "proposed_fix": "Add spin parameter documentation:\n        spin : str, optional\n            Spin configuration ('r' for restricted) (default: 'r')",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "gauNEGF/surfG1D.py",
+      "line_range": [279, 302],
+      "current_snippet": "def g(self, E, i, conv=SURFACE_GREEN_CONVERGENCE, relFactor=0.5):#SURFACE_RELAXATION_FACTOR):\n        \"\"\"\n        Calculate surface Green's function for a contact.\n\n        Uses an iterative scheme to calculate the surface Green's function\n        for contact i at energy E. The iteration continues until the change\n        in the Green's function is below the convergence criterion.\n\n        Parameters\n        ----------\n        E : float\n            Energy point in eV\n        i : int\n            Contact index\n        conv : float, optional\n            Convergence criterion for iteration (default: 1e-5)\n        relFactor : float, optional\n            Relaxation factor for iteration mixing (default: 0.5)\n\n        Returns\n        -------\n        ndarray\n            Surface Green's function matrix for contact i\n        \"\"\"",
+      "issue": "Parameter 'i' documented as 'Contact index' but truth table shows it is a static argument (static_argnums=(1,)) which affects compilation behavior.",
+      "proposed_fix": "i : int (static)\n            Contact index (static for JAX JIT compilation)",
+      "confidence": "judgment",
+      "code_bug": false
+    }
+  ],
+  "summary": {
+    "total_findings": 2,
+    "mechanical_count": 1,
+    "judgment_count": 1,
+    "code_bug_count": 0
+  }
+}

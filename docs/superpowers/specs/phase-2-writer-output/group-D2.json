@@ -1,0 +1,28 @@
+{
+  "group": "D2",
+  "modules_processed": [
+    "gauNEGF/surfG1D.py",
+    "gauNEGF/surfG3D.py",
+    "gauNEGF/surfGBethe.py",
+    "gauNEGF/surfGTester.py"
+  ],
+  "entries": [
+    {
+      "file_path": "gauNEGF/surfG1D.py",
+      "symbol": "module-level",
+      "kind": "insert",
+      "anchor_line": 0,
+      "anchor_text": "# Python packages\nimport jax\nimport jax.numpy as jnp\nimport jax.lax as lax\nfrom jax import jit",
+      "docstring": "\"\"\"\nSurface Green's function implementation for 1D chain contacts.\n\nThis module provides a surface Green's function calculator for quasi-1D chain\ncontacts in quantum transport calculations. It supports three usage patterns for\nspecifying contact parameters: fully automatic extraction from Fock/Overlap\nmatrices, custom coupling matrices with automatic onsite parameters, or fully\nspecified contact parameters. The implementation uses iterative solvers with JAX\nJIT compilation for efficient computation.\n\nThe surfG class handles:\n- Semi-infinite 1D chain Green's function calculations\n- Multiple contact geometries and coupling specifications\n- Orthogonal and non-orthogonal contact overlap matrices\n- De-orthonormalization for proper self-energy contributions\n- Contact regularization via congruent eigenvalue clipping\n- Self-energy and cross-term calculations with convergence control\n\nKey exports:\n- surfG: Main surface Green's function calculator class\n\"\"\"",
+      "style": "numpy",
+      "todo_count_so_far": null
+    }
+  ],
+  "summary": {
+    "total_entries": 1,
+    "inserts": 1,
+    "replaces": 0,
+    "todos": 0,
+    "modules_with_todo_overflow": []
+  }
+}

@@ -256,7 +256,7 @@ class surfG:
                 lam_min_thresh = OVERLAP_EIGENVALUE_RATIO * lam_max
 
                 # Turning off regularization for now 
-                if jnp.min(eigvals) >= lam_min_thresh:
+                if True:#jnp.min(eigvals) >= lam_min_thresh:
                     # Already PSD -- no transform needed
                     continue
 

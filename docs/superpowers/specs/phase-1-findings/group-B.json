@@ -1,0 +1,172 @@
+{
+  "group": "B",
+  "files_audited": [
+    "docs/source/quickstart.rst",
+    "docs/source/installation.rst",
+    "docs/source/theory/introduction.rst",
+    "docs/source/theory/negf_dft.rst",
+    "docs/source/theory/transport.rst",
+    "docs/source/theory/best_practices.rst"
+  ],
+  "findings": [
+    {
+      "file_path": "docs/source/quickstart.rst",
+      "line_range": [58, 58],
+      "current_snippet": "    negf.setSigma([1], [2], -0.05j)",
+      "issue": "setSigma called with positional list arguments, but signature expects keyword arguments lContact=None, rContact=None",
+      "proposed_fix": "    negf.setSigma(lContact=[1], rContact=[2], sig=-0.05j)",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/quickstart.rst",
+      "line_range": [82, 82],
+      "current_snippet": "    T = calculate_transmission(F_eV, negf.S, SigmaCalculator(sig1, sig2), Elist)",
+      "issue": "calculate_transmission called with positional energy list, but signature expects keyword parameter energy_list",
+      "proposed_fix": "    T = calculate_transmission(F_eV, negf.S, SigmaCalculator(sig1, sig2), Elist, spin=None)",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/quickstart.rst",
+      "line_range": [109, 110],
+      "current_snippet": "        I.append(calculate_current(F_eV, negf.S, SigmaCalculator(sig1, sig2), \n                              qV=v, fermi=negf.fermi))",
+      "issue": "calculate_current called with positional arguments but signature expects F, S, sigma_calculator as positional, then keyword-only fermi, qV, T, spin, dE, **kwargs",
+      "proposed_fix": "        I.append(calculate_current(F_eV, negf.S, SigmaCalculator(sig1, sig2), \n                              fermi=negf.fermi, qV=v))",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/theory/negf_dft.rst",
+      "line_range": [90, 90],
+      "current_snippet": "    negf.setSigma([1], [6])  # Simple constant self-energy",
+      "issue": "setSigma called with positional arguments; signature expects keyword parameters lContact, rContact, sig, sig2",
+      "proposed_fix": "    negf.setSigma(lContact=[1], rContact=[6], sig=-0.1j)",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/theory/negf_dft.rst",
+      "line_range": [100, 100],
+      "current_snippet": "    negf = NEGFE('molecule', basis='lanl2dz')",
+      "issue": "NEGFE class signature is NEGFE(NEGF), not compatible with NEGF constructor signature; cannot instantiate with fn parameter",
+      "proposed_fix": "    # First create NEGF object, then wrap with NEGFE\n    negf_base = NEGF('molecule', basis='lanl2dz')\n    negf = NEGFE(negf_base)",
+      "confidence": "judgment",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/theory/negf_dft.rst",
+      "line_range": [101, 101],
+      "current_snippet": "    negf.setContactBethe([1,2,3], [4,5,6], latFile='Au', T=300)  # Bethe lattice with temperature",
+      "issue": "setContactBethe called with positional list arguments; signature expects keyword parameter contactList and optional latFile, eta, T",
+      "proposed_fix": "    negf.setContactBethe(contactList=[1,2,3,4,5,6], latFile='Au', T=300)",
+      "confidence": "judgment",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/theory/negf_dft.rst",
+      "line_range": [182, 182],
+      "current_snippet": "    negf = NEGF('molContact', basis='lanl2dz')",
+      "issue": "Comment says 'Basic NEGF Calculation' but uses NEGF class; context suggests this should demonstrate NEGFE (energy-dependent)",
+      "proposed_fix": "    # Initialize system with NEGF (energy-independent)\n    negf = NEGF('molContact', basis='lanl2dz')",
+      "confidence": "judgment",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/theory/negf_dft.rst",
+      "line_range": [198, 198],
+      "current_snippet": "    negf = NEGFE('molecule', basis='lanl2dz')",
+      "issue": "NEGFE class signature is NEGFE(NEGF), not compatible with direct instantiation with fn and basis parameters",
+      "proposed_fix": "    # Initialize system\n    negf_base = NEGF('molecule', basis='lanl2dz')\n    negf = NEGFE(negf_base)",
+      "confidence": "judgment",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/theory/negf_dft.rst",
+      "line_range": [199, 199],
+      "current_snippet": "    negf.setContactBethe([1,2,3], [4,5,6], latFile='Au2', T=300)",
+      "issue": "setContactBethe called with positional list arguments; signature expects keyword parameter contactList",
+      "proposed_fix": "    negf.setContactBethe(contactList=[1,2,3,4,5,6], latFile='Au2', T=300)",
+      "confidence": "judgment",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/theory/transport.rst",
+      "line_range": [33, 33],
+      "current_snippet": "    T = calculate_transmission(F_eV, negf.S, SigmaCalculator(sig1, sig2), E)",
+      "issue": "calculate_transmission called with positional energy list; signature uses keyword parameter energy_list",
+      "proposed_fix": "    T = calculate_transmission(F_eV, negf.S, SigmaCalculator(sig1, sig2), E, spin=None)",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/theory/transport.rst",
+      "line_range": [68, 68],
+      "current_snippet": "        SigmaCalculator(negf.g, energy_dependent=True),",
+      "issue": "SigmaCalculator instantiated with negf.g as first argument; signature expects sig1 (self-energy matrix), not a surfG object",
+      "proposed_fix": "        SigmaCalculator(sig1, sig2=None, energy_dependent=True),",
+      "confidence": "judgment",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/theory/transport.rst",
+      "line_range": [234, 234],
+      "current_snippet": "    T = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist + negf.fermi)",
+      "issue": "SigmaCalculator instantiated with negf.g; should use sig1 and sig2 self-energy matrices instead",
+      "proposed_fix": "    sig1, sig2 = negf.getSigma()\n    T = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(sig1, sig2), Elist + negf.fermi)",
+      "confidence": "judgment",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/theory/transport.rst",
+      "line_range": [237, 237],
+      "current_snippet": "    dos, _ = calculate_dos(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist + negf.fermi)",
+      "issue": "SigmaCalculator instantiated with negf.g; should use sig1 and sig2 self-energy matrices instead",
+      "proposed_fix": "    dos, _ = calculate_dos(negf.F*har_to_eV, negf.S, SigmaCalculator(sig1, sig2), Elist + negf.fermi)",
+      "confidence": "judgment",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/theory/best_practices.rst",
+      "line_range": [43, 43],
+      "current_snippet": "       negf.setSigma([1], [2], -0.05j)",
+      "issue": "setSigma called with positional list arguments; signature expects keyword parameters lContact, rContact, sig",
+      "proposed_fix": "       negf.setSigma(lContact=[1], rContact=[2], sig=-0.05j)",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/theory/best_practices.rst",
+      "line_range": [52, 54],
+      "current_snippet": "       # Use realistic metallic contacts with extended system\n       negf = scfE.NEGFE('molContacts')\n       # Assuming triangular contacts on 1,2,3,4 and 5,6,7,8\n       inds = setContactBethe([[1,2,3],[6,7,8]], latFile='Au2', eta=1e-5, T=300)",
+      "issue": "setContactBethe called with nested list structure and positional arguments; signature expects contactList as single parameter; also uses scfE.NEGFE incorrectly with string parameter",
+      "proposed_fix": "       # Use realistic metallic contacts with extended system\n       negf_base = scf.NEGF('molContacts')\n       negf = scfE.NEGFE(negf_base)\n       # Assuming triangular contacts on 1,2,3,4 and 5,6,7,8\n       negf.setContactBethe(contactList=[1,2,3,4,5,6,7,8], latFile='Au2', eta=1e-5, T=300)",
+      "confidence": "judgment",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/theory/best_practices.rst",
+      "line_range": [60, 63],
+      "current_snippet": "       # For molecular wire systems\n       negf = scfE.NEGFE('molContacts')\n       # Assuming repeating infinite chain extending atoms [1,2] and [3,4]\n       inds = setContact1D([[2],[3]], [[1],[4]], eta=1e-5, T=300)",
+      "issue": "setContact1D called with nested list structure and positional arguments; signature expects contactList and then tauList, stauList, etc as keyword parameters; also NEGFE instantiation is incorrect",
+      "proposed_fix": "       # For molecular wire systems\n       negf_base = scf.NEGF('molContacts')\n       negf = scfE.NEGFE(negf_base)\n       # Assuming repeating infinite chain extending atoms [1,2] and [3,4]\n       negf.setContact1D(contactList=[2,3], tauList=[[1],[4]], eta=1e-5, T=300)",
+      "confidence": "judgment",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/theory/best_practices.rst",
+      "line_range": [133, 133],
+      "current_snippet": "       negf.setSigma([1], [2], sig=-0.05j, T=300)",
+      "issue": "NEGF.setSigma does not have T parameter; only NEGFE.setSigma accepts temperature; this code example is for NEGF class which doesn't support T",
+      "proposed_fix": "       # For energy-dependent contacts with temperature (NEGFE only):\n       # negf.setSigma(lContact=[1], rContact=[2], sig=-0.05j, T=300)\n       # For energy-independent contacts (NEGF):\n       negf.setSigma(lContact=[1], rContact=[2], sig=-0.05j)",
+      "confidence": "judgment",
+      "code_bug": false
+    }
+  ],
+  "summary": {
+    "total_findings": 18,
+    "mechanical_count": 6,
+    "judgment_count": 12,
+    "code_bug_count": 0
+  }
+}

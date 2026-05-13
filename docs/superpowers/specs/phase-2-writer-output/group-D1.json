@@ -1,0 +1,23 @@
+{
+  "group": "D1",
+  "modules_processed": ["gauNEGF/scf.py", "gauNEGF/scfE.py", "gauNEGF/density.py", "gauNEGF/transport.py"],
+  "entries": [
+    {
+      "file_path": "gauNEGF/density.py",
+      "symbol": "calcEmin",
+      "kind": "insert",
+      "anchor_line": 864,
+      "anchor_text": "def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES, Emin=None):\n    if Emin is None:\n        D,_ = eigh(inv(S)@F)",
+      "docstring": "    \"\"\"\n    Calculate minimum energy bound for numerical integration.\n\n    Finds the lower energy bound for density matrix integration by iteratively\n    lowering Emin until the density of states at that energy falls below the\n    specified tolerance. This ensures the integration bounds capture all occupied\n    states without including energies too far below the band edge.\n\n    Parameters\n    ----------\n    F : ndarray\n        Fock matrix in eV.\n    S : ndarray\n        Overlap matrix.\n    g : surfG object\n        Surface Green's function calculator providing sigmaTot() and\n        crossTermQTot() methods for energy-dependent self-energies.\n    tol : float, optional\n        Convergence tolerance for density of states (default: FERMI_CALCULATION_TOL).\n    maxN : int, optional\n        Maximum number of expansion iterations (default: MAX_CYCLES).\n    Emin : float or None, optional\n        Initial lower bound in eV. If None, initialized from minimum eigenvalue\n        of inv(S)@F minus 5 eV offset (default: None).\n\n    Returns\n    -------\n    float\n        Lower energy bound in eV where DOS is below tolerance.\n\n    Notes\n    -----\n    Prints warning if maximum iterations reached without achieving convergence.\n    Prints final Emin value and corresponding DOS for debugging purposes.\n    \"\"\"\n",
+      "style": "numpy",
+      "todo_count_so_far": 0
+    }
+  ],
+  "summary": {
+    "total_entries": 1,
+    "inserts": 1,
+    "replaces": 0,
+    "todos": 0,
+    "modules_with_todo_overflow": []
+  }
+}
