@@ -284,6 +284,30 @@ class NEGF(object):
         """
         self.F = np.array(F_)/har_to_eV
 
+    def updatePulay(self, nPulay):
+        """
+        Reset Pulay mixing buffers to use a new history length.
+
+        Allows changing the number of previous iterations used in Pulay DIIS
+        mixing without reinitializing the full NEGF object. Buffers are
+        re-seeded from the current density matrix, matching the initialization
+        in __init__. Any accumulated mixing history is discarded.
+
+        Parameters
+        ----------
+        nPulay : int
+            New number of previous iterations to use in Pulay mixing.
+        """
+        if nPulay < 1:
+            raise ValueError(f'nPulay must be >= 1, got {nPulay}')
+        self.pList = np.array([self.P for i in range(nPulay)], dtype=complex)
+        self.DPList = np.ones((nPulay, self.nsto, self.nsto), dtype=complex)*1e4
+        self.pMat = np.ones((nPulay+1, nPulay+1), dtype=complex)*-1
+        self.pMat[-1, -1] = 0
+        self.pB = np.zeros(nPulay+1)
+        self.pB[-1] = -1
+        print(f'Pulay mixing buffers reset, nPulay = {nPulay}')
+
     def setDen(self, P_, enableSpinLock=False, spinLockList=None):
         """
         Set the density matrix and update dependent quantities.
