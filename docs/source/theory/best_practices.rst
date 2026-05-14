@@ -1,157 +1,122 @@
 Best Practices for Production Calculations
-===================================
+==========================================
 
-This section provides guidelines for setting up and running production-quality NEGF-DFT calculations, focusing on accuracy, efficiency, and troubleshooting.
+This page collects practical advice that is not covered by the task-oriented
+guides. For step-by-step setup of contacts, SCF tuning, and standard workflows,
+see :doc:`/guides/index`.
+
+.. seealso::
+
+   :doc:`/guides/contact_choice` -- choosing between energy-independent self-energies, 1D chain, and Bethe lattice contacts.
+
+   :doc:`/guides/config_tuning` -- SCF damping, Pulay mixing, ETA, fermiMethod, and integration tolerances.
+
+   :doc:`/guides/workflow_recipes` -- warm-starts, IV sweeps, and checkpointing.
+
 
 System Preparation
-----------------
+------------------
 
-Geometry Optimization
-~~~~~~~~~~~~~~~~~~
+Contact Placement
+~~~~~~~~~~~~~~~~~
 
-1. **Initial Structure**
+* Choose chemically reasonable contact sites (e.g. thiol on Au, terminating
+  Si atom for a nanowire).
+* Maintain consistent contact-molecule distances when comparing geometries.
+* Consider multiple contact configurations if conductance is sensitive to
+  binding site.
 
-   * Use standard bond lengths and angles
-   * Consider symmetry for efficient calculations
-   * Optimize geometry without contacts first
+Basis Set Selection
+~~~~~~~~~~~~~~~~~~~
 
-2. **Contact Placement**
+* For light-element systems, a compact all-electron basis such as STO-3G or
+  6-31G is fine for testing and quick convergence checks.
+* **Boundary atoms must use a minimal basis** - This applies to 1D or 3D 
+  contacts, due to poor conditioning of the overlap matrix (to be fixed
+  in future versions with regularization methods)
+* For heavy elements (Au, Pt, transition metals), use an ECP basis such as
+  LANL2DZ to keep the orbital count tractable.
+* Move to a polarized basis (6-31G(d,p), def2-SVP) for production transport.
 
-   * Choose chemically reasonable contact sites
-   * Maintain consistent contact-molecule distances
-   * Consider multiple contact configurations
-
-3. **Basis Set Selection**
-
-   * Start with a compact basis like LANL2DZ for testing
-   * Use larger basis sets for production
-   * Check basis set superposition error
 
 DFT Setup
---------
+---------
 
 Functional Selection
-~~~~~~~~~~~~~~~~~
-Honestly, there are hundreds of DFT functionals out there. Find one that works for your system and doesn't make the reviewers too mad. People seem to like pure functionals for metals and hybrid functionals for organics, if you want both you are SOL.
+~~~~~~~~~~~~~~~~~~~~
 
-Contact Models
-~~~~~~~~~~~~
+From a pure physics perspective, using a functional with exchange will never
+be accurate: the charges from any atom outside of the device boundary cannot
+possibly be included in the two-electron integrals. However, in practice, 
+hybrid functionals like B3LYP have produced the best results for isolated
+molecular systems. Therefore, benchmarking your results against multiple
+functionals is always recommended: find one that works relatively well
+for your system and doesn't make the reviewers too mad.
 
-1. **Energy-Independent**
-
-   .. code-block:: python
-       negf = scf.NEGF('mol')
-       # Start with simple diagonal self-energies
-       negf.setSigma(lContact=[1], rContact=[2], sig=-0.05j)
-
-2. **Bethe Lattice**
-
-   .. code-block:: python
-   
-       # Use realistic metallic contacts with extended system
-       negf = scfE.NEGFE('molContacts')
-       # Assuming triangular contacts on 1,2,3,4 and 5,6,7,8
-       inds = negf.setContactBethe([[1,2,3],[6,7,8]], latFile='Au2', eta=1e-5, T=300)
-
-3. **1D Chain**
-
-   .. code-block:: python
-   
-       # For molecular wire systems
-       negf = scfE.NEGFE('molContacts')
-       # Assuming repeating infinite chain extending atoms [1,2] and [3,4]
-       inds = negf.setContact1D([[2],[3]], [[1],[4]], eta=1e-5, T=300)
-
-Convergence Strategies
--------------------
-
-SCF Convergence
-~~~~~~~~~~~~~
-
-1. **Mixing Parameters**
-
-   .. code-block:: python
-   
-       # Start with default mixing values (values over 0.05 will be unstable!)
-       negf.SCF(damping=0.02, maxcycles=200)
-       
-       # Lower mixing if SCF is unstable
-       negf.SCF(damping=0.005, maxcycles=400)
-       
-       # turn off pulay mixing if cyclical convergence values are observed (convergence will take longer)
-       negf.SCF(damping=0.02, maxcycles=1000, pulay=False)
-
-2. **Pulay Mixing**
-
-   .. code-block:: python
-   
-       # Pulay mixing as implemented works well
-       # Increasing nPulay can increase convergence speed for difficult systems
-       negf = NEGF(fn='system', nPulay=9)
-       # Side effect may be instability, consider setting pulay=False if stability is an issue
-       negf.SCF(damping=0.02, maxcycles=1000, pulay=False)
-
-3. **Change Initial Wavefunction Guess**
-
-   .. code-block:: python
-        
-       negf.setDen(density_guess)
-       # Typical values for convergence, don't read checkpoint
-       negf.SCF(conv=1e-4, damping=0.02, maxcycles=300, checkpoint=False)
 
 Integration Parameters
+----------------------
+
+Integration is used only by the energy-dependent class
+(:class:`gauNEGF.scfE.NEGFE`). The default adaptive integrator is correct for
+most cases; see :doc:`/guides/config_tuning` for the ``ADAPTIVE_INTEGRATION_TOL``
+constraint.
+
+Manually Setting the Integration Grid
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For cases where the adaptive integrator is too slow or unstable, you can fix
+the grid directly:
+
+.. code-block:: python
+
+    negf.setIntegralLimits(
+         N1=100,     # integration points from Emin to mu
+         N2=50,      # integration points from Eminf to Emin
+         Emin=-500   # lower bound (eV)
+    )
+
+This bypasses adaptive refinement entirely; use only after you have a working
+adaptive run for comparison.
+
+Adding Temperature
 ~~~~~~~~~~~~~~~~~~
 
-Note that integration is only used by the NEGFE() class and by default is adaptive:
+Temperature affects the contact Fermi-Dirac distribution. It is set per-contact
+on the energy-dependent class:
 
-1. **Adaptive Integration used by default***
+.. code-block:: python
 
-Change adapative integration tolerance in config.py, which is calculated as the maximum density matrix difference between two consecutive SCF cycles:
-   .. code-block:: python
-   
-      # Convergence Tolerances
-      ADAPTIVE_INTEGRATION_TOL = 1e-3     # Adaptive integration tolerance
+    from gauNEGF.scfE import NEGFE
 
-2. **Manually Set Integration Grid***
+    negf = NEGFE('molecule', basis='lanl2dz')
+    negf.setSigma(lContact=[1], rContact=[2], sig=-0.05j, T=300)
 
-   .. code-block:: python
-   
-       # Set grid size and Emin
-       negf.setIntegralLimits(
-            N1=100, #Integration from Emin to mu
-            N2=50, #Integration from Eminf to Emin
-            Emin=-500
-       )
+See :doc:`/guides/config_tuning` for the global ``TEMPERATURE`` config constant.
 
-
-3. **Add Temperature**
-
-   .. code-block:: python
-
-       from gauNEGF.scfE import NEGFE
-
-       # Use NEGFE for temperature-dependent calculations.
-       # T=... kwarg is supported on NEGFE.setSigma (overrides NEGF.setSigma).
-       negf = NEGFE('molecule', basis='lanl2dz')
-       negf.setSigma(lContact=[1], rContact=[2], sig=-0.05j, T=300)
 
 Validation Checks
-~~~~~~~~~~~~~~
+-----------------
 
-1. **Zero Bias**
+Zero Bias
+~~~~~~~~~
 
-   * Compare with literature conductance values
-   * Check Transmission profile between HOMO-LUMO gap
-   * Verify DOS features (molecular orbitals vs contact effects)
+* Compare with literature conductance values for similar systems.
+* Check the transmission profile inside the HOMO-LUMO gap (should be small).
+* Verify DOS features: molecular orbitals should be sharp, contact-induced
+  broadening should be smooth.
 
-2. **Finite Bias**
+Finite Bias
+~~~~~~~~~~~
 
-   * Check current symmetry with positive and negative bias
-   * Check current hysteresis with increasing convergence
-   * Monitor charge conservation
+* Check current symmetry under positive and negative bias.
+* Check for hysteresis by sweeping voltage forward and backward.
+* Monitor charge conservation across the device region.
 
-3. **Spin Systems**
+Spin Systems
+~~~~~~~~~~~~
 
-   * Check charge and multiplicity
-   * Check spin contamination
-   * For non-collinear cases check system spin direction
+* Verify charge and multiplicity match the intended state.
+* Check for spin contamination (``<S^2>``) in unrestricted runs.
+* For non-collinear (``spin='g'``) cases, inspect the system spin direction
+  after SCF convergence.

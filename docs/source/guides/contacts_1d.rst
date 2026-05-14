@@ -7,6 +7,16 @@ energy-dependent 1D chain contacts via the ``NEGFE`` class and ``surfG`` surface
 Green's function. This method is ideal for periodic or quasi-periodic structures
 where you can define semi-infinite leads as repeating 1D chains.
 
+.. warning::
+
+   **Contact-atom basis must be minimal.** Atoms participating in the 1D
+   contact slice must use a minimal basis (e.g. STO-3G for light atoms,
+   LANL2DZ for heavy atoms). Polarized or diffuse functions on contact atoms
+   produce a poorly-conditioned overlap matrix between adjacent unit cells,
+   which breaks the surface Green's function iteration. Interior (device)
+   atoms can use any basis. See :doc:`/theory/best_practices` for the
+   conditioning background.
+
 --------
 Overview
 --------
@@ -62,14 +72,11 @@ The device is partitioned as:
 ::
 
     |  Left   |         Device          |  Right  |
-    | Contact |  Buffer ... Buffer      | Contact |
+    | Contact |  Coupling ... Coupling  | Contact |
     | 1 cell  |  (N-2) cells            | 1 cell  |
 
 The contact cells define the repeating unit of the semi-infinite leads.
 Buffer cells screen the contact self-energies from the active region.
-
-**Recommendation**: Use at least 5 total cells (1 contact + 3 device + 1
-contact). More buffer cells improve accuracy.
 
 -----------------------------------------
 Extract Matrices from the Large Cluster
@@ -185,10 +192,6 @@ Set Up NEGFE
 * ``setFock(F)``: override the initial Fock with the one extracted from the
   large cluster
 
-**Constructor note**: ``NEGFE`` inherits from ``NEGF``, so you can instantiate
-it with all ``NEGF`` constructor arguments (e.g.,
-``NEGFE('molecule', basis='6-31g')`` is valid).
-
 -------------------------------------
 Three Usage Patterns for setContact1D
 -------------------------------------
@@ -197,61 +200,45 @@ The ``setContact1D`` method supports three different calling patterns, depending
 on how much information you have about the bulk electronic structure. Choose the
 pattern that matches your workflow.
 
-Pattern A: Full Specification (explicit tau, alpha, beta)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Pattern A: Auto-Extract from Device Fock (recommended)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Use this pattern when you have extracted all matrices from a large DFT cluster
-and want explicit control over the contact parameters.
+Use this pattern when you have a device cluster extracted from a larger
+DFT calculation. ``setContact1D`` reads the contact-cell and inter-cell
+coupling matrices directly from the device Fock and overlap, and the contact
+electron count from the device density matrix. No explicit matrices required.
 
 .. code-block:: python
 
     # adapted from examples/SiNEGF.py (multi-atom contacts)
-    negf = NEGFE(fn='SiNanowire', func='b3lyp', basis='6-31g(d,p)')
+    negf = NEGFE(fn='SiNanowire', func='b3lyp', basis='STO-3G')
     negf.setFock(F)
 
-    # Contact atom indices (1-indexed), coupling matrices from bulk calculation
     inds = negf.setContact1D(
         [[1, 2, 3], [4, 5, 6]],      # contactList: atoms per contact
-        [tau_F, tau_F.conj().T],     # tauList: inter-cell coupling
-        [tau_S, tau_S.conj().T],     # stauList: overlap coupling
-        [alpha_F, alpha_F],          # alphas: on-site Fock
-        [alpha_S, alpha_S],          # aOverlaps: on-site overlap
-        [tau_F, tau_F.conj().T],     # betas: bulk hopping (tau for periodic)
-        [tau_S, tau_S.conj().T],     # bOverlaps: bulk hopping overlap
-        neList=[ne/nCells, ne/nCells],  # electrons per unit cell per contact
         symmetrize_contacts=True,    # True if both contacts same material
         eta=1e-3                     # broadening (eV)
     )
 
-    negf.setVoltage(0.0, fermiMethod='predict')
+    negf.setVoltage(0.0)
     negf.SCF(1e-2, 0.02, 100)
 
-**Pattern A details:**
+**Key arguments:**
 
 * **contactList**: 1-indexed atom numbers within the device ``.gjf`` file.
   Left contact is first unit cell; right contact is last unit cell.
-* **tauList** ``[tau_L, tau_R]``: Coupling matrices between contact surface and
-  adjacent device cell. For left contact, tau goes left-to-right; for right
-  contact, right-to-left. In symmetric periodic system: ``tau_R = tau_L.conj().T``.
-* **stauList** ``[stau_L, stau_R]``: Overlap matrices for coupling. Same symmetry
-  as tau. If your system uses orthogonal basis, pass ``None`` instead.
-* **alphas** ``[alpha_L, alpha_R]``: On-site Fock matrix for one bulk unit
-  cell of each contact. For same-material contacts, these are identical.
-* **aOverlaps** ``[salpha_L, salpha_R]``: On-site overlap for each contact's
-  unit cell.
-* **betas** ``[beta_L, beta_R]``: Hopping Fock between adjacent bulk unit cells
-  in the lead chain. For periodic systems, ``beta = tau``.
-* **bOverlaps** ``[sbeta_L, sbeta_R]``: Hopping overlap. Same symmetry as beta/tau.
-* **neList** ``[ne_L, ne_R]``: Number of electrons per unit cell for each
-  contact. Used to compute contact Fermi level via ``getFermiContact``. For
-  periodic system, this is ``total_electrons / nCells``.
-* **symmetrize_contacts**: Set ``True`` when both contacts are same material
-  (e.g., periodic nanotube, nanowire). This averages the on-site Fock blocks
-  during SCF to prevent artificial symmetry breaking from opposite directional
-  coupling signs in sigma_L vs sigma_R.
-* **eta**: Broadening parameter in eV. Larger values (1e-3) speed up surface
-  Green's function convergence but smear sharp features. Smaller values
-  (1e-5 to 1e-9) are more accurate but may require more iterations.
+* **symmetrize_contacts**: Set ``True`` when both contacts are the same
+  material (e.g., periodic nanotube, nanowire). This averages the on-site
+  Fock blocks during SCF to prevent artificial symmetry breaking from
+  opposite directional coupling signs in sigma_L vs sigma_R.
+* **eta**: Broadening (eV). Larger values (1e-3) speed up surface Green's
+  function convergence but smear sharp features. See
+  :doc:`config_tuning` for ETA tuning.
+
+For the full signature including ``tauList``, ``stauList``, ``alphas``,
+``aOverlaps``, ``betas``, ``bOverlaps``, and ``neList`` (used when overriding
+auto-extraction), see :meth:`gauNEGF.scfE.NEGFE.setContact1D` or Pattern B
+below.
 
 Pattern B: Custom Coupling with Auto Onsite (tauList only)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -273,15 +260,16 @@ useful when the device onsite approximation is adequate.
         eta=1e-3
     )
 
-    negf.setVoltage(0.0, fermiMethod='predict')
+    negf.setVoltage(0.0, fermiMethod='poly')
     negf.SCF(1e-3, 0.02, 1000)
 
 .. note::
 
-   This pattern is useful when your bulk structure matches the device geometry
-   well enough that extracting alpha and beta from the device Fock is acceptable.
-   If this assumption is invalid (e.g., strongly distorted contacts), use
-   Pattern A with explicit matrices.
+   This pattern is useful when your bulk structure matches the device
+   geometry well enough that extracting alpha and beta from the device Fock
+   is acceptable. If this assumption is invalid (e.g., strongly distorted
+   contacts), pass the explicit matrices listed in
+   :meth:`gauNEGF.scfE.NEGFE.setContact1D`.
 
 Pattern C: Auto-Extraction from DFT (contactList + neList only)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -302,24 +290,25 @@ matrices are auto-computed from the DFT geometry stored in the device ``.gjf``.
         eta=1e-4
     )
 
-    # CRITICAL: Pass fermiMethod to setVoltage
-    negf.setVoltage(0.0, fermiMethod='predict')
+    # Let Fermi search run -- do NOT pass an explicit fermi energy here
+    negf.setVoltage(0.0, fermiMethod='poly')
     negf.SCF(1e-2, 0.02, 100)
     negf.SCF(1e-4, 0.02, 1000, pulay=False)
 
 .. warning::
 
-   Pattern (c) requires **fermiMethod**. If you use ``setContact1D`` with atom
-   indices only (no explicit tau/alpha/beta matrices), you MUST pass
-   fermiMethod to ``setVoltage``:
+   With Pattern C (no explicit tau/alpha/beta), **do not pass an explicit
+   Fermi energy** as the second positional argument to ``setVoltage`` -- the
+   electron count becomes unphysical. Let Fermi search run via the default
+   ``fermiMethod='muller'`` or pick another method explicitly:
 
    .. code-block:: python
 
-      negf.setVoltage(0.0, fermiMethod='predict')
+      negf.setVoltage(0.0)                       # uses default 'muller'
+      # or
+      negf.setVoltage(0.0, fermiMethod='poly')   # explicit method
 
-   Without this, the electron count in the contact region is non-physical.
-   See :doc:`config_tuning` for fermiSearch options. Valid fermiMethod values
-   include 'predict', 'poly', 'secant', and 'bisect'.
+   See :doc:`config_tuning` for the method comparison and selection guidance.
 
 -----------
 Run the SCF
@@ -363,8 +352,9 @@ Common Pitfalls
 ----------------
 
 1. **Too few cells**: Using only 3 cells (1+1+1) gives no buffer between
-   contacts. The self-energies overlap on the single device cell. Use at
-   least 5 cells.
+   contacts; the self-energies overlap on the single device cell. Add
+   interior cells until the on-site Fock for the central cell looks
+   bulk-like.
 
 2. **Edge-contaminated coupling**: Extracting tau/alpha from the edge of the
    large cluster gives non-bulk-like values. Always extract from the deep
@@ -386,9 +376,11 @@ Common Pitfalls
    at the edges. The semi-infinite leads replace the caps. Including H atoms
    adds spurious states.
 
-7. **Missing fermiMethod for Pattern C**: If using auto-extraction
-   (Pattern C), always pass ``fermiMethod`` to ``setVoltage``. Without it,
-   the Fermi level calculation is incomplete and results are unphysical.
+7. **Passing an explicit Fermi energy with Pattern C**: With auto-extraction
+   (Pattern C), passing the second positional argument to ``setVoltage``
+   disables the Fermi search and gives an unphysical contact electron count.
+   Either omit it (default ``fermiMethod='muller'`` runs) or pass only the
+   ``fermiMethod=`` keyword.
 
 8. **Forgetting symmetrize_contacts=True**: For parity-symmetric systems
    (both contacts same material), set ``symmetrize_contacts=True`` in

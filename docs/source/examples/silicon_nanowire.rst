@@ -133,4 +133,8 @@ Key Points
    - Uses NEGFE for self-consistent calculations
    - Implements 1D chain contacts
    - Includes both zero and finite temperature (300K)
-   - Uses low damping values due to contact instability 
+   - Uses low damping values due to contact instability
+
+See :doc:`/guides/contacts_1d` for full 1D contact setup patterns and
+:doc:`/guides/config_tuning` for damping/ETA tuning.
+

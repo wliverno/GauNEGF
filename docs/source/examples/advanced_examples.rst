@@ -24,7 +24,6 @@ Example of spin-dependent transport:
     sig_down = [-0.05j]
     # Define contact indices explicitly (NEGF.setSigma does not return them)
     inds = [[1], [2]]
-    negf.setSigma(lContact=inds[0], rContact=inds[1])
     sig1 = np.diag(sig_up*len(inds[0]) + sig_down*len(inds[0]))
     sig2 = np.diag(sig_down*len(inds[1]) + sig_up*len(inds[1]))
     negf.setSigma(lContact=inds[0], rContact=inds[1], sig=sig1, sig2=sig2)
@@ -93,12 +92,12 @@ setContact1D; both are NEGFE-only methods):
         eta=1e-6      # Broadening term (eV)
     )
 
-    # 1D chain contacts attached to atoms 1 and 6
+    # 1D chain contacts auto-extracted from the device Fock block.
+    # See /guides/contacts_1d for the explicit-matrix and tau-list patterns.
     negf.setContact1D(
-        contactList= [[1],[6]],
-        tauList = [[2], [5]],   # hopping calculated from 1 to 2 and 6 to 5
-        neList = [4,  4],       # 4 electrons per cell
-        eta = 1e-6              # Broadening term (eV)
+        contactList=[[1], [6]],
+        symmetrize_contacts=True,
+        eta=1e-3
     )
 
 Custom Analysis
@@ -133,4 +132,11 @@ Advanced analysis tools:
     
     plt.tight_layout()
     plt.show()
+
+See Also
+--------
+
+* :doc:`/guides/contacts_bethe` -- Bethe lattice contact setup, including SOC workflows
+* :doc:`/guides/contacts_1d` -- full 1D chain contact setup patterns
+* :doc:`/guides/workflow_recipes` -- IV sweeps, checkpointing, multi-temperature workflows
 

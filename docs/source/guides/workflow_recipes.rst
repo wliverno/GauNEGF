@@ -156,7 +156,7 @@ Code Example
     print("SCF at T=0K...")
     negf = NEGFE(fn=fn, func='b3lyp', basis='lanl2dz', fullSCF=False)
     negf.setContact1D([[1], [2]], eta=1e-4)  # Default T=0
-    negf.setVoltage(0.0, fermiMethod='predict')
+    negf.setVoltage(0.0, fermiMethod='poly')
     negf.SCF(1e-2, 0.02, 100)
     negf.SCF(1e-4, 0.02, 1000, pulay=False)
     negf.saveMAT('CNanowire_ESCF.mat')
@@ -169,7 +169,7 @@ Code Example
     print("SCF at T=300K...")
     negf = NEGFE(fn=fn, func='b3lyp', basis='lanl2dz', fullSCF=False)
     negf.setContact1D([[1], [2]], eta=1e-4, T=300)  # Set T=300K
-    negf.setVoltage(0.0, fermiMethod='predict')
+    negf.setVoltage(0.0, fermiMethod='poly')
     negf.SCF(1e-2, 0.02, 100)
     negf.SCF(1e-4, 0.02, 1000, pulay=False)
     negf.saveMAT('CNanowire_ESCF_300K.mat')
@@ -309,6 +309,8 @@ Code Example
     # Hot-start with prior density and Fermi
     negf.setDen(prior_density)  # Load density matrix
     negf.setVoltage(0.0, prior_fermi)  # Set initial Fermi level
+    # Add `negf.setVoltage(0.0)` here if you want to re-enable Fermi search
+    # during the warm-started SCF (see contacts_bethe.rst warm-start pattern).
 
     # SCF from warm-start (converges faster)
     negf.SCF(1e-3, 0.02, 200, checkpoint=False)
@@ -329,6 +331,10 @@ Key Points
   - ``'fermi'`` - Fermi level as a 1x1 array (access with ``[0][0]``)
   - ``'F'`` - Fock matrix
   - ``'S'`` - Overlap matrix
+
+* **checkpoint=False**: Ensure that the density matrix will not be overwritten by
+  existing ``f'{fn}_P.mat'`` file. Conversely, copy your warm-start file to that 
+  filename to skip all of the previous steps!
 
 * **Speed improvement**: Warm-start typically converges in 10-30% of the iterations
   needed for a cold start, especially if the geometry is similar.

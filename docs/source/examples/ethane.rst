@@ -102,10 +102,14 @@ Add voltage calculations to your script:
     plt.show()
 
 Next Steps
---------
+----------
 Try modifying the example:
 
 1. Change contact parameters
 2. Use different basis sets
 3. Try different functionals
-4. Add temperature effects 
+4. Add temperature effects
+
+See :doc:`/guides/contact_choice` for picking a more realistic contact model
+and :doc:`/guides/config_tuning` for SCF tuning.
+

@@ -221,21 +221,21 @@ Example of a comprehensive transport analysis:
 .. code-block:: python
 
     # Initialize system
-    negf = NEGF('molecule', basis='lanl2dz')
-    negf.setContactBethe([1,2,3], [6,7,8], 'Au2')
+    negf = NEGFE('molecule', basis='lanl2dz')
+    negf.setContactBethe([[1,2,3], [6,7,8]], 'Au')
     har_to_eV = 27.211386
 
-    # Run NEGF-DFT to get quilibrium density
+    # Run NEGF-DFT to get equilibrium density
     negf.setVoltage(0.0)
     negf.SCF(1e-3, 0.02, 200)
-    
+
     # Calculate transmission
-    E = np.linspace(-5, 5, 1000)
+    Elist = np.linspace(-5, 5, 1000)
     T = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist + negf.fermi)
-    
+
     # Calculate DOS
     dos, _ = calculate_dos(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist + negf.fermi)
-    
+
     # Generate IV curve
     V = np.linspace(0, 2, 21)
     I = []
@@ -243,8 +243,8 @@ Example of a comprehensive transport analysis:
         negf.setVoltage(v)
         negf.SCF()
         I.append(calculate_current(
-            negf.F*har_to_eV, negf.S, 
-            SigmaCalculator(sig1, sig2),
+            negf.F*har_to_eV, negf.S,
+            SigmaCalculator(negf.g),
             fermi=negf.fermi,
             qV=v
         ))
@@ -273,8 +273,10 @@ Example of a comprehensive transport analysis:
     plt.show()
 
 Next Steps
---------
-Review :doc:`best_practices` for tips on production calculations. 
+----------
+Review :doc:`best_practices` for tips on production calculations, and see
+:doc:`/guides/workflow_recipes` for IV sweeps and checkpointing patterns.
+
 
 .. [Zoellner2020] Zöllner, M. S., Varela, S., Medina, E., Mujica, V., & Herrmann, C. (2020). Insight into the Origin of Chiral-Induced Spin Selectivity from a Symmetry Analysis of Electronic Transmission. Journal of Chemical Theory and Computation, 16(5), 2914-2929. DOI: 10.1021/acs.jctc.9b01078 
 
