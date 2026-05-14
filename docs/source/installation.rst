@@ -18,7 +18,7 @@ Installation Steps
 
    .. code-block:: bash
 
-      pip install numpy<=1.26 matplotlib jax
+      pip install "numpy<=1.26" matplotlib jax
 
 To install JAX with GPU support, you will need to install CUDA and also install the [cudaXX] extra, where XX is the CUDA version you are using (e.g. [cuda12] for CUDA 12). 
 

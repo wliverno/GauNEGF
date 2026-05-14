@@ -1,41 +1,18 @@
 Examples and Tutorials
-===================
+======================
 
 This section provides practical examples and tutorials for using gauNEGF.
 
-Basic Examples
-------------
+.. toctree::
+   :maxdepth: 1
+   :caption: Tutorials
 
-1. **Ethane Molecule** (:doc:`ethane`)
-
-   * Simple molecular junction
-   * Basic transmission calculation
-   * IV characteristics
-
-2. **Integration Methods** (:doc:`IntegralDemo`)
-
-   * Energy-independent vs energy-dependent integration
-   * Convergence testing and optimization
-   * Performance analysis with examples
-   * Detailed step-by-step tutorial
-
-Advanced Examples
---------------
-
-1. **Silicon Nanowire** (:doc:`silicon_nanowire`)
-
-   * Extended systems
-   * Band structure effects
-   * Realistic contacts
-
-2. **Advanced Topics** (:doc:`advanced_examples`)
-
-   * Spin transport
-   * Finite bias
-   * Temperature effects
+   ethane
+   silicon_nanowire
+   advanced_examples
 
 Example Files
------------
+-------------
 
 All example files are available in the ``examples/`` directory:
 
@@ -43,7 +20,7 @@ All example files are available in the ``examples/`` directory:
 
     examples/
     ├── ethane.gjf          # Ethane molecule input file
-    ├── Si2.gjf             # Si2 input file 
+    ├── Si2.gjf             # Si2 input file
     ├── SiNanowire12.gjf    # 12-atom Si Nanowire input file
-    ├── IntegralDemo.ipynb  # Integration methods tutorial
+    ├── IntegralDemo.ipynb  # Integration methods Jupyter notebook
     └── SiNEGF.py           # Silicon nanowire example

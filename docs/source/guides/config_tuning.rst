@@ -71,16 +71,14 @@ Fermi Search Method (fermiMethod)
 ----------------------------------
 
 The ``fermiMethod`` parameter controls the *root-finding algorithm* used to determine
-the Fermi energy during contact setup. This is passed to :meth:`setVoltage` to select
-how gauNEGF solves for the electron count.
+the Fermi energy during contact setup. This is passed to
+:meth:`gauNEGF.scfE.NEGFE.setVoltage` to select how gauNEGF solves for the
+electron count.
 
 .. warning::
 
-   For 1D contacts set up with atom indices only (no explicit tau/alpha/beta matrices),
-   you **MUST** specify ``fermiMethod`` in ``setVoltage``. Without it, the electron count
-   is non-physical. Example: ``negf.setVoltage(0.0, fermiMethod='poly')``
+   For 1D contacts set up with atom indices only (no explicit tau/alpha/beta matrices), **DO NOT**  specify a fermi energy in ``setVoltage`` or the electron count will become unphysical! Instead use defaults or set ``fermiMethod`` . Example: ``negf.setVoltage(0.0)``
    
-   For Bethe lattice contacts, ``fermiMethod`` is recommended but not strictly required.
 
 .. list-table:: Fermi Search Algorithms
    :widths: 15 15 15 55
@@ -94,22 +92,22 @@ how gauNEGF solves for the electron count.
      - Highest
      - Slow
      - Always safe; default fallback when others fail. Guaranteed convergence but requires many iterations.
-   * - ``'muller'``
+   * - ``'muller'`` (default)
      - High
      - Medium
-     - Good general-purpose default. Quadratically convergent, low failure rate.
+     - Good general-purpose default. Overshoot unlikely, defaults to bisection upon failure.
    * - ``'poly'``
      - Medium
-     - Medium
-     - Recommended in production. Balances stability and speed with polynomial fitting.
+     - Medium-Fast
+     - Recommended in production. Balances stability and speed with 3rd order polynomial fitting.
    * - ``'secant'``
      - Low
      - Fast
-     - Use only on well-conditioned problems with a good initial guess. High failure rate on challenging systems.
+     - Best for highly coupled contacts, unstable for weak contacts. Defaults to bisection upon failure
    * - ``'predict'``
      - Lowest
      - Very fast
-     - Advanced use; unstable for most systems. Use only when you have empirical evidence it works for your geometry.
+     - Stable only for weakly coupled contacts, uses previous guess upon failure (check warnings)
 
 See :doc:`contact_choice` for guidance on which contact type is appropriate, and :doc:`contacts_1d`
 for detailed setup instructions.
@@ -125,24 +123,27 @@ each SCF iteration. It acts as a mixing coefficient: new density = (1 - damping)
 
 **Tuning guidelines:**
 
-- **0.02 (default):** Good starting point for most systems. Provides stable convergence without excessive oscillation.
+- **Recommended Range: 0.002 to 0.1**, Anything outside of that range highly unstable
 
-- **0.01 (tighter damping):** Use when SCF oscillates or overshoots. Slower but more stable; particularly useful for charged systems or systems with small band gaps.
+- **High Mixing (0.1) for saddle points** Use if iterations seem "stuck", try with or without pulay interpolation.
 
-- **0.1 (looser damping):** Use when SCF is very slow to converge. Looser damping finds the convergence basin faster but may miss fine structure. After convergence, rerun with tighter damping (0.01-0.02) for final accuracy.
+- **Low Mixing (0.002) for unstable systems** Use when SCF oscillates or overshoots, increase nPulay if unstable
 
 **Production strategy:**
 
-For difficult systems, use a two-phase approach: run SCF with loose damping first to find
-the convergence basin, then switch to tight damping for final refinement.
+For difficult systems, use a two-phase approach: run SCF with low mixing first
+to find the convergence basin, then switch to higher mixing to escape any
+saddle points.
 
 .. code-block:: python
 
-   # Phase 1: Loose damping to find basin (coarse search)
-   negf.SCF(conv=1e-3, damping=0.1, maxcycles=200)
+   # Phase 1: Can be unstable until contacts mixed into system
+   negf.updatePulay(10)
+   negf.SCF(conv=1e-3, damping=0.002, maxcycles=100)
    
-   # Phase 2: Tight damping to converge (fine refinement)
-   negf.SCF(conv=1e-3, damping=0.01, maxcycles=1000)
+   # Phase 2: Ensure not in a saddle point
+   negf.updatePulay(4)
+   negf.SCF(conv=1e-3, damping=0.1, maxcycles=100)
 
 
 ETA (Broadening Parameter)
@@ -156,11 +157,11 @@ spectral features.
 
 **Typical overrides:**
 
-- **1e-4 eV:** Standard DFT workflows with 1D contacts. Slight broadening improves numerical stability for wide energy ranges (e.g., computing transmission over >10 eV).
+- **1e-3 eV:** Higher eta values can improve stability of 1D contacts especially at band edges
 
-- **1e-5 eV (default):** Recommended for Bethe lattice 3D contacts and most production transport calculations. Provides sharp spectral resolution while maintaining good conditioning.
+- **1e-5 eV (default):** Recommended for most production transport calculations. Provides sharp spectral resolution while maintaining good conditioning.
 
-- **1e-6 eV:** Very precise calculations when you have converged basis sets and tight SCF thresholds. Use with caution; may cause numerical issues if the Green's function is poorly conditioned.
+- **1e-6 eV:** Use for precise calculations to capture band edges exactly, may cause numerical issues if the Green's function is poorly conditioned.
 
 **Trade-off:** Higher ETA speeds convergence and broadens spectral features; lower ETA gives sharper spectra but requires better conditioning. For production transport calculations, use the default (1e-5) unless specifically tuning spectral resolution.
 
@@ -169,7 +170,7 @@ spectral features.
 .. code-block:: python
 
    # Set ETA for 1D contact
-   negf.setContact1D([[1,2,3],[4,5,6]], eta=1e-4)
+   negf.setContact1D([[1,2,3],[4,5,6]], eta=1e-3)
    
    # Set ETA for Bethe contact
    negf.setContactBethe([[1,2,3],[4,5,6]], eta=1e-5)
@@ -178,7 +179,7 @@ spectral features.
 TEMPERATURE
 -----------
 
-The ``TEMPERATURE`` parameter controls thermal broadening in the contacts. It does *not*
+The ``TEMPERATURE`` parameter controls thermal broadening in the contacts. It does not *directly*
 affect the device Hamiltonian, only the Fermi-Dirac distribution in the contact self-energy.
 
 **Default:** 0.0 K (zero temperature, sharp Fermi cutoff)
@@ -216,25 +217,26 @@ Two tolerances control Fermi energy accuracy:
   Increase to 20-30 for difficult systems; decrease to 5 if Fermi search is a bottleneck.
 
 
-Green's Function Convergence
------------------------------
+
+Surface Green's Function Convergence
+------------------------------------
 
 **SURFACE_GREEN_CONVERGENCE (default 1e-5):**
-  Convergence threshold for the iterative inversion of the surface Green's function
-  (used in :meth:`surfG.g` and related methods). Controls accuracy of contact self-energies.
-
-  - **1e-5 (default):** Balanced choice for most calculations.
-  - **1e-4:** Faster but less accurate; acceptable for exploratory studies.
-  - **1e-6:** Higher accuracy; use if you observe non-physical transmission features.
+  Convergence threshold for the iterative inversion that builds the contact
+  surface Green's function. The default is the lowest safe value: going
+  **below 1e-5** can produce numerical instability in the contour integration
+  and is not recommended. Going **above 1e-5** (e.g. 1e-4) speeds up contact
+  setup at the cost of slightly less accurate self-energies, which is useful
+  for exploratory runs or initial convergence sweeps.
 
 
 Integration Tolerances
 ----------------------
 
 **ADAPTIVE_INTEGRATION_TOL (default 1e-4):**
-  Tolerance for adaptive energy integration (e.g., in density and current calculations).
-  Controls automatic refinement of the energy grid. Loosen to 1e-3 for speed; tighten
-  to 1e-5 for high-resolution spectroscopy.
+  Tolerance for adaptive energy integration in density matrix calculations. Set as a threshold
+  for the maximum error (element-wise) in the density matrix.
+  **NOTE**: should be *below* SCF convergence criteria
 
 
 Integration Methods: Complex Contour vs Real-Axis
@@ -253,24 +255,20 @@ Workflow: Tuning Convergence
   Most systems converge with factory settings. Run SCF and check the convergence history.
 
 **Step 2: If SCF oscillates or diverges:**
-  - Tighten SCF_DAMPING to 0.01
-  - Enable Pulay mixing: ``negf.SCF(conv=1e-3, damping=0.02, pulay=True)``
+  - Tighten mixing to lower value: ``negf.SCF(conv=1e-3, damping=0.005)``
+  - Adjust Pulay mixing value if unstable: ``negf.updatePulay(9)``
   - Check that contacts are physically reasonable (see :doc:`contact_choice`)
 
 **Step 3: If SCF is very slow:**
-  - Use two-phase approach: loose damping (0.1) then tight (0.01)
-  - Increase SCF_MAX_CYCLES to 200-500
-  - Reduce SCF_CONVERGENCE_TOL to 1e-2 for initial runs
+  - Use two-phase approach: higher mixing (0.1) then lower (0.01)
+  - Increase ETA in initial runs: ``negf.setContact1D([[1,2],[5,6]], eta=1e-3)``
+  - Use closed shell spin for initial runs, then add spin degrees of freedom later
 
 **Step 4: If Fermi search fails or gives non-physical electrons:**
+  - Turn on fermi search in initial runs - fermi energy setpoint may be near orbital energies
   - Explicitly set fermiMethod in setVoltage: ``negf.setVoltage(0.0, fermiMethod='muller')``
-  - If muller fails, fall back to 'bisect'
-  - Check FERMI_CALCULATION_TOL and FERMI_SEARCH_CYCLES
-
-**Step 5: If transmission or DOS has spurious features:**
-  - Reduce ETA from 1e-5 to 1e-6 (sharper spectra)
-  - Or increase SURFACE_GREEN_CONVERGENCE to 1e-6 (tighter contact self-energy)
-  - Tighten ADAPTIVE_INTEGRATION_TOL to 1e-5
+  - Add a finite temperature to smooth out integration: ``negf.setContact1D([[1,2],[5,6]], T=300)``
+  - Otherwise revert back to bisection (``fermiMethod='bisect'``) if all else fails
 
 
 See Also

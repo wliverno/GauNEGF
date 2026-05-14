@@ -45,20 +45,21 @@ Fermi Energy and 1D Auto-Extract Contacts
 
 .. warning::
 
-   When you call :meth:`gauNEGF.scfE.NEGFE.setContact1D` with only atom indices and no explicit tau/alpha/beta matrices (the "auto-extract" pattern), gauNEGF extracts coupling matrices from your DFT Fock block. In this case, you **MUST** specify a fermiMethod in the :meth:`gauNEGF.scfE.NEGFE.setVoltage` call. Without a Fermi search method, the electron count in the contact region is not physically meaningful.
+   For 1D contacts set up with atom indices only (no explicit tau/alpha/beta matrices), **DO NOT**  specify a fermi energy in ``setVoltage`` or the electron count will become unphysical! Instead use defaults or set ``fermiMethod`` . Example: ``negf.setVoltage(0.0)``
    
-   For Bethe lattice contacts set via :meth:`gauNEGF.scfE.NEGFE.setContactBethe`, the Bethe lattice provides its own Fermi reference. fermiMethod is recommended but not strictly required.
-
 Correct usage:
 
 .. code-block:: python
 
-   # 1D auto-extract: MUST specify fermiMethod
-   negf.setVoltage(0.0, fermiMethod='poly')  # 'poly' is a good default
+   # 1D auto-extract: fermi energy not specified
+   negf.setVoltage(0.0)  # fermiMethod='muller' is the default
 
-   # Bethe lattice: fermiMethod optional (Bethe provides Fermi reference)
+   # Bethe lattice: contacts set Fermi level (0eV reference).
+   # Passing fermi=0 explicitly is a valid shortcut at zero bias -- it only
+   # shifts all energies; the two-pass form shown in contacts_bethe.rst can
+   # be slightly more accurate by matching the initial DFT guess.
    negf.setContactBethe([[1,2,3],[7,8,9]], 'Au')
-   negf.setVoltage(0.0)  # OK -- Bethe provides Fermi energy
+   negf.setVoltage(0.0, 0.0)
 
 For detailed information on available Fermi search methods, see :doc:`config_tuning`.
 
