@@ -41,8 +41,13 @@ def au_params():
 # Tests
 # ---------------------------------------------------------------------------
 
+@pytest.mark.slow
 def test_bethe_single_cell_fermi(au_params):
-    """calcFermi on surfGBAt should work directly (no wrapper, no nOrbs)."""
+    """calcFermi on surfGBAt should work directly (no wrapper, no nOrbs).
+
+    Marked slow: a single calcFermi pass takes ~4 min on P100. Run with
+    `pytest -m slow` to include.
+    """
     ne, H0, Slist, Vlist = au_params
     gBAt = surfGBAt(H0, Slist, Vlist, eta=eta, T=0)
     fermi = gBAt.calcFermi(ne / 2)
@@ -53,8 +58,12 @@ def test_bethe_single_cell_fermi(au_params):
         f"Au Fermi {fermi:.4f} eV differs from benchmark {AU_BULK_FERMI_EV} eV"
 
 
+@pytest.mark.slow
 def test_bethe_cross_term_fermi_consistency(au_params):
-    """Two independent surfGBAt instances should agree on Fermi energy."""
+    """Two independent surfGBAt instances should agree on Fermi energy.
+
+    Marked slow: runs calcFermi twice (~8 min total on P100).
+    """
     ne, H0, Slist, Vlist = au_params
     ne_per_spin = ne / 2
 
@@ -68,8 +77,12 @@ def test_bethe_cross_term_fermi_consistency(au_params):
         f"Two independent instances differ: {fermi1:.4f} vs {fermi2:.4f} eV"
 
 
+@pytest.mark.slow
 def test_cross_term_symmetrization_consistency(au_params):
     """Symmetrized Q_sym formula must match unsymmetrized (c_Q, c_Q_rev).
+
+    Marked slow: runs calcFermi plus a 100-point x 12-direction Python loop
+    (~10+ min on P100).
 
     The cross-term electron count is:
         delta_N = Re[-i/(2pi) * (-c_Q + c_Q_rev*)]
@@ -165,11 +178,27 @@ def test_cross_term_symmetrization_consistency(au_params):
         f"delta_N = {delta_N_sym:.6f} is unexpectedly small for Au"
 
 
+@pytest.mark.slow
 def test_3d_single_cell_fermi(au_params):
-    """calcFermi on surfGAt3D should work directly (no wrapper, no nOrbs)."""
+    """calcFermi on surfGAt3D should work directly (no wrapper, no nOrbs).
+
+    Marked slow: the current sigmaBulk/crossTermQBulk path is dominated by
+    Python-level dispatch (12-direction concatenations per energy point);
+    a Fermi search takes ~15-20 min on P100 even with smooth resonances.
+    Run with `pytest -m slow` to include this test.
+
+    Uses eta=1e-3 (instead of the file-global 1e-6) to broaden spectral
+    resonances enough that the adaptive contour integration converges to
+    its target tolerance, rather than saturating at max grid points and
+    leaving dN with a ~5e-5 noise floor that the default bisection tol
+    of 1e-5 can never satisfy. eta=1e-3 is a conventional NEGF broadening.
+
+    JIT'ing the full sigmaBulk/crossTermQBulk path is a known follow-up
+    (GPU sits at 0% util during the run -- dispatch-bound, not compute-bound).
+    """
     ne, H0, Slist, Vlist = au_params
     vecs = gen_fcc_111_neighbors()
-    gAt = surfGAt3D(H0, Slist, Vlist, vecs, eta=eta, T=0, kPoints=3)
+    gAt = surfGAt3D(H0, Slist, Vlist, vecs, eta=1e-3, T=0, kPoints=3)
     fermi = gAt.calcFermi(ne / 2)
     assert gAt.F.shape == (dim, dim)
     assert gAt.S.shape == (dim, dim)

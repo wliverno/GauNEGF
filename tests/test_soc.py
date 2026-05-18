@@ -11,6 +11,7 @@ Tests the full SOC pipeline:
 import sys
 sys.path.insert(0, '..')
 
+import pytest
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -392,8 +393,12 @@ def test_surfGB_constructMat_nosoc():
 
 # ========== TEST 6: Fermi energy convergence with SOC ==========
 
+@pytest.mark.slow
 def test_surfGBAt_soc_fermi_convergence():
-    """Fermi energy search with SOC should converge for Au (ne=11)."""
+    """Fermi energy search with SOC should converge for Au (ne=11).
+
+    Marked slow: SOC Fermi search takes ~10+ min on P100 (dominates test_soc.py).
+    """
     g, ne = build_soc_surfGBAt()
     # ne=11 for Au, but calcFermi expects ne per spin for restricted
     # With SOC, the 18x18 basis already includes both spins

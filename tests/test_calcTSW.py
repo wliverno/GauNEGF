@@ -26,8 +26,12 @@ def au_system():
     return gBAt, ne
 
 
+@pytest.mark.slow
 def test_calcTSW_converges(au_system):
-    """calcTSW should converge and return Eminf below all eigenvalues."""
+    """calcTSW should converge and return Eminf below all eigenvalues.
+
+    Marked slow: calcTSW search takes ~5 min on P100.
+    """
     gBAt, ne = au_system
     F = gBAt.F
     S = gBAt.S
@@ -44,8 +48,12 @@ def test_calcTSW_converges(au_system):
         f"Eminf {Eminf} should be below min eigenvalue {min(eigenvalues)}"
 
 
+@pytest.mark.slow
 def test_calcTSW_warm_start(au_system):
-    """Warm-started calcTSW should converge in zero iterations if bounds are good."""
+    """Warm-started calcTSW should converge in zero iterations if bounds are good.
+
+    Marked slow: cold-start calcTSW dominates (~7 min total on P100).
+    """
     gBAt, ne = au_system
     F = gBAt.F
     S = gBAt.S

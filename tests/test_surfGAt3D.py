@@ -6,6 +6,7 @@ Tests the atomic-level 3D Green's function calculator without requiring BinAr ob
 import sys
 sys.path.insert(0, '..')
 
+import pytest
 import jax
 import jax.numpy as jnp
 from jax.numpy import linalg as LA
@@ -199,6 +200,21 @@ def gen_fcc_111_neighbors():
         all_vectors.append(-all_vectors[i])
 
     return all_vectors
+
+
+@pytest.fixture(scope="module")
+def g_atom_3d():
+    """surfGAt3D instance built from Au.bethe parameters.
+
+    Uses a small kPoints=5 mesh for speed: these tests check structure
+    (shapes, reciprocal-lattice vectors, sigma counts) rather than k-point
+    convergence, so the coarse mesh is sufficient.
+    """
+    ne, H0, Sdict, Vdict = read_bethe_params('Au')
+    vecs = gen_fcc_111_neighbors()
+    Slist = [construct_mat(Sdict, d) for d in vecs]
+    Vlist = [construct_mat(Vdict, d) for d in vecs]
+    return surfGAt3D(H0, Slist, Vlist, vecs, eta, T=0, kPoints=5)
 
 
 def test_reciprocal_lattice(g_atom_3d):
@@ -482,27 +498,20 @@ def test_sigma_count(g_atom_3d):
     print("="*60)
 
     E = 0.0  # Use arbitrary energy
-    try:
-        sig = g_atom_3d.sigma(E, conv=1e-3, mix=0.1)
+    # sigma(E, i) is the contact-level wrapper (i=0 for single bulk contact).
+    sig = g_atom_3d.sigma(E, 0)
+    print(f"\nReturn value shape:")
+    print(f"  sigma shape: {sig.shape} (expect {dim} x {dim})")
+    assert sig.shape == (dim, dim), \
+        f"sigma should return {dim}x{dim}, got {sig.shape}"
 
-        print(f"\nReturn value shape:")
-        print(f"  sigma shape: {sig.shape} (expect {dim} x {dim})")
+    # sigmaSurf exposes the active_dirs subset API.
+    sig_sub = g_atom_3d.sigmaSurf(E, active_dirs=[3, 4, 5], conv=1e-3, mix=0.1)
+    print(f"  sigmaSurf([3,4,5]) shape: {sig_sub.shape} (expect {dim} x {dim})")
+    assert sig_sub.shape == (dim, dim), \
+        f"sigmaSurf with active_dirs should return {dim}x{dim}, got {sig_sub.shape}"
 
-        assert sig.shape == (dim, dim), \
-            f"sigma should return {dim}x{dim}, got {sig.shape}"
-
-        # Also test with active_dirs subset
-        sig_sub = g_atom_3d.sigma(E, active_dirs=[3, 4, 5], conv=1e-3, mix=0.1)
-        print(f"  sigma([3,4,5]) shape: {sig_sub.shape} (expect {dim} x {dim})")
-
-        assert sig_sub.shape == (dim, dim), \
-            f"sigma with active_dirs should return {dim}x{dim}, got {sig_sub.shape}"
-
-        print(f"\n[PASS] sigma returns correct shape")
-        return True
-    except Exception as e:
-        print(f"\n[FAIL] sigma raised exception: {e}")
-        return False
+    print(f"\n[PASS] sigma returns correct shape")
 
 
 def test_subset_sigma_psd_gamma(g_atom_3d):
@@ -545,7 +554,7 @@ def test_subset_sigma_psd_gamma(g_atom_3d):
 
         for name, dirs in subsets.items():
             # Call sigma with active_dirs -- returns single (dim, dim) matrix
-            sigma_sub = g_atom_3d.sigma(E, active_dirs=dirs, G_AB=G_AB)
+            sigma_sub = g_atom_3d.sigmaSurf(E, active_dirs=dirs, G_AB=G_AB)
             gamma = 1j * (sigma_sub - sigma_sub.conj().T)
             eigs = jnp.linalg.eigvalsh(gamma)
             min_eig = float(jnp.min(eigs))
