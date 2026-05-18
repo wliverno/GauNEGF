@@ -174,6 +174,22 @@ class surfG:
             staus = [None if not bool(jnp.any(stau)) else stau for stau in staus]
         else:
             self.tauFromFock = False
+        # TODO: orthogonal-basis foot-gun. When a user works in a Lowdin-orthogonal
+        # basis they often pass alpha_S=I and beta_S=I (or tau_S=I), meaning
+        # "orthogonal everything". beta_S=I is wrong: in an orthogonal basis the
+        # inter-cell overlap is 0, not I, and beta_S=I makes the periodic contact
+        # overlap S(k) = (1 + 2 cos k) I non-PSD, which corrupts the surface GF
+        # (per-contact TSW collapses to ~0, device sigma is bogus at deep E,
+        # calcEmin reports negative DOS, calcTSW finds wildly wrong Eminf).
+        # Two fixes worth considering:
+        #   (1) Auto-canonicalize: in the matrix-input branch above, detect
+        #       beta_S equal to identity when alpha_S is also identity and warn
+        #       (or treat as zero). Mirror the all-zero -> None canonicalization
+        #       already done in the tauFromFock branch for staus/bOverlaps.
+        #   (2) Add an explicit orthogonal=True flag to scfE.setContact1D that
+        #       overrides aOverlaps/bOverlaps to I and 0 respectively. Removes
+        #       the foot-gun for the common Lowdin-orthogonal case entirely.
+        # See debugging session 2026-05-15 (CNT33_5cell_orthESCF.out).
         self.tauList = taus
         self.stauList = ([None] * len(taus) if staus is None
                          else [None if stau is None else jnp.array(stau) for stau in staus])
