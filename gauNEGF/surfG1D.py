@@ -184,6 +184,13 @@ class surfG:
         # Set up broadening for retarded/advanced Green's function, initialize g
         self.eta = eta
 
+        # Rigid-band shift bookkeeping (used in contactFromFock=False branch).
+        # fermi0 captured on first setF call; dFermi = mu - fermi0 thereafter.
+        # Must be initialized before _setContacts -- regularization can trigger
+        # a debug density calc that calls crossTermQ which reads dFermiList.
+        self.dFermiList = [0.0] * self.num_contacts
+        self.fermi0List = [None] * self.num_contacts
+
         # Set up contact information
         if alphas is None:
             self.contactFromFock = True
@@ -226,10 +233,24 @@ class surfG:
             self.bSList = ([jnp.zeros_like(beta) for beta in betas] if bOverlaps is None
                            else [jnp.zeros_like(beta) if bOverlap is None else jnp.array(bOverlap)
                                  for beta, bOverlap in zip(betas, bOverlaps)])
+        # Initial snapshot so g() works during regularization's debug-density
+        # call (if FERMI_DEBUG). Refreshed below to capture regularized state.
+        self.aList0  = [jnp.array(a) for a in self.aList]
+        self.bList0  = [jnp.array(b) for b in self.bList]
+        self.aSList0 = [jnp.array(s) for s in self.aSList]
+        self.bSList0 = [jnp.array(s) for s in self.bSList]
         self._regularizeContacts()
+        # Final snapshot: intrinsic contact reference state. g/sigma read these
+        # so the rigid-band shift is applied via E only -- aList itself never
+        # mutates post-init in the contactFromFock=False branch.
+        self.aList0  = [jnp.array(a) for a in self.aList]
+        self.bList0  = [jnp.array(b) for b in self.bList]
+        self.aSList0 = [jnp.array(s) for s in self.aSList]
+        self.bSList0 = [jnp.array(s) for s in self.bSList]
 
     def _regularizeContacts(self):
         """Ensure the infinite chain overlap is PSD via congruent eigenvalue clipping.
+        NOTE: This function is currently DISABLED, needs development/debugging
 
         For each contact i, diagonalizes S0 = aSList[i]. If the minimum eigenvalue
         is already >= OVERLAP_EIGENVALUE_RATIO * max(eigenvalue), no transform is
@@ -298,7 +319,6 @@ class surfG:
         of what self.g currently points to (instance vs class attribute).
         """
         self.g = jit(self.__class__.g.__get__(self), static_argnums=(1,))
-        self.sigma = jit(self.__class__.sigma.__get__(self), static_argnums=(1,))
 
     def g(self, E, i, conv=SURFACE_GREEN_CONVERGENCE, relFactor=0.5):#SURFACE_RELAXATION_FACTOR):
         """
@@ -324,10 +344,10 @@ class surfG:
         ndarray
             Surface Green's function matrix for contact i
         """
-        alpha = self.aList[i]
-        Salpha = self.aSList[i]
-        beta = self.bList[i]
-        Sbeta = self.bSList[i]
+        alpha = self.aList0[i]
+        Salpha = self.aSList0[i]
+        beta = self.bList0[i]
+        Sbeta = self.bSList0[i]
 
         # Prepare matrices using JAX
         A = (E+1j*self.eta)*Salpha - alpha
@@ -397,20 +417,28 @@ class surfG:
             self.tauList = tau_temp
             self.stauList = stau_temp
         if self.contactFromFock:
-            # Rebuild aList/bList from new F and re-trace JIT'd functions
+            # Rebuild aList/bList from new F and re-trace JIT'd functions.
+            # _setContacts also refreshes the *List0 snapshots, so g sees the
+            # updated alphas. dFermiList stays at zero -- the Fermi shift is
+            # already baked into the new F.
             self._setContacts()
             self._rejit()
         if not self.contactFromFock:
-            # Track chemical potentials but do NOT shift aList/bList.
-            # The retarded self-energy is independent of chemical potential;
-            # mu enters only through the Fermi function in density integration.
-            if self.fermiList[0] is None:
-                self.fermiList[0] = mu1
-                self.fermiList[-1] = mu2
-            else:
-                for i, mu in zip([0, -1], [mu1, mu2]):
-                    if mu is not None:
-                        self.fermiList[i] = mu
+            # Track chemical potentials and compute rigid-shift dFermi.
+            # Pre-shifting E in sigma/crossTermQ is algebraically identical
+            # to shifting alpha/beta by dFermi*S; mu enters self-energy only
+            # via this shift (and via Fermi function in density integration).
+            mus = [mu1, mu2]
+            for slot, mu in zip([0, -1], mus):
+                if mu is None:
+                    continue
+                if self.fermi0List[slot] is None:
+                    self.fermi0List[slot] = mu
+                    self.fermiList[slot] = mu
+                    self.dFermiList[slot] = 0.0
+                else:
+                    self.fermiList[slot] = mu
+                    self.dFermiList[slot] = mu - self.fermi0List[slot]
 
     def sigma(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
         """
@@ -440,13 +468,17 @@ class surfG:
         inds = self.indsList[i]
         stau = self.stauList[i]
         tau = self.tauList[i]
+        # Pre-shift E for the surface Green's function call only. The device-
+        # contact coupling tau (F_dc block) is not rigid-shifted, so t/bar_t
+        # use raw E. Matches surfGBAt convention.
+        E_shifted = E - self.dFermiList[i]
         t = (-tau) if stau is None else (E*stau - tau)
         bar_t = (-tau.conj().T) if stau is None else (E*stau.conj().T - tau.conj().T)
         n = len(self.aList[i])
         C_mid = self.CList[i][:n, :n]
         t_reg = t @ C_mid
         bar_t_reg = C_mid.conj().T @ bar_t
-        sig = t_reg @ self.g(E, i, conv) @ bar_t_reg
+        sig = t_reg @ self.g(E_shifted, i, conv) @ bar_t_reg
         sigma = jnp.zeros(self.F.shape, dtype=complex)
         sigma = sigma.at[jnp.ix_(inds, inds)].add(sig)
         # De-orthogonalization - TODO: makes sure that alpha/beta also orthogonal!
@@ -471,10 +503,11 @@ class surfG:
         inds = self.indsList[i]
         tau = self.tauList[i]
         n = len(self.aList[i])
+        E_shifted = E - self.dFermiList[i]
         t = E * stau - tau
         C_mid = self.CList[i][:n, :n]
         t_reg = t @ C_mid
-        g_surf = self.g(E, i, conv)
+        g_surf = self.g(E_shifted, i, conv)
         bar_t = E * stau.conj().T - tau.conj().T
         bar_t_reg = C_mid.conj().T @ bar_t
         Q_fwd = t_reg @ g_surf @ stau.conj().T

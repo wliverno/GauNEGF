@@ -184,13 +184,15 @@ class NEGFE(NEGF):
         return inds
 
     def _symmetrize_F(self):
-        if not getattr(self, '_symmetrize_contacts', False):
-            return
         lInd = self.lInd
         rInd = self.rInd
-        avg = (self.F[np.ix_(lInd, lInd)] + self.F[np.ix_(rInd, rInd)]) / 2
-        self.F[np.ix_(lInd, lInd)] = avg
-        self.F[np.ix_(rInd, rInd)] = avg
+        if getattr(self.g, 'contactFromFock', False):
+            self.F[np.ix_(lInd, lInd)] = np.asarray(self.g.aList[0])/har_to_eV
+            self.F[np.ix_(rInd, rInd)] = np.asarray(self.g.aList[-1])/har_to_eV
+        if getattr(self, '_symmetrize_contacts', True):
+            avg = (self.F[np.ix_(lInd, lInd)] + self.F[np.ix_(rInd, rInd)]) / 2
+            self.F[np.ix_(lInd, lInd)] = avg
+            self.F[np.ix_(rInd, rInd)] = avg
 
     # Set constant sigma contact for testing or adding non-zero temperature
     def setSigma(self, lContact=None, rContact=None, sig=-0.1j, sig2=None, T=TEMPERATURE):
