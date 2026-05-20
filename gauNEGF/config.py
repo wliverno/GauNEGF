@@ -20,8 +20,8 @@ FERMI_DEBUG=True                    # Debugging for fermi search functions
 # Integration Parameters
 ADAPTIVE_INTEGRATION_TOL = 1e-4     # Adaptive integration tolerance
 N_KT = 10                           # Number of kT for integration limits
-ENERGY_MIN = -1e6                   # eV - lower bound for energy integration
-MAX_CYCLES = 100                   # Maximum iteration cycles
+ENERGY_MIN = -1e6                   # eV - lower bound for energy integration - MUST BE NEGATIVE
+MAX_CYCLES = 100                    # Maximum iteration cycles
 MAX_GRID_POINTS = 500               # Maximum number of grid points
 
 # SCF Parameters

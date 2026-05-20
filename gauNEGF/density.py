@@ -911,11 +911,19 @@ def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES, Emin=None):
     return Emin
 
 def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=FERMI_SEARCH_CYCLES,
-            Eminf=None, TSW=None):
+            Eminf=None, TSW=None, Emin_floor=ENERGY_MIN):
     """Calculate integration bounds by stabilizing total spectral weight.
 
-    Iteratively lowers Eminf until Tr(rho @ S) + delta_N
-    stabilizes, guaranteeing that bounds bracket all occupied states.
+    Iteratively doubles |Eminf| (Eminf <- 2*Eminf) until Tr(rho @ S) at the
+    truncated contour matches a reference TSW computed at the configured
+    Emin_floor. Uses a one-sided convergence test (TSW_ref - TSW_new < tol)
+    so the loop only widens while the new contour is undercounting relative
+    to the reference. dTSW < 0 (reference is *smaller* than the truncated
+    contour) is the signature of a deep negative-weight pseudo-pole inside
+    the reference contour, induced by asymptotically E-linear Sigma(E)
+    from a non-orthogonal contact (see docs/tsw_convergence_notes.md);
+    in that case the truncated contour is the physically correct choice
+    and convergence is accepted to leave the pseudo-pole excluded.
 
     Parameters
     ----------
@@ -926,18 +934,24 @@ def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=FERMI_SEARCH_CYCLES,
     g : surfG object
         Surface Green's function calculator.
     tol : float, optional
-        Convergence tolerance for TSW change (default: FERMI_CALCULATION_TOL).
+        Convergence tolerance for relative TSW change (default: FERMI_CALCULATION_TOL).
     maxN : int, optional
-        Maximum expansion iterations (default: MAX_CYCLES).
+        Maximum doubling iterations (default: FERMI_SEARCH_CYCLES).
     Eminf : float or None, optional
         Warm-start lower bound in eV. If None, initialized from min eigenvalue.
     TSW : float or None, optional
-        Warm-start spectral weight. If None, recomputes reference TSW from scratch.
+        Warm-start spectral weight. If None, recomputed from scratch using
+        Emin_floor as the reference contour bound.
+    Emin_floor : float, optional
+        Hard lower limit for Eminf in eV (default: ENERGY_MIN from config).
+        Also used as the reference contour bound (-/+) when TSW is recomputed.
+        If the doubling loop would expand past this limit without converging,
+        the function warns and returns the current Eminf.
 
     Returns
     -------
     tuple (float, float)
-        (Eminf, TSW) -- converged lower bound and final spectral weight.
+        (Eminf, TSW) -- converged lower bound and reference spectral weight.
     """
     # Initialize from eigenvalues if no warm-start values
     if Eminf is None:
@@ -946,27 +960,48 @@ def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=FERMI_SEARCH_CYCLES,
         Eminf = float(min(eigs))
 
     if TSW is None:
-        P, delta_N = densityComplex(F, S, g, -1e6, 1e6, tol, T=0)
+        P, _ = densityComplex(F, S, g, Emin_floor, -Emin_floor, tol, T=0)
         TSW_ref = np.trace(P @ g.S).real
     else:
         TSW_ref = TSW+0.0
 
     print(f'Lower Bound Search: TSW={TSW_ref:.2E}')
     for _ in range(maxN):
-        # Emax is passed as mu: the contour from Emin to Emax encloses all
-        # poles of G^R in that window, yielding the total spectral weight.
-        P, delta_N = densityComplex(F, S, g, Eminf, 1e6, tol, T=0)
+        P, _ = densityComplex(F, S, g, Eminf, -Emin_floor, tol, T=0)
         TSW_new = np.trace(P @ g.S).real
-        if ((TSW_ref - TSW_new)/TSW_ref) < tol:
+        dTSW = TSW_ref - TSW_new
+        # One-sided test: the contour at Eminf has captured all relevant
+        # spectral weight when its TSW reaches (or exceeds) the reference.
+        # dTSW < 0 means the reference (deeper) contour is *smaller* than
+        # the truncated one, which only happens when the reference encloses
+        # a deep negative-weight pseudo-pole that the truncated contour
+        # excludes. See docs/tsw_convergence_notes.md; the truncated
+        # contour is the physically correct choice in that case.
+        if dTSW / abs(TSW_ref) < tol:
             if FERMI_DEBUG:
+                if dTSW < 0:
+                    print(f'calcTSW: dTSW<0 detected at Eminf={Eminf:.2f}, '
+                          f'dTSW={dTSW:.2E}. Deep pseudo-pole inside reference '
+                          f'contour (likely asymptotically E-linear contact '
+                          f'Sigma making S_eff = S - X_L - X_R non-PSD). '
+                          f'Truncated contour excludes it; this is the '
+                          f'intended outcome.')
                 print(f'calcTSW converged: Eminf={Eminf:.2f}, TSW={TSW_new:.4f}')
-            return Eminf, TSW_ref
+            return Eminf, TSW_new
         elif FERMI_DEBUG:
-            print(f'DEBUG: Eminf={Eminf:.2f}, dTSW={TSW_ref-TSW_new:.2E}')
-        Eminf *= 2.0
+            print(f'DEBUG: Eminf={Eminf:.2f}, dTSW={dTSW:.2E}')
 
-    print(f'Warning: calcTSW did not converge after {maxN} iterations ')
-    print(f'calcTSW: Eminf={Eminf:.2f}, dTSW={TSW_ref-TSW_new:.2E}')
+        # Check that the next doubling stays within Emin_floor.
+        next_Eminf = Eminf * 2.0
+        if next_Eminf < Emin_floor:
+            print(f'Warning: calcTSW would expand Eminf past Emin_floor ({Emin_floor:.2e}).')
+            print(f'  Last Eminf={Eminf:.2e}, dTSW={dTSW:.2E}.')
+            print(f'  If TSW is still undercounted, lower Emin_floor in config.')
+            return Eminf, TSW_ref
+        Eminf = next_Eminf
+
+    print(f'Warning: calcTSW did not converge after {maxN} iterations')
+    print(f'  Last Eminf={Eminf:.2e}, dTSW={dTSW:.2E}')
     return Eminf, TSW_ref
 
 def integralFit(F, S, g, mu, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_TOL, T=TEMPERATURE, maxN=MAX_CYCLES):
