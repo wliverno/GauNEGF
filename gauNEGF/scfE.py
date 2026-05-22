@@ -261,6 +261,11 @@ class NEGFE(NEGF):
         """
         Set integration parameters for density calculation.
 
+        DEPRECATED: production runs use adaptive integration in FockToP which
+        recomputes Emin, Eminf, and Eminf_floor (calcPseudoPoleFloor) each
+        SCF cycle. This routine is preserved for the fixed-grid (N1/N2) path
+        only; calls in the default tol path are redundant with FockToP.
+
         Parameters
         ----------
         N1 : int, optional
@@ -276,7 +281,12 @@ class NEGFE(NEGF):
         """
         if Emin is None and tol is not None:
             self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, tol=tol)
-            self.Eminf, self.TSW = calcTSW(self.F*har_to_eV, self.S, self.g, Eminf=self.Emin, tol=tol)
+            # Pseudo-pole detection: principled floor for calcTSW (replaces ENERGY_MIN).
+            # See docs/pseudo_pole_handling.md.
+            Eminf_floor = calcPseudoPoleFloor(self.F*har_to_eV, self.S, self.g)
+            self.Eminf, self.TSW = calcTSW(self.F*har_to_eV, self.S, self.g,
+                                           Eminf=self.Emin, tol=tol,
+                                           Emin_floor=Eminf_floor)
             self.tol = tol
         else:
             self.Emin = Emin
@@ -386,23 +396,26 @@ class NEGFE(NEGF):
         self._symmetrize_F()
         print('Calculating lower density matrix:')
         if self.N2 is None:
-            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, Emin=self.Emin)
-            Eminf_ = min(self.Eminf,self.Emin) if self.Eminf != -1e6 else self.Emin
-            self.Eminf, self.TSW = calcTSW(self.F*har_to_eV, self.S, self.g, Eminf=Eminf_, TSW=self.TSW, tol=self.tol)
-            P, _delta_N_lower = densityComplex(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
+            F_eV = self.F*har_to_eV
+            # Pseudo-pole detection: principled lower limit for calcTSW and
+            # cap on calcEmin so the contour cannot dive past asymptotically
+            # E-linear Sigma pseudo-poles (see docs/pseudo_pole_handling.md).
+            # Recomputed every cycle since F drifts during SCF; the per-cycle
+            # cost is small relative to the contour density integrals.
+            Eminf_floor = calcPseudoPoleFloor(F_eV, self.S, self.g)
+            self.Emin = calcEmin(F_eV, self.S, self.g, Emin=self.Emin)
+            self.Emin = max(self.Emin, Eminf_floor)
+            Eminf_ = min(self.Eminf, self.Emin) if self.Eminf != ENERGY_MIN else self.Emin
+            Eminf_ = max(Eminf_, Eminf_floor)
+            # TSW is not warm-started: when Eminf_floor moves between cycles
+            # the cached TSW_ref no longer matches the new reference contour.
+            self.Eminf, self.TSW = calcTSW(F_eV, self.S, self.g, Eminf=Eminf_,
+                                           tol=self.tol, Emin_floor=Eminf_floor)
+            P, _delta_N_lower = densityComplex(F_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
         else:
             P, _delta_N_lower = densityComplexN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
         nLower = np.trace(self.S@P).real + _delta_N_lower
-        if nLower >= 1 and self.N2 is None:
-            print(f'Found {nLower:.2f} electrons below Emin, adjusting integration limits...')
-            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g)
-            Eminf_ = min(self.Eminf,self.Emin)
-            self.Eminf, self.TSW = calcTSW(self.F*har_to_eV, self.S, self.g, Eminf=Eminf_, tol=self.tol)
-            P, _delta_N_lower = densityComplex(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
-            nLower = np.trace(self.S@P).real + _delta_N_lower
-            if nLower >= 1:
-                print(f'WARNING: {nLower:.2f} electrons still below Emin!')
-            
+
         # Helper function for densityComplex()
         def compContourP2(mu):
                 if self.N1 is not None:

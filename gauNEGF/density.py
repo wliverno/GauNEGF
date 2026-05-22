@@ -925,6 +925,10 @@ def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=FERMI_SEARCH_CYCLES,
     in that case the truncated contour is the physically correct choice
     and convergence is accepted to leave the pseudo-pole excluded.
 
+    The upper contour bound is held at -ENERGY_MIN (the wide config bound)
+    independently of Emin_floor so that tightening Emin_floor (e.g. via
+    calcPseudoPoleFloor) does not also chop the upper spectrum.
+
     Parameters
     ----------
     F : ndarray
@@ -941,18 +945,24 @@ def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=FERMI_SEARCH_CYCLES,
         Warm-start lower bound in eV. If None, initialized from min eigenvalue.
     TSW : float or None, optional
         Warm-start spectral weight. If None, recomputed from scratch using
-        Emin_floor as the reference contour bound.
+        Emin_floor as the reference contour lower bound.
     Emin_floor : float, optional
         Hard lower limit for Eminf in eV (default: ENERGY_MIN from config).
-        Also used as the reference contour bound (-/+) when TSW is recomputed.
+        Also used as the reference contour lower bound when TSW is recomputed.
         If the doubling loop would expand past this limit without converging,
-        the function warns and returns the current Eminf.
+        the function warns and returns the current Eminf. Tighten this via
+        calcPseudoPoleFloor to keep the reference contour from straddling
+        deep pseudo-poles.
 
     Returns
     -------
     tuple (float, float)
         (Eminf, TSW) -- converged lower bound and reference spectral weight.
     """
+    # Upper contour bound stays at the wide config bound regardless of
+    # Emin_floor; only the lower bound moves with pseudo-pole detection.
+    Emax = -ENERGY_MIN
+
     # Initialize from eigenvalues if no warm-start values
     if Eminf is None:
         D, _ = eigh(inv(S) @ F)
@@ -960,14 +970,14 @@ def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=FERMI_SEARCH_CYCLES,
         Eminf = float(min(eigs))
 
     if TSW is None:
-        P, _ = densityComplex(F, S, g, Emin_floor, -Emin_floor, tol, T=0)
+        P, _ = densityComplex(F, S, g, Emin_floor, Emax, tol, T=0)
         TSW_ref = np.trace(P @ g.S).real
     else:
         TSW_ref = TSW+0.0
 
     print(f'Lower Bound Search: TSW={TSW_ref:.2E}')
     for _ in range(maxN):
-        P, _ = densityComplex(F, S, g, Eminf, -Emin_floor, tol, T=0)
+        P, _ = densityComplex(F, S, g, Eminf, Emax, tol, T=0)
         TSW_new = np.trace(P @ g.S).real
         dTSW = TSW_ref - TSW_new
         # One-sided test: the contour at Eminf has captured all relevant
@@ -1003,6 +1013,109 @@ def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=FERMI_SEARCH_CYCLES,
     print(f'Warning: calcTSW did not converge after {maxN} iterations')
     print(f'  Last Eminf={Eminf:.2e}, dTSW={dTSW:.2E}')
     return Eminf, TSW_ref
+
+def calcPseudoPoleFloor(F, S, g, buffer=100.0, E1=-1e3, E2=-1e4):
+    """Compute a safe Eminf floor by detecting pseudo-poles of the device GF.
+
+    Pseudo-poles are spurious real-axis poles of G_DD^R(E) = (E*S - F - Sigma)^{-1}
+    that arise from the asymptotically E-linear piece of Sigma when the contact
+    is non-orthogonal. If the contour integration captures them, P_DD acquires
+    negative natural-orbital occupations and is no longer DFT-compatible.
+
+    All matrices are treated as complex Hermitian throughout, so this works
+    for GHF / SOC where F, S, X, Sigma_0 have nontrivial imaginary parts as
+    well as the real-symmetric closed-shell case.
+
+    See docs/pseudo_pole_handling.md for the math and AuBetheFerrocene
+    empirical verification.
+
+    Algorithm:
+        1. Two-point asymptotic probe of Sigma:
+             X       = (Sigma(E2) - Sigma(E1)) / (E2 - E1)
+             Sigma_0 = Sigma(E1) - E1 * X
+        2. Form the effective generalized eigenproblem H_eff v = E S_eff v
+           that governs deep-|E| poles of G_DD^R:
+             H_eff = F + Sigma_0       (Hermitian)
+             S_eff = S - X             (Hermitian, possibly indefinite)
+        3. Reduce to the standard non-Hermitian eigproblem T = S_eff^{-1} H_eff
+           and solve with the JAX general eig (via gauNEGF.utils.eig).
+           Eigenvalues are real for Hermitian (H, S) even with indefinite S;
+           take Re(...) to drop floating-point imaginary noise.
+        4. Classify each eigenvector by its Hermitian S_eff-norm:
+             v^H S_eff v > 0  -> physical pole (not returned)
+             v^H S_eff v < 0  -> pseudo-pole (returned)
+           Number of pseudo-poles equals the number of negative eigenvalues
+           of S_eff (Sylvester's law of inertia).
+        5. Return max(E_pseudopole) + buffer (the shallowest safe Eminf),
+           or ENERGY_MIN if no pseudo-poles exist (orthogonal contact, or
+           a well-conditioned device where S - X stays positive-definite).
+
+    Parameters
+    ----------
+    F : ndarray (N, N)
+        Device Fock matrix in eV. Complex Hermitian for GHF/SOC, real-symmetric
+        otherwise; both are handled.
+    S : ndarray (N, N)
+        Device overlap matrix. Complex Hermitian, positive-definite.
+    g : surfG-like object
+        Surface Green's function calculator with sigmaTot(E) method.
+    buffer : float, optional
+        Energy gap (eV) added above the highest pseudo-pole. Default 100 eV.
+    E1, E2 : float, optional
+        Deep probe energies (eV) for asymptotic extraction. Default -1e3, -1e4.
+
+    Returns
+    -------
+    Eminf_floor : float
+        Safe lower bound for Eminf in eV. Returns ENERGY_MIN from config if
+        no pseudo-poles are detected.
+
+    Notes
+    -----
+    Buffer choice trade-off: too small risks numerical noise from near-singular
+    resolvent at contour points close to pseudo-poles; too large pushes the
+    reference TSW contour unnecessarily deep. 100 eV is well above the
+    adaptive integration's discretization scale for typical Au-based systems
+    where pseudo-poles are at hundreds-to-thousands of eV depth.
+
+    Why we do NOT take Re(...) of F, S, X, Sigma_0: for Hermitian A, A.real
+    drops the antisymmetric imaginary part and gives a SYMMETRIC matrix that
+    is not equal to A. Eigenvalues of (Re(F), Re(S)) do not match eigenvalues
+    of (F, S) when the imaginary part is non-trivial -- this matters for
+    GHF/SOC where Sigma's imaginary structure contributes to pseudo-pole
+    locations.
+    """
+    # Two-point asymptotic probe of Sigma (preserves complex-Hermitian structure).
+    Sigma1 = jnp.asarray(g.sigmaTot(E1))
+    Sigma2 = jnp.asarray(g.sigmaTot(E2))
+    X = (Sigma2 - Sigma1) / (E2 - E1)
+    Sigma_0 = Sigma1 - E1 * X
+
+    # Effective generalized (H, S) for the deep-|E| asymptotic G_DD^R.
+    H_eff = jnp.asarray(F) + Sigma_0
+    S_eff = jnp.asarray(S) - X
+
+    # Reduce (H, S) generalized problem -- where S may be INDEFINITE -- to the
+    # standard non-Hermitian eigproblem of T = S^{-1} H. utils.eig (jit-wrapped
+    # jnp.linalg.eig) handles complex / non-Hermitian T via LAPACK.
+    eigvals_c, eigvecs_c = eig(inv(S_eff) @ H_eff)
+
+    # Eigenvalues are real for Hermitian (H, S) even with indefinite S.
+    # Real-part is to discard numerical imaginary noise from JAX's complex-typed
+    # return, not a physics approximation.
+    eigvals = jnp.real(eigvals_c)
+
+    # Hermitian S_eff-norm: v^H S v (use conj() for the H-conjugate transpose).
+    # v^H S v is real for Hermitian S; we wrap in real() just to drop the
+    # exact-zero imaginary part from einsum.
+    norms = jnp.real(jnp.einsum('in,ij,jn->n',
+                                 eigvecs_c.conj(), S_eff, eigvecs_c))
+
+    pp_energies = np.asarray(jnp.sort(eigvals[norms < 0]))
+
+    if len(pp_energies) == 0:
+        return float(ENERGY_MIN)
+    return float(np.max(pp_energies)) + buffer
 
 def integralFit(F, S, g, mu, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_TOL, T=TEMPERATURE, maxN=MAX_CYCLES):
     """

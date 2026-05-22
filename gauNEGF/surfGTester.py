@@ -10,7 +10,7 @@ or when computational efficiency is prioritized over full energy dependence.
 
 import numpy as np
 from gauNEGF.matTools import formSigma
-from gauNEGF.config import SURFACE_GREEN_CONVERGENCE
+from gauNEGF.config import SURFACE_GREEN_CONVERGENCE, ETA
 
 class surfGTest:
     """
@@ -82,6 +82,7 @@ class surfGTest:
         self.N = len(Fock)
         self.indsList = indsList
         self.num_contacts = len(indsList)
+        self.eta = ETA
         self.sig = [np.zeros((self.N, self.N), dtype=complex),
                     np.zeros((self.N, self.N), dtype=complex)]
         if sig1 is not None:

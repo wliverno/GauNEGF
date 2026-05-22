@@ -360,16 +360,31 @@ def constructSOCterm(lambdas):
         return V
 
     def genLSMatrix(l):
-        """Generate L·S matrix for angular momentum l."""
+        """Generate L.S matrix for angular momentum l in INTERLEAVED basis.
+
+        Returns a (2*(2l+1)) x (2*(2l+1)) matrix in the basis
+        (orb_0 up, orb_0 dn, orb_1 up, orb_1 dn, ..., orb_(2l) up, orb_(2l) dn),
+        matching the kron(H0, eye(2)) convention used everywhere else.
+
+        Earlier versions (1) used the wrong direction of the spherical-to-real
+        transform and (2) returned a spin-major-within-the-L-block matrix that
+        was then added to an interleaved kron(H0, I2) -- a basis mismatch that
+        placed SOC matrix elements on the wrong orbital pairs.
+        """
         Lx, Ly, Lz = LOps(l)
-        orbs = genOrbList(l)
-        # Transform to real orbital basis using Hermitian conjugate (dagger)
-        Lx = orbs.conj().T @ Lx @ orbs
-        Ly = orbs.conj().T @ Ly @ orbs
-        Lz = orbs.conj().T @ Lz @ orbs
-        # Construct L·S = 0.5 * [[Lz, L-], [L+, -Lz]]
-        # where L- = Lx - i*Ly and L+ = Lx + i*Ly
-        return 0.5*np.block([[Lz, Lx-1j*Ly], [Lx+1j*Ly, -Lz]])
+        V = genOrbList(l)
+        # genOrbList returns V where V[i, j] = component of real orbital i in
+        # spherical eigenstate j (i.e. |real_i> = sum_j V[i,j] |Y_{m_j}>).
+        # Therefore A_real[i,k] = <real_i|A|real_k> = sum_{m,n} V*[i,m] A[m,n] V[k,n]
+        #                       = (V.conj() @ A @ V.T)[i,k].
+        Lx = V.conj() @ Lx @ V.T
+        Ly = V.conj() @ Ly @ V.T
+        Lz = V.conj() @ Lz @ V.T
+        # L.S = 0.5 * sum_alpha (L_alpha (x) sigma_alpha) with np.kron giving
+        # the interleaved ordering [orbital_i, spin_s] -> 2*i + s.
+        return 0.5 * (np.kron(Lx, sigx)
+                     + np.kron(Ly, sigy)
+                     + np.kron(Lz, sigz))
 
     # s (l=0): L·S is always zero
     LdotS_s = genLSMatrix(0)  # 2x2 zero matrix
