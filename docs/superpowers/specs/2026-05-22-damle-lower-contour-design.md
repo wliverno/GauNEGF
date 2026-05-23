@@ -134,9 +134,48 @@ the spectrum edge for Damle accuracy; large enough that broadening
 does not push physical density across the boundary. Noteably, this 
 replaces the hardcoded buffer in scf.py as a tunable parameter
 
+### 2.6 Cache freshness under mu changes
+
+`surfG.setF(F, muL, muR)` applies a rigid-band Fermi shift per contact:
+`dFermi_i = mu_i - fermi0_i`, and the surface Green's function is
+evaluated at `g_surf(E - dFermi_i)` while the device-contact coupling
+`t = E*stau - tau` stays at raw E. Asymptotically (g_surf ~ G_1/E +
+O(1/E^2)) a Taylor expansion gives:
+
+    sigma_i_after(E) = sigma_i_orig(E) + dFermi_i * X_i + O(1/E)     (8)
+
+where X_i = stau_i @ G_1 @ stau_i.T is the per-contact slope of the
+asymptotic expansion. Implications:
+
+  - X_asymp_total = sum_i X_i is INVARIANT under any mu shift.
+  - S_eff = S - X_asymp is INVARIANT.
+  - Y_eff = S_eff^(-1/2) is INVARIANT.
+  - Sigma_0_total shifts by sum_i X_i * dFermi_i. Per-contact X_i
+    is nonzero only on the [inds_i, inds_i] block, so the shift is
+    naturally block-diagonal.
+
+Consequence: any code path that changes mu through setF
+(notably `NEGFE.setVoltage`) MUST trigger a refit of `Sigma_0` before
+the next `damleLowerDensity` call, or the lower contour integrates
+with a stale Sigma_0 against the current contact state. The simplest
+fix is to re-call `_initAsymptoticSigma` at the end of `setVoltage`;
+cost is dominated by three sigmaTot probes which converge quickly
+well below the band. See `tests/test_setF_mu_invariance.py` for the
+empirical verification (linear theory matches at <1% rel err) and
+the failing-then-passing TDD test that drives the setVoltage refit.
+
 ## 3. Components
 
 ### 3.1 New: `damleLowerDensity` in `gauNEGF/density.py`
+
+Note: implementation adds the standard NEGF retarded-Green's-function
+regularization `+i*ETA*I` to `H_eff` (where `ETA` is the canonical
+broadening constant in `gauNEGF/config.py`). This guarantees a nonzero
+anti-Hermitian piece so the analytic integrator's `1/(DD - DD^H)` factor
+stays finite when `Sigma_0` happens to have negligible anti-Hermitian
+piece (a degenerate case in production but trivial to handle once
+flagged). It does NOT inject a magic constant -- it reuses an already-
+present canonical parameter with documented physical meaning.
 
     damleLowerDensity(F_eV, Y_eff, Sigma_0, buffer,
                       ENERGY_MIN_=ENERGY_MIN)
@@ -155,19 +194,26 @@ call that follows.
 
 ### 3.2 New: `_initAsymptoticSigma` on `NEGFE` in `gauNEGF/scfE.py`
 
-Called once from `setContact1D` / `setContacts` after `self.g` exists.
-Sets:
+Called from `setContact1D` / `setContactBethe` / `setSigma` after
+`self.g` exists. ALSO called from `setVoltage` after `self.g.setF`
+to refresh stale `Sigma_0` (see 2.6). Sets/refreshes:
 
     self.Sigma_0   # asymptotic constant from (1)
     self.X_asymp   # asymptotic linear coefficient from (1)
     self.S_eff     # S - X_asymp
     self.Y_eff     # S_eff^(-1/2), possibly complex
+    self.damle_buffer  # initialized to EMIN_BUFFER on first call only,
+                       # preserved on re-fit so user customization survives
 
 Implementation: three deep probes (E1 = -1e3, E2 = -1e4, E3 = -1e5
 defaults), fit a line through Sigma(E_i), report residual to caller,
 warn if asymptotic linearity is poor (||residual|| / ||Sigma|| > 1%
 at the deepest probe). Computes `Y_eff = S_eff^(-1/2)` using the
 new utils helper described in 3.3.
+
+On re-fit calls (from setVoltage), X_asymp/S_eff/Y_eff are recomputed
+but mathematically guaranteed invariant (see 2.6); the redundant work
+is accepted for code simplicity over per-component caching.
 
 ### 3.3 Extend `gauNEGF/utils.py`: indefinite-tolerant matrix power
 
@@ -327,6 +373,13 @@ instead check that the new path produces:
     round-trips correctly for PSD and indefinite inputs; output is
     symmetric to machine precision; matches the PSD-only
     `fractional_matrix_power` exactly when S is PSD.
+
+  - `tests/test_setF_mu_invariance.py`: empirical verification of
+    the rigid-band shift math from 2.6. Asserts X_asymp / S_eff /
+    Y_eff invariant under setF mu changes (any bias), Sigma_0 shifts
+    by predicted amount (per-contact, block-diagonal). Includes the
+    TDD test that drives the setVoltage refit (failing before the
+    fix, passing after).
 
 ### 6.2 Removed test files
 

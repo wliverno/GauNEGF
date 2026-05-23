@@ -347,6 +347,77 @@ def density(V, Vc, D, Gam, Emin, mu):
     den = V@ prefactor @ V.conj().T
     return den
 
+def damleLowerDensity(F_eV, Y_eff, Sigma_0, buffer, ENERGY_MIN_=ENERGY_MIN):
+    """Analytic Damle density on the lower contour [ENERGY_MIN_, Emin].
+
+    Builds the effective-orthogonal Fock matrix Fbar = Y_eff @ (F + Sigma_0) @ Y_eff,
+    diagonalizes it once, picks Emin = min(D.real) - buffer from that same
+    diagonalization, builds the effective broadening matrix, calls the existing
+    density() analytic integrator, and back-transforms to the AO basis.
+
+    Parameters
+    ----------
+    F_eV : ndarray (N, N)
+        Device Fock matrix in eV.
+    Y_eff : ndarray (N, N)
+        S_eff^(-1/2), where S_eff = S - X_asymp. May be complex if S_eff is
+        indefinite. Computed once at contact setup by NEGFE._initAsymptoticSigma.
+    Sigma_0 : ndarray (N, N)
+        Asymptotic constant part of the contact self-energy. May be complex
+        (anti-Hermitian piece gives nonzero broadening).
+    buffer : float
+        Positive distance (eV) below min(D.real) used to place Emin.
+        Tunable via NEGFE.damle_buffer (default from config.EMIN_BUFFER).
+    ENERGY_MIN_ : float, optional
+        Lower bound of the lower-contour integral in eV. Defaults to the
+        global config.ENERGY_MIN (typically -1e6).
+
+    Returns
+    -------
+    P_lower : ndarray (N, N)
+        Density matrix contribution from the deep tail [ENERGY_MIN_, Emin]
+        in the AO basis. Complex if Y_eff is complex.
+    Emin : float
+        Upper bound of the lower contour. The caller uses this as the lower
+        bound of the upper-contour integral [Emin, mu].
+
+    Notes
+    -----
+    Pure function: no state, no cross-term return. The Mulliken cross-term
+    delta_N that densityComplex returns is subsumed into the S_eff framework
+    here (verified by the pre-implementation gate test
+    tests/test_damle_seff_gate.py).
+    """
+    F_eV = np.asarray(F_eV)
+    Y_eff = np.asarray(Y_eff)
+    Sigma_0 = np.asarray(Sigma_0)
+    N = F_eV.shape[0]
+
+    # Build effective-orthogonal Fock and broadening.
+    # The +i*ETA*I shift is the standard NEGF retarded-Green's-function
+    # regularization (G_R(E) = 1/((E+i*eta)*I - H - Sigma_R)); it guarantees
+    # nonzero anti-Hermitian piece so the analytic integrator's
+    # 1/(DD - DD^H) factor is finite. ETA is the canonical broadening
+    # constant defined in gauNEGF/config.py (default 1e-5 eV).
+    H_eff = F_eV + Sigma_0 + 1j * ETA * np.eye(N)
+    Fbar = Y_eff @ H_eff @ Y_eff
+    Gam = (H_eff - H_eff.conj().T) * 1j
+    GamBar = Y_eff @ Gam @ Y_eff
+
+    # Diagonalize Fbar once; D supplies both the integrand and Emin.
+    D, V = np.linalg.eig(Fbar)
+    Vc = np.linalg.inv(V.conj().T)
+
+    # Emin policy (spec 2.5): below every Re part by `buffer`.
+    Emin = float(np.min(D.real)) - float(buffer)
+
+    # Analytic Damle integral in the effective-orthogonal basis.
+    P_orth = density(V, Vc, D, GamBar, float(ENERGY_MIN_), Emin)
+
+    # Back-transform to AO. Symmetric inverse sqrt -> sandwich on both sides.
+    P_lower = Y_eff @ np.asarray(P_orth) @ Y_eff
+    return P_lower, Emin
+
 def bisectFermi(V, Vc, D, Gam, Nexp, conv=FERMI_CALCULATION_TOL, Eminf=ENERGY_MIN):
     """
     Find Fermi energy using bisection method.
@@ -1014,7 +1085,7 @@ def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=FERMI_SEARCH_CYCLES,
     print(f'  Last Eminf={Eminf:.2e}, dTSW={dTSW:.2E}')
     return Eminf, TSW_ref
 
-def calcPseudoPoleFloor(F, S, g, buffer=100.0, E1=-1e3, E2=-1e4):
+def calcPseudoPoleFloor(F, S, g, alpha=0.1, min_buffer=50.0, E1=-1e3, E2=-1e4):
     """Compute a safe Eminf floor by detecting pseudo-poles of the device GF.
 
     Pseudo-poles are spurious real-axis poles of G_DD^R(E) = (E*S - F - Sigma)^{-1}
@@ -1046,9 +1117,11 @@ def calcPseudoPoleFloor(F, S, g, buffer=100.0, E1=-1e3, E2=-1e4):
              v^H S_eff v < 0  -> pseudo-pole (returned)
            Number of pseudo-poles equals the number of negative eigenvalues
            of S_eff (Sylvester's law of inertia).
-        5. Return max(E_pseudopole) + buffer (the shallowest safe Eminf),
-           or ENERGY_MIN if no pseudo-poles exist (orthogonal contact, or
-           a well-conditioned device where S - X stays positive-definite).
+        5. Filter to negative-energy pseudo-poles only (positive ones cannot
+           be excluded by Eminf, which is a LOWER bound). For each, compute
+           floor_i = E_pp_i + max(alpha * |E_pp_i|, min_buffer); return the
+           shallowest (largest) floor_i, or ENERGY_MIN if no negative
+           pseudo-poles exist or if the shallowest buffered floor is >= 0.
 
     Parameters
     ----------
@@ -1059,8 +1132,19 @@ def calcPseudoPoleFloor(F, S, g, buffer=100.0, E1=-1e3, E2=-1e4):
         Device overlap matrix. Complex Hermitian, positive-definite.
     g : surfG-like object
         Surface Green's function calculator with sigmaTot(E) method.
-    buffer : float, optional
-        Energy gap (eV) added above the highest pseudo-pole. Default 100 eV.
+    alpha : float, optional
+        Fractional buffer coefficient (default 0.1, i.e. 10%). For each
+        pseudo-pole at energy E_pp, the buffer is max(alpha * |E_pp|,
+        min_buffer). The fractional component reflects the scale-invariance
+        of the asymptotic Sigma ~ E*X regime: pole "width" near the resolvent
+        singularity scales with |E|, so a constant-eV buffer is overkill at
+        deep poles and inadequate at moderate ones.
+    min_buffer : float, optional
+        Absolute floor for the buffer in eV (default 50). Prevents the
+        fractional formula from placing Eminf arbitrarily close to a
+        moderate-depth pseudo-pole. Set both alpha=0 and min_buffer=0
+        to disable buffering entirely (useful for tests of raw pole
+        detection).
     E1, E2 : float, optional
         Deep probe energies (eV) for asymptotic extraction. Default -1e3, -1e4.
 
@@ -1072,11 +1156,24 @@ def calcPseudoPoleFloor(F, S, g, buffer=100.0, E1=-1e3, E2=-1e4):
 
     Notes
     -----
-    Buffer choice trade-off: too small risks numerical noise from near-singular
-    resolvent at contour points close to pseudo-poles; too large pushes the
-    reference TSW contour unnecessarily deep. 100 eV is well above the
-    adaptive integration's discretization scale for typical Au-based systems
-    where pseudo-poles are at hundreds-to-thousands of eV depth.
+    Buffer formula: per pseudo-pole, the gap is max(alpha * |E_pp|, min_buffer).
+    The fractional component handles scale-invariance (deep poles need
+    proportionally larger gaps; constant-eV would be either over- or under-
+    sized depending on system); the absolute min_buffer prevents the gap
+    from collapsing to numerical noise near shallow poles. Defaults of 0.1
+    and 50 eV give ~300 eV gap at -3000 eV poles (AuBetheFerrocene scale)
+    and 50 eV gap at -100 eV poles.
+
+    Positive pseudo-poles are filtered out before buffer/floor computation:
+    they cannot be excluded by Eminf (which is a LOWER bound on the contour
+    integration range). They get captured by both reference and truncated
+    contours in calcTSW and cancel in dTSW.
+
+    Return value semantics: a returned floor is GUARANTEED strictly negative
+    (or exactly ENERGY_MIN). If the shallowest buffered floor across all
+    deep pseudo-poles lands at >= 0 (e.g. C2_chain LANL2DZ has a pseudo-pole
+    at ~ -7 eV mixed with physical states), the function returns ENERGY_MIN
+    and calcTSW's dTSW<0 truncation handles the system.
 
     Why we do NOT take Re(...) of F, S, X, Sigma_0: for Hermitian A, A.real
     drops the antisymmetric imaginary part and gives a SYMMETRIC matrix that
@@ -1113,9 +1210,28 @@ def calcPseudoPoleFloor(F, S, g, buffer=100.0, E1=-1e3, E2=-1e4):
 
     pp_energies = np.asarray(jnp.sort(eigvals[norms < 0]))
 
-    if len(pp_energies) == 0:
+    # Positive pseudo-poles cannot be excluded by Eminf (it's a LOWER bound);
+    # only negative-energy pseudo-poles inform the floor.
+    pp_neg = pp_energies[pp_energies < 0]
+    if len(pp_neg) == 0:
         return float(ENERGY_MIN)
-    return float(np.max(pp_energies)) + buffer
+
+    # Per-pseudo-pole buffer: fractional (alpha * |E_pp|) because the
+    # asymptotic E*X regime that creates pseudo-poles is scale-invariant,
+    # plus an absolute min_buffer so shallow poles don't get a meaninglessly
+    # tight gap. Each pole's required floor is E_pp + buffer(E_pp).
+    abs_pp = np.abs(pp_neg)
+    buffers = np.maximum(alpha * abs_pp, min_buffer)
+    floors = pp_neg + buffers
+
+    # Eminf must clear ALL deep pseudo-poles -> take the shallowest (largest)
+    # of the per-pole floors. If even that is non-negative, no safe negative
+    # Eminf exists; fall back to ENERGY_MIN and let calcTSW's dTSW<0 path
+    # handle the system.
+    shallowest = float(np.max(floors))
+    if shallowest >= 0:
+        return float(ENERGY_MIN)
+    return shallowest
 
 def integralFit(F, S, g, mu, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_TOL, T=TEMPERATURE, maxN=MAX_CYCLES):
     """

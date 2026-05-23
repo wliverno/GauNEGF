@@ -21,6 +21,7 @@ FERMI_DEBUG=True                    # Debugging for fermi search functions
 ADAPTIVE_INTEGRATION_TOL = 1e-4     # Adaptive integration tolerance
 N_KT = 10                           # Number of kT for integration limits
 ENERGY_MIN = -1e6                   # eV - lower bound for energy integration - MUST BE NEGATIVE
+EMIN_BUFFER = 20.0                  # eV - buffer below min eigenvalue for Damle/contour split point
 MAX_CYCLES = 100                    # Maximum iteration cycles
 MAX_GRID_POINTS = 500               # Maximum number of grid points
 

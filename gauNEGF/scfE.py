@@ -21,8 +21,8 @@ jax.config.update("jax_enable_x64", True)
 # Developed Packages
 from gauNEGF.matTools import *
 from gauNEGF.density import *
-from gauNEGF.utils import inv, eig, eigh
-from gauNEGF.config import (ETA, TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL) 
+from gauNEGF.utils import inv, eig, eigh, fractional_matrix_power_signed
+from gauNEGF.config import (ETA, TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, EMIN_BUFFER, ENERGY_MIN)
 from gauNEGF.scf import NEGF
 from gauNEGF.surfG1D import surfG
 from gauNEGF.surfGBethe import surfGB
@@ -86,7 +86,10 @@ class NEGFE(NEGF):
         self.rInd = inds[1]
         # Generate surfGB() object for Bethe lattice contacts
         self.g = surfGB(self.F*har_to_eV, self.S, contactList, self.bar, latFile, self.spin, eta, T)
-        
+
+        # Fit asymptotic Sigma and build S_eff / Y_eff once for the new Damle lower contour.
+        self._initAsymptoticSigma()
+
         # Update other variables
         self.setIntegralLimits()
         self.T = T
@@ -178,6 +181,10 @@ class NEGFE(NEGF):
             else:  
                 raise Exception('neList or muList must be defined!') 
             self.g.setF(self.g.F, muL, muR)
+
+        # Fit asymptotic Sigma and build S_eff / Y_eff once for the new Damle lower contour.
+        self._initAsymptoticSigma()
+
         # Update other variables
         self.setIntegralLimits()
         self.T = T
@@ -193,6 +200,86 @@ class NEGFE(NEGF):
             avg = (self.F[np.ix_(lInd, lInd)] + self.F[np.ix_(rInd, rInd)]) / 2
             self.F[np.ix_(lInd, lInd)] = avg
             self.F[np.ix_(rInd, rInd)] = avg
+
+    def _initAsymptoticSigma(self, probes=(-1e3, -1e4, -1e5),
+                             linearity_tol=1e-2):
+        """Fit asymptotic Sigma(E) ~ Sigma_0 + E * X_asymp and build S_eff, Y_eff.
+
+        Called ONCE per contact setup (from setContact1D / setContactBethe /
+        setSigma) after self.g is available. Stores:
+
+          self.Sigma_0   : (N, N) asymptotic constant part of contact self-energy
+          self.X_asymp   : (N, N) asymptotic linear coefficient (Sigma' at E -> -inf)
+          self.S_eff     : (N, N) real-symmetric effective overlap = S - sym(Re X)
+          self.Y_eff     : (N, N) S_eff^(-1/2), complex if S_eff is indefinite
+          self.damle_buffer : float copy of EMIN_BUFFER (tunable per-instance)
+
+        Parameters
+        ----------
+        probes : tuple of 3 floats, optional
+            Three deep negative energies at which to evaluate Sigma(E) for the
+            linear fit. Defaults to (-1e3, -1e4, -1e5) eV.
+        linearity_tol : float, optional
+            Relative residual threshold at the deepest probe. If
+            ||Sigma(E_deep) - (Sigma_0 + E_deep*X)||_F / ||Sigma(E_deep)||_F
+            exceeds this, print a warning (no exception).
+
+        Notes
+        -----
+        See docs/damle_lower_contour.md for the math. The fit is a
+        least-squares solve over the three probes per matrix element; this
+        is overkill for purely linear Sigma (2-point would suffice) but
+        gives a free residual that we use to check the asymptotic-linearity
+        assumption.
+
+        X_asymp may be slightly non-symmetric due to surface-Green-function
+        iteration noise; we symmetrize Re(X_asymp) before forming S_eff so
+        eigh can handle it.
+        """
+        Es = np.asarray(probes, dtype=float)
+        assert len(Es) == 3, '_initAsymptoticSigma expects exactly three probes'
+        Sigs = np.stack([np.asarray(self.g.sigmaTot(E)) for E in Es], axis=0)
+        # Least-squares per matrix element: Sig(E) = X*E + Sigma_0
+        A = np.stack([Es, np.ones_like(Es)], axis=1)  # (3, 2)
+        sol, *_ = np.linalg.lstsq(A, Sigs.reshape(len(Es), -1), rcond=None)
+        X_asymp = sol[0].reshape(Sigs.shape[1:])
+        Sigma_0 = sol[1].reshape(Sigs.shape[1:])
+
+        # Residual at the deepest probe
+        E_deep = float(Es[np.argmin(Es)])
+        Sig_deep = np.asarray(self.g.sigmaTot(E_deep))
+        Sig_pred = Sigma_0 + E_deep * X_asymp
+        rel_resid = np.linalg.norm(Sig_deep - Sig_pred) / max(np.linalg.norm(Sig_deep), 1e-30)
+        if rel_resid > linearity_tol:
+            print(f'WARNING: asymptotic Sigma fit residual {rel_resid:.3e} exceeds '
+                  f'tolerance {linearity_tol:.3e} at E={E_deep:.1e}. Sigma(E) may not '
+                  f'be asymptotically linear; Damle lower-contour accuracy may degrade.')
+
+        # Build S_eff with symmetrized real part of X_asymp (eigh-safe).
+        X_sym = 0.5 * (np.real(X_asymp) + np.real(X_asymp).T)
+        S = np.asarray(self.S)
+        S_eff = np.real(S) - X_sym
+
+        # Y_eff = S_eff^(-1/2). Use JAXed helper; cast back to numpy for storage.
+        import jax.numpy as jnp
+        Y_eff = np.asarray(fractional_matrix_power_signed(jnp.asarray(S_eff), -0.5))
+
+        self.Sigma_0 = Sigma_0
+        self.X_asymp = X_asymp
+        self.S_eff = S_eff
+        self.Y_eff = Y_eff
+        # Preserve a user-customized damle_buffer across re-fit calls (e.g.,
+        # the refit triggered by setVoltage to refresh stale Sigma_0).
+        if not hasattr(self, 'damle_buffer'):
+            self.damle_buffer = EMIN_BUFFER
+
+        print(f'Asymptotic Sigma fit: ||Sigma_0||_F = {np.linalg.norm(Sigma_0):.3e}, '
+              f'||X_asymp||_F = {np.linalg.norm(X_asymp):.3e}, '
+              f'residual = {rel_resid:.3e}')
+        n_neg = int(np.sum(np.linalg.eigvalsh(S_eff) < 0))
+        if n_neg > 0:
+            print(f'  S_eff indefinite ({n_neg} negative eigenvalues -> pseudo-poles); '
+                  f'Y_eff is complex.')
 
     # Set constant sigma contact for testing or adding non-zero temperature
     def setSigma(self, lContact=None, rContact=None, sig=-0.1j, sig2=None, T=TEMPERATURE):
@@ -220,7 +307,11 @@ class NEGFE(NEGF):
         super().setSigma(lContact, rContact, sig, sig2)
         inds = (self.lInd, self.rInd)
         self.g = surfGTest(self.F*har_to_eV, self.S, inds, sig, sig2, self.spin)
-        
+
+        # Fit asymptotic Sigma and build S_eff / Y_eff once for the new Damle lower contour.
+        # For constant Sigma (surfGTest), X_asymp will be ~0 and S_eff == S.
+        self._initAsymptoticSigma()
+
         # Update other variables
         self.setIntegralLimits()
         self.T = T
@@ -247,6 +338,14 @@ class NEGFE(NEGF):
         """
         super().setVoltage(qV, fermi, Emin, Eminf)
         self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
+        # The setF call above shifts each contact's surface Green's function by
+        # dFermi_i = mu_i - fermi0_i. This invalidates self.Sigma_0 cached by
+        # the previous _initAsymptoticSigma: Sigma_0 shifts by sum_i X_i*dFermi_i.
+        # X_asymp / S_eff / Y_eff are invariant (rigid-band shift theorem),
+        # but we re-fit them too for simplicity -- the cost is dominated by
+        # the three sigmaTot probes which converge fast well below the band.
+        # See tests/test_setF_mu_invariance.py for the empirical verification.
+        self._initAsymptoticSigma()
         if self.mu1 != self.mu2 and self.N1 is not None:
             self.Nnegf=50 # Default grid
         if self.updFermi:
@@ -261,10 +360,16 @@ class NEGFE(NEGF):
         """
         Set integration parameters for density calculation.
 
-        DEPRECATED: production runs use adaptive integration in FockToP which
-        recomputes Emin, Eminf, and Eminf_floor (calcPseudoPoleFloor) each
-        SCF cycle. This routine is preserved for the fixed-grid (N1/N2) path
-        only; calls in the default tol path are redundant with FockToP.
+        Two modes:
+          - Default (Emin is None, tol given): auto-compute Emin, Eminf, TSW
+            via calcEmin + calcPseudoPoleFloor + calcTSW. Used at initial
+            setup (called by setContact1D) so that the first FockToP cycle
+            has sensible bounds to start from. FockToP refreshes these each
+            SCF cycle thereafter.
+          - Fixed-grid (N1/N2 given): DEPRECATED for production. The adaptive
+            integration in FockToP replaces fixed-grid Emin/Eminf for the
+            default tol path; N1/N2 is retained only for code paths that
+            explicitly opt into fixed-point quadrature.
 
         Parameters
         ----------
@@ -284,6 +389,7 @@ class NEGFE(NEGF):
             # Pseudo-pole detection: principled floor for calcTSW (replaces ENERGY_MIN).
             # See docs/pseudo_pole_handling.md.
             Eminf_floor = calcPseudoPoleFloor(self.F*har_to_eV, self.S, self.g)
+            Eminf_floor = min(self.Emin, Eminf_floor)
             self.Eminf, self.TSW = calcTSW(self.F*har_to_eV, self.S, self.g,
                                            Eminf=self.Emin, tol=tol,
                                            Emin_floor=Eminf_floor)
@@ -404,13 +510,12 @@ class NEGFE(NEGF):
             # cost is small relative to the contour density integrals.
             Eminf_floor = calcPseudoPoleFloor(F_eV, self.S, self.g)
             self.Emin = calcEmin(F_eV, self.S, self.g, Emin=self.Emin)
-            self.Emin = max(self.Emin, Eminf_floor)
-            Eminf_ = min(self.Eminf, self.Emin) if self.Eminf != ENERGY_MIN else self.Emin
-            Eminf_ = max(Eminf_, Eminf_floor)
+            Emin_floor = min(self.Emin, Eminf_floor)
+            Eminf_ = min(self.Emin, max(self.Eminf, Emin_floor))
             # TSW is not warm-started: when Eminf_floor moves between cycles
             # the cached TSW_ref no longer matches the new reference contour.
             self.Eminf, self.TSW = calcTSW(F_eV, self.S, self.g, Eminf=Eminf_,
-                                           tol=self.tol, Emin_floor=Eminf_floor)
+                                           tol=self.tol, Emin_floor=Emin_floor)
             P, _delta_N_lower = densityComplex(F_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
         else:
             P, _delta_N_lower = densityComplexN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
