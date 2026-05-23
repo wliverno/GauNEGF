@@ -47,6 +47,43 @@ def fractional_matrix_power(S, power):
 
     return result
 
+@jit
+def fractional_matrix_power_signed(S, power):
+    """
+    Calculate matrix power S^p for possibly-indefinite symmetric/Hermitian S.
+
+    Unlike fractional_matrix_power (which clamps eigenvalues at 1e-16 and
+    only handles PSD inputs cleanly), this routine carries negative
+    eigenvalues through complex arithmetic so the result is well-defined.
+
+    Parameters
+    ----------
+    S : jax array
+        Symmetric (or Hermitian) matrix, possibly indefinite.
+    power : float
+        Power to raise matrix to (e.g., 0.5 for sqrt, -0.5 for inverse sqrt).
+
+    Returns
+    -------
+    jax array
+        Matrix power S^p. Real-valued if S is PSD, complex-valued if S has
+        any negative eigenvalues.
+
+    Notes
+    -----
+    Uses eigh (Hermitian eigendecomposition) and promotes eigenvalues to
+    complex before applying jnp.power so negative^fractional is computed
+    as a complex number, not NaN.
+
+    For PSD S this matches fractional_matrix_power to machine precision
+    (after taking the real part of the negligible imaginary component).
+    """
+    eigenvalues, eigenvectors = eigh(S)
+    eigenvalues_c = eigenvalues.astype(jnp.complex64)
+    powered = jnp.power(eigenvalues_c, power)
+    V = eigenvectors.astype(jnp.complex64)
+    return V @ jnp.diag(powered) @ V.conj().T
+
 # Simple numpy operations
 
 @jit
