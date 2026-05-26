@@ -326,22 +326,22 @@ def density(V, Vc, D, Gam, Emin, mu):
     The result includes contributions from poles below the Fermi energy.
     """
     Nd = len(V)
-    DD = np.array([D for i in range(Nd)]).T
+    DD = jnp.array([D for i in range(Nd)]).T
     
     #Integral of 1/x is log(x), calculating at lower and upper limit
-    logmat = np.array([np.emath.log(1-(mu/D)) for i in range(Nd)]).T
-    logmat2 = np.array([np.emath.log(1-(Emin/D)) for i in range(Nd)]).T
+    logmat = jnp.array([np.emath.log(1-(mu/D)) for i in range(Nd)]).T
+    logmat2 = jnp.array([np.emath.log(1-(Emin/D)) for i in range(Nd)]).T
 
     #Compute integral, add prefactor
     invmat = 1/(2*np.pi*(DD-DD.conj().T))
     pref2 = logmat - logmat.conj().T
     pref3 = logmat2-logmat2.conj().T
 
-    prefactor = np.multiply(invmat,(pref2-pref3))
+    prefactor = jnp.multiply(invmat,(pref2-pref3))
 
     #Convert Gamma into Fbar eigenbasis, element-wise multiplication
     Gammam = Vc.conj().T@Gam@Vc
-    prefactor = np.multiply(prefactor,Gammam)
+    prefactor = jnp.multiply(prefactor,Gammam)
     
     #Convert back to input basis, return
     den = V@ prefactor @ V.conj().T
@@ -388,9 +388,9 @@ def damleLowerDensity(F_eV, Y_eff, Sigma_0, buffer, ENERGY_MIN_=ENERGY_MIN):
     here (verified by the pre-implementation gate test
     tests/test_damle_seff_gate.py).
     """
-    F_eV = np.asarray(F_eV)
-    Y_eff = np.asarray(Y_eff)
-    Sigma_0 = np.asarray(Sigma_0)
+    F_eV = jnp.asarray(F_eV)
+    Y_eff = jnp.asarray(Y_eff)
+    Sigma_0 = jnp.asarray(Sigma_0)
     N = F_eV.shape[0]
 
     # Build effective-orthogonal Fock and broadening.
@@ -399,14 +399,14 @@ def damleLowerDensity(F_eV, Y_eff, Sigma_0, buffer, ENERGY_MIN_=ENERGY_MIN):
     # nonzero anti-Hermitian piece so the analytic integrator's
     # 1/(DD - DD^H) factor is finite. ETA is the canonical broadening
     # constant defined in gauNEGF/config.py (default 1e-5 eV).
-    H_eff = F_eV + Sigma_0 + 1j * ETA * np.eye(N)
+    H_eff = F_eV + Sigma_0 + 1j * ETA * jnp.eye(N)
     Fbar = Y_eff @ H_eff @ Y_eff
     Gam = (H_eff - H_eff.conj().T) * 1j
     GamBar = Y_eff @ Gam @ Y_eff
 
     # Diagonalize Fbar once; D supplies both the integrand and Emin.
-    D, V = np.linalg.eig(Fbar)
-    Vc = np.linalg.inv(V.conj().T)
+    D, V = jnp.linalg.eig(Fbar)
+    Vc = jnp.linalg.inv(V.conj().T)
 
     # Emin policy (spec 2.5): below every Re part by `buffer`.
     Emin = float(np.min(D.real)) - float(buffer)
@@ -415,7 +415,7 @@ def damleLowerDensity(F_eV, Y_eff, Sigma_0, buffer, ENERGY_MIN_=ENERGY_MIN):
     P_orth = density(V, Vc, D, GamBar, float(ENERGY_MIN_), Emin)
 
     # Back-transform to AO. Symmetric inverse sqrt -> sandwich on both sides.
-    P_lower = Y_eff @ np.asarray(P_orth) @ Y_eff
+    P_lower = Y_eff @ jnp.asarray(P_orth) @ Y_eff
     return P_lower, Emin
 
 def bisectFermi(V, Vc, D, Gam, Nexp, conv=FERMI_CALCULATION_TOL, Eminf=ENERGY_MIN):

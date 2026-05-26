@@ -47,42 +47,47 @@ def fractional_matrix_power(S, power):
 
     return result
 
-@jit
-def fractional_matrix_power_signed(S, power):
-    """
-    Calculate matrix power S^p for possibly-indefinite symmetric/Hermitian S.
 
-    Unlike fractional_matrix_power (which clamps eigenvalues at 1e-16 and
-    only handles PSD inputs cleanly), this routine carries negative
-    eigenvalues through complex arithmetic so the result is well-defined.
+@jit
+def inv_sqrt_general(M):
+    """Inverse square root M^(-1/2) for a general diagonalizable matrix.
+
+    Diagonalizes M = V @ diag(D) @ V^(-1) with the general (non-symmetric)
+    eigendecomposition and returns Y = V @ diag(D^(-1/2)) @ V^(-1). This
+    satisfies Y @ M @ Y = I to machine precision for ANY diagonalizable M --
+    Hermitian, complex-symmetric, or neither -- since D^(-1/2) D D^(-1/2) = 1
+    holds for every branch of the scalar square root.
+
+    Use this for the effective overlap S_eff = S - X_asymp. The retarded contact
+    self-energy (Sigma = A @ g_surf @ A^dagger, g_surf complex-symmetric) carries
+    broadening Gamma = i(Sigma - Sigma^dagger) and is therefore NON-Hermitian, so
+    X_asymp and S_eff are non-Hermitian. eigh assumes a Hermitian matrix and uses
+    only one triangle, which silently computes the wrong S_eff^(-1/2); use this
+    routine instead. The physical lower-contour density is independent of the
+    sqrt branch chosen here, because G(E) = Y @ (E*I - Fbar)^(-1) @ Y reduces to
+    [E*S_eff - H_eff]^(-1) for any Y with Y @ Y = S_eff^(-1).
 
     Parameters
     ----------
-    S : jax array
-        Symmetric (or Hermitian) matrix, possibly indefinite.
-    power : float
-        Power to raise matrix to (e.g., 0.5 for sqrt, -0.5 for inverse sqrt).
+    M : jax array (N, N)
+        General diagonalizable matrix (may be complex / non-Hermitian).
 
     Returns
     -------
-    jax array
-        Matrix power S^p. Real-valued if S is PSD, complex-valued if S has
-        any negative eigenvalues.
+    jax array (N, N), complex
+        Y = M^(-1/2), satisfying Y @ M @ Y = I.
 
     Notes
     -----
-    Uses eigh (Hermitian eigendecomposition) and promotes eigenvalues to
-    complex before applying jnp.power so negative^fractional is computed
-    as a complex number, not NaN.
-
-    For PSD S this matches fractional_matrix_power to machine precision
-    (after taking the real part of the negligible imaginary component).
+    Uses JAX's general eig (jnp.linalg.eig, CPU backend) -- the same wrapper
+    used elsewhere in this module. Accuracy degrades if the eigenvector matrix
+    is ill-conditioned (near-defective M); a Schur-based matrix power is the
+    robust fallback for that case.
     """
-    eigenvalues, eigenvectors = eigh(S)
-    eigenvalues_c = eigenvalues.astype(jnp.complex64)
-    powered = jnp.power(eigenvalues_c, power)
-    V = eigenvectors.astype(jnp.complex64)
-    return V @ jnp.diag(powered) @ V.conj().T
+    D, V = jnp.linalg.eig(M)
+    D_inv_sqrt = jnp.power(D.astype(jnp.complex128), -0.5)
+    return V @ jnp.diag(D_inv_sqrt) @ jnp.linalg.inv(V)
+
 
 # Simple numpy operations
 
