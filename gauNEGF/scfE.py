@@ -21,7 +21,7 @@ jax.config.update("jax_enable_x64", True)
 # Developed Packages
 from gauNEGF.matTools import *
 from gauNEGF.density import *
-from gauNEGF.utils import inv, eig, eigh, fractional_matrix_power_signed
+from gauNEGF.utils import inv, eig, eigh, inv_sqrt_general
 from gauNEGF.config import (ETA, TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, EMIN_BUFFER, ENERGY_MIN)
 from gauNEGF.scf import NEGF
 from gauNEGF.surfG1D import surfG
@@ -201,8 +201,7 @@ class NEGFE(NEGF):
             self.F[np.ix_(lInd, lInd)] = avg
             self.F[np.ix_(rInd, rInd)] = avg
 
-    def _initAsymptoticSigma(self, probes=(-1e3, -1e4, -1e5),
-                             linearity_tol=1e-2):
+    def _initAsymptoticSigma(self):
         """Fit asymptotic Sigma(E) ~ Sigma_0 + E * X_asymp and build S_eff, Y_eff.
 
         Called ONCE per contact setup (from setContact1D / setContactBethe /
@@ -210,59 +209,59 @@ class NEGFE(NEGF):
 
           self.Sigma_0   : (N, N) asymptotic constant part of contact self-energy
           self.X_asymp   : (N, N) asymptotic linear coefficient (Sigma' at E -> -inf)
-          self.S_eff     : (N, N) real-symmetric effective overlap = S - sym(Re X)
-          self.Y_eff     : (N, N) S_eff^(-1/2), complex if S_eff is indefinite
+          self.S_eff     : (N, N) complex effective overlap = S - X_asymp (non-Hermitian)
+          self.Y_eff     : (N, N) S_eff^(-1/2) via general eig (inv_sqrt_general)
           self.damle_buffer : float copy of EMIN_BUFFER (tunable per-instance)
 
-        Parameters
-        ----------
-        probes : tuple of 3 floats, optional
-            Three deep negative energies at which to evaluate Sigma(E) for the
-            linear fit. Defaults to (-1e3, -1e4, -1e5) eV.
-        linearity_tol : float, optional
-            Relative residual threshold at the deepest probe. If
-            ||Sigma(E_deep) - (Sigma_0 + E_deep*X)||_F / ||Sigma(E_deep)||_F
-            exceeds this, print a warning (no exception).
+        Two-probe fit (see docs/lower_contour_math_and_probes.md). Sigma(E) =
+        X_asymp*E + Sigma_0 + O(1/E) is linear only deep below the lead band, so
+        the probes are placed DEEP and RELATIVE to the integration window -- never
+        at Emin, where band-edge curvature would bias the slope X (which is global:
+        it defines S_eff = S - X and hence Y_eff):
 
-        Notes
-        -----
-        See docs/damle_lower_contour.md for the math. The fit is a
-        least-squares solve over the three probes per matrix element; this
-        is overkill for purely linear Sigma (2-point would suffice) but
-        gives a free residual that we use to check the asymptotic-linearity
-        assumption.
+          E1 = ENERGY_MIN
+          E2 = (Emin_est + ENERGY_MIN) / 2          (the midpoint)
 
-        X_asymp may be slightly non-symmetric due to surface-Green-function
-        iteration noise; we symmetrize Re(X_asymp) before forming S_eff so
-        eigh can handle it.
+        Emin_est is a cheap band-floor estimate from the device spectrum, since
+        self.Emin is not set until setIntegralLimits runs after this. Because
+        |ENERGY_MIN| >> |Emin|, the midpoint is ~ ENERGY_MIN/2 regardless, so both
+        probes sit safely in the linear regime. Two points determine the two
+        parameters (X_asymp, Sigma_0) exactly; the slope error from any residual
+        1/E term scales as ~1/(E1*E2) and is negligible at this depth. No third
+        probe / linearity residual is computed (see the doc, sec 7).
+
+        X_asymp is in general NON-Hermitian (the retarded self-energy carries
+        broadening), so S_eff = S - X_asymp is complex/non-Hermitian and
+        Y_eff = S_eff^(-1/2) is built with a general (non-symmetric)
+        eigendecomposition (inv_sqrt_general), NOT eigh.
         """
-        Es = np.asarray(probes, dtype=float)
-        assert len(Es) == 3, '_initAsymptoticSigma expects exactly three probes'
-        Sigs = np.stack([np.asarray(self.g.sigmaTot(E)) for E in Es], axis=0)
-        # Least-squares per matrix element: Sig(E) = X*E + Sigma_0
-        A = np.stack([Es, np.ones_like(Es)], axis=1)  # (3, 2)
-        sol, *_ = np.linalg.lstsq(A, Sigs.reshape(len(Es), -1), rcond=None)
-        X_asymp = sol[0].reshape(Sigs.shape[1:])
-        Sigma_0 = sol[1].reshape(Sigs.shape[1:])
-
-        # Residual at the deepest probe
-        E_deep = float(Es[np.argmin(Es)])
-        Sig_deep = np.asarray(self.g.sigmaTot(E_deep))
-        Sig_pred = Sigma_0 + E_deep * X_asymp
-        rel_resid = np.linalg.norm(Sig_deep - Sig_pred) / max(np.linalg.norm(Sig_deep), 1e-30)
-        if rel_resid > linearity_tol:
-            print(f'WARNING: asymptotic Sigma fit residual {rel_resid:.3e} exceeds '
-                  f'tolerance {linearity_tol:.3e} at E={E_deep:.1e}. Sigma(E) may not '
-                  f'be asymptotically linear; Damle lower-contour accuracy may degrade.')
-
-        # Build S_eff with symmetrized real part of X_asymp (eigh-safe).
-        X_sym = 0.5 * (np.real(X_asymp) + np.real(X_asymp).T)
+        # Cheap band-floor estimate (self.Emin is not set until setIntegralLimits
+        # runs after this): min eig of inv(S) F in eV, minus the standard buffer.
+        # eig runs on jax (GPU); large-matrix eigendecompositions must not use numpy.
+        F_eV = np.asarray(self.F) * har_to_eV
         S = np.asarray(self.S)
-        S_eff = np.real(S) - X_sym
+        D_dev, _ = eigh(inv(jnp.asarray(S)) @ jnp.asarray(F_eV))
+        Emin_est = float(np.real(np.asarray(D_dev)).min()) - EMIN_BUFFER
 
-        # Y_eff = S_eff^(-1/2). Use JAXed helper; cast back to numpy for storage.
+        # Deep probes, RELATIVE to the integration window [ENERGY_MIN, Emin].
+        E1 = float(ENERGY_MIN)
+        E2 = 0.5 * (Emin_est + float(ENERGY_MIN))
+        Sig1 = np.asarray(self.g.sigmaTot(E1))
+        Sig2 = np.asarray(self.g.sigmaTot(E2))
+
+        # 2-point linear fit Sigma(E) = X_asymp*E + Sigma_0 (exact through both
+        # probes). Intercept taken at the shallower probe E2 to limit the
+        # subtractive cancellation in Sigma_0 = Sig - X*E.
+        X_asymp = (Sig2 - Sig1) / (E2 - E1)
+        Sigma_0 = Sig2 - X_asymp * E2
+
+        # S_eff = S - X_asymp, kept fully complex. X_asymp is non-Hermitian (the
+        # retarded self-energy carries broadening), so no Re()/symmetrization.
+        # Y_eff = S_eff^(-1/2) via a general (non-symmetric) eigendecomposition,
+        # NOT eigh -- eigh would assume Hermiticity and silently drop Im(X_asymp).
+        S_eff = S - X_asymp
         import jax.numpy as jnp
-        Y_eff = np.asarray(fractional_matrix_power_signed(jnp.asarray(S_eff), -0.5))
+        Y_eff = np.asarray(inv_sqrt_general(jnp.asarray(S_eff)))
 
         self.Sigma_0 = Sigma_0
         self.X_asymp = X_asymp
@@ -273,13 +272,21 @@ class NEGFE(NEGF):
         if not hasattr(self, 'damle_buffer'):
             self.damle_buffer = EMIN_BUFFER
 
-        print(f'Asymptotic Sigma fit: ||Sigma_0||_F = {np.linalg.norm(Sigma_0):.3e}, '
-              f'||X_asymp||_F = {np.linalg.norm(X_asymp):.3e}, '
-              f'residual = {rel_resid:.3e}')
-        n_neg = int(np.sum(np.linalg.eigvalsh(S_eff) < 0))
-        if n_neg > 0:
-            print(f'  S_eff indefinite ({n_neg} negative eigenvalues -> pseudo-poles); '
-                  f'Y_eff is complex.')
+        # Diagnostics: how far X_asymp / S_eff are from the Hermitian/symmetric
+        # assumptions the old eigh path silently made, and the defining-property
+        # check Y_eff @ S_eff @ Y_eff = I (must be ~machine precision).
+        Xn = max(np.linalg.norm(X_asymp), 1e-30)
+        imag_frac = np.linalg.norm(np.imag(X_asymp)) / Xn
+        herm_frac = np.linalg.norm(X_asymp - X_asymp.conj().T) / Xn
+        symm_frac = np.linalg.norm(X_asymp - X_asymp.T) / Xn
+        I_defect = np.linalg.norm(Y_eff @ S_eff @ Y_eff - np.eye(S_eff.shape[0]))
+        print(f'Asymptotic Sigma fit (2-probe E1={E1:.2e}, E2={E2:.2e} eV): '
+              f'||Sigma_0||_F = {np.linalg.norm(Sigma_0):.3e}, '
+              f'||X_asymp||_F = {np.linalg.norm(X_asymp):.3e}')
+        print(f'  X_asymp structure: ||Im X||/||X|| = {imag_frac:.3e}, '
+              f'||X-X^dag||/||X|| = {herm_frac:.3e} (non-Hermiticity), '
+              f'||X-X^T||/||X|| = {symm_frac:.3e} (non-symmetry)')
+        print(f'  Y_eff @ S_eff @ Y_eff = I defect: {I_defect:.3e}')
 
     # Set constant sigma contact for testing or adding non-zero temperature
     def setSigma(self, lContact=None, rContact=None, sig=-0.1j, sig2=None, T=TEMPERATURE):
@@ -502,24 +509,27 @@ class NEGFE(NEGF):
         self._symmetrize_F()
         print('Calculating lower density matrix:')
         if self.N2 is None:
-            F_eV = self.F*har_to_eV
-            # Pseudo-pole detection: principled lower limit for calcTSW and
-            # cap on calcEmin so the contour cannot dive past asymptotically
-            # E-linear Sigma pseudo-poles (see docs/pseudo_pole_handling.md).
-            # Recomputed every cycle since F drifts during SCF; the per-cycle
-            # cost is small relative to the contour density integrals.
-            Eminf_floor = calcPseudoPoleFloor(F_eV, self.S, self.g)
-            self.Emin = calcEmin(F_eV, self.S, self.g, Emin=self.Emin)
-            Emin_floor = min(self.Emin, Eminf_floor)
-            Eminf_ = min(self.Emin, max(self.Eminf, Emin_floor))
-            # TSW is not warm-started: when Eminf_floor moves between cycles
-            # the cached TSW_ref no longer matches the new reference contour.
-            self.Eminf, self.TSW = calcTSW(F_eV, self.S, self.g, Eminf=Eminf_,
-                                           tol=self.tol, Emin_floor=Emin_floor)
-            P, _delta_N_lower = densityComplex(F_eV, self.S, self.g, self.Eminf, self.Emin, self.tol, T=0)
+            # Lower contour [ENERGY_MIN, Emin] handled analytically via Damle
+            # in the S_eff / Sigma_0 framework. See docs/superpowers/specs/
+            # 2026-05-22-damle-lower-contour-design.md. self.Emin is set HERE
+            # from min(D.real) - self.damle_buffer where D = eigvals(Fbar).
+            # The Mulliken cross-term delta_N that densityComplex would
+            # return is subsumed into the S_eff framework, so no separate
+            # cross-term term is needed (verified by tests/test_damle_seff_gate.py).
+            F_eV = self.F * har_to_eV
+            P, self.Emin = damleLowerDensity(F_eV, self.Y_eff, self.Sigma_0,
+                                             self.damle_buffer)
+            nLower = np.trace(self.S @ P).real
         else:
-            P, _delta_N_lower = densityComplexN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, T=0)
-        nLower = np.trace(self.S@P).real + _delta_N_lower
+            # DEPRECATED fixed-grid path. Retained for backward compatibility
+            # only. Caller must supply explicit Emin via setIntegralLimits(
+            # N2=..., Emin=...); this path uses self.Eminf which (after Task
+            # 3.3 pins it to ENERGY_MIN) makes densityComplexN integrate over
+            # [-1e6, Emin] with a fixed point count -- numerically poor. The
+            # default (N2=None) Damle path above is preferred.
+            P, _delta_N_lower = densityComplexN(self.F*har_to_eV, self.S, self.g,
+                                                self.Eminf, self.Emin, self.N2, T=0)
+            nLower = np.trace(self.S @ P).real + _delta_N_lower
 
         # Helper function for densityComplex()
         def compContourP2(mu):

@@ -1,0 +1,30 @@
+#!/bin/bash
+#SBATCH --job-name=LowTailMth
+#SBATCH --account=anantram
+#SBATCH --partition=ckpt-all
+#SBATCH --gpus=1
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=40
+#SBATCH --time=02:00:00
+#SBATCH --mem=60GB
+#SBATCH --mail-type=END
+#SBATCH --mail-user=willll@uw.edu
+##
+
+set -e
+
+module load anantram/gdv
+module load cuda
+unset LD_LIBRARY_PATH
+
+export GAUSS_SCRDIR='/tmp'
+export GAUSS_PDEF=$SLURM_NTASKS
+export GAUSS_MEMDEF=${SLURM_MEM_PER_NODE}MB
+
+source /gscratch/anantram/willll/miniconda3/etc/profile.d/conda.sh
+conda activate /gscratch/anantram/willll/NEGF
+
+cd /gscratch/anantram/willll/NEGFCode
+python3 -u tests/fixtures/_diag_lower_tail_methods.py
+
+exit 0
