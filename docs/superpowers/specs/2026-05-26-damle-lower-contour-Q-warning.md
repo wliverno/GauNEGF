@@ -156,12 +156,21 @@ density P = P_lo + P_hi; lower electron count uses nLower = tr(P_lo S) + delta_N
 (delta_N now real, not discarded). The deprecated fixed-grid (N2 not None) path
 is untouched.
 
-Emin uses calcEmin as-is (true-Sigma DOS, fresh each cycle). The "use the Damle
-estimate (Fbar floor) as the Emin guess" refinement was investigated and found
-UNNECESSARY: with a fresh fit, the eig(Fbar) floor ~= the true band floor
-(within ~0.5 eV on both C2 and Au3), so calcEmin already lands below the Fbar
-band. The deep-Fbar-mismatch this would have addressed does not occur for PSD
-S_eff. See Section 9.
+Emin is seeded with self.damleEmin (the Fbar-anchored guess set by
+_initAsymptoticSigma: min(Re eig(Y_eff (F + Sigma_0) Y_eff)) - damle_buffer);
+calcEmin's DOS loop only goes deeper from that seed, so the result is the
+deeper of (Damle floor - buffer) and (point where true-Sigma DOS falls below
+tol). For low-||Sigma_0|| systems (Au3, ~23) the Damle and true band floors
+agree and the seed reduces to the bare-Fock guess. For high-||Sigma_0||
+systems (CNT33_5cell ~80-220, Au10FullPDT-GSO comparable), Fbar's floor sits
+tens of eV below the bare-Fock floor; without the Damle-anchored seed,
+calcEmin stops where true-Sigma DOS first drops, leaving Fbar's spurious
+deeper eigenvalues *inside* the lower contour -- the warning correctly fires
+with tr(P@S) of tens of electrons. Seeding with the Damle anchor places Emin
+where Damle actually has its band floor and prevents the mismatch by
+construction. (Earlier draft claimed this seed was unnecessary based on Au3
+evidence alone -- that conclusion was overgeneralized; the CNT data refuted
+it. See Section 9.)
 
 ### 3.4 `setIntegralLimits` -- drop calcTSW + calcPseudoPoleFloor (keep calcEmin)
 
@@ -218,9 +227,13 @@ the kept term counts exactly the spectral weight inside the window.
 5. Sigma_0/Y_eff and Emin are recomputed EVERY FockToP call on the current Fock,
    not frozen at setup (they all depend on self.F, which changes each SCF cycle).
    This is the pre-Damle behavior; the Damle rewiring had regressed it. [confirmed]
-6. Emin guess: plain calcEmin (true-Sigma DOS), NOT the Fbar-floor estimate.
-   For PSD S_eff the Fbar floor ~= the true floor, so calcEmin already lands
-   below the Damle band; the Fbar-guess refinement is unnecessary. [confirmed]
+6. Emin guess: Fbar-floor anchor (self.damleEmin = min(Re eig Fbar) -
+   damle_buffer) seeded into calcEmin; the DOS loop confirms/deepens. Earlier
+   draft claimed this was unnecessary based on Au3 alone (where Fbar floor ~=
+   true floor); CNT33_5cell with ||Sigma_0|| ~ 100+ refuted that. The seed
+   collapses to the bare-Fock guess for low-Sigma_0 systems and protects the
+   high-Sigma_0 mismatch case. calcEmin's no-seed default offset is also
+   widened from a hardcoded 5 eV to EMIN_BUFFER (config: 20 eV). [confirmed]
 
 ## 7. Non-goals
 
@@ -319,3 +332,42 @@ Fixture tests/fixtures/_diag_lower_tail_methods.py on C2-STO3G (1D contact,
   spurious eigenvalues below the frozen Emin -> spurious lower charge -> crash.
   Fix: recompute Sigma_0/Y_eff + Emin every FockToP (Section 3.3). C2 survived the
   frozen bug only via its ~270 eV Emin margin.
+
+### Fbar-floor Emin guess + EMIN_BUFFER (2026-05-28)
+
+- High-||Sigma_0|| evidence overturned the "Fbar floor ~= true floor" claim.
+  CNT33_5cell post-recompute run (NEGFTests/CNT33_5cell_ESCF.out): ||Sigma_0|| ~
+  80-220 across SCF iterations; at iter 1 with Emin=-289.40 (placed by calcEmin
+  on true-Sigma DOS, which was 1.05e-06 there -- below tol), the Damle warning
+  fired with tr(P@S)=+59.6, delta_N=-76.2, total=-16.5. 60 electrons sat below
+  Emin in the Damle (Fbar) spectrum but not in the true spectrum -- the exact
+  mismatch the Au3 evidence had shown was absent for low-||Sigma_0||. The Au3
+  conclusion was overgeneralized from one PSD low-Sigma_0 data point.
+- Au10FullPDT-GSO (job 35640856, AuPDTTransGSO.py): same regime; lower-contour
+  warnings starting at iter 10, ||Sigma_0|| jumping from ~80 to 1.3e+04 by iter
+  13, calcFermiMuller assertion at iter 15 with target ne - nLower = ne + 3672.
+- Fix (option 3 + A):
+    (a) _initAsymptoticSigma now also sets self.damleEmin = min(Re eig Fbar)
+        - self.damle_buffer, where Fbar = Y_eff (F + Sigma_0) Y_eff.
+    (b) FockToP seeds calcEmin with self.damleEmin; the DOS loop only goes
+        deeper, so the result is below BOTH the Damle band and the true band.
+    (c) calcEmin's no-seed default offset is widened from a hardcoded 5 eV to
+        EMIN_BUFFER (config: 20 eV). Used by setIntegralLimits at setup.
+- Tests (RED job 35658002, GREEN job 35658036, 12/12 passed):
+    test_init_asymptotic_sigma_sets_damle_emin_from_fbar_floor (computes
+        expected damleEmin from Fbar matrix; asserts equality);
+    test_focktop_seeds_calcemin_with_damle_emin_guess (monkeypatch calcEmin,
+        capture the Emin kwarg passed; assert it == self.damleEmin);
+    test_calcemin_default_offset_is_EMIN_BUFFER (no-seed calcEmin on C2 must
+        return Emin deeper than the old -5 offset would allow).
+- Minimal-basis integration (job 35658085, _diag_minimal_basis_scf.py):
+    C2-STO3G : CONVERGED (convLevel 1.13e-4); Emin=-289.99 (~9 eV deeper than
+               the previous -281.41, reflecting EMIN_BUFFER widening); 0 warnings.
+    Au3-CRENBS: CONVERGED in 20 iters (convLevel 3.59e-4); Emin=-42.01 (~14 eV
+               deeper than the previous -27.56, reflecting the Fbar-anchored seed);
+               0 warnings. Took ~2x more iterations than the previous deeper-Emin
+               run, attributed to the wider densityComplex band [Emin, mu].
+- CNT33_5cell and Au10FullPDT-GSO re-runs deferred to user (long-running production
+  jobs); the unit tests + minimal-basis integration suffice to validate the
+  mechanism; the predicted effect is that the lower-contour warning frequency
+  drops sharply on those systems.

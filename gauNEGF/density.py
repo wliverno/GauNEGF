@@ -27,8 +27,9 @@ from jax import jit
 jax.config.update("jax_enable_x64", True)
 
 # Configuration
-from gauNEGF.config import (TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, FERMI_DEBUG, 
-                            FERMI_SEARCH_CYCLES, N_KT, ENERGY_MIN, MAX_CYCLES, MAX_GRID_POINTS, ETA)
+from gauNEGF.config import (TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, FERMI_DEBUG,
+                            FERMI_SEARCH_CYCLES, N_KT, ENERGY_MIN, MAX_CYCLES, MAX_GRID_POINTS, ETA,
+                            EMIN_BUFFER)
 from scipy.special import roots_legendre
 from scipy.special import roots_chebyu
 import matplotlib.pyplot as plt
@@ -1006,7 +1007,7 @@ def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES, Emin=None):
     """
     if Emin is None:
         D,_ = eigh(inv(S)@F)
-        Emin = min(D.real.flatten())-5
+        Emin = min(D.real.flatten()) - EMIN_BUFFER
     counter = 0
     dP = _compute_dos_at_energy(Emin, F, S, g.sigmaTot(Emin), g.crossTermQTot(Emin))
     while dP>tol and counter<maxN:
