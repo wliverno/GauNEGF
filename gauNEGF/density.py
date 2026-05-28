@@ -1069,6 +1069,13 @@ def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=FERMI_SEARCH_CYCLES,
     tuple (float, float)
         (Eminf, TSW) -- converged lower bound and reference spectral weight.
     """
+    # Capture the warm-start for the postcondition check: the returned Eminf
+    # must not be shallower than the caller's warm-start (would invert the
+    # caller's lower-contour integration). The doubling loop preserves this for
+    # valid negative warm-starts, but the guard catches invalid input (e.g. a
+    # positive Eminf) and future algorithm changes.
+    Eminf_warm = Eminf
+
     # Upper contour bound stays at the wide config bound regardless of
     # Emin_floor; only the lower bound moves with pseudo-pole detection.
     Emax = -ENERGY_MIN
@@ -1107,6 +1114,9 @@ def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=FERMI_SEARCH_CYCLES,
                           f'Truncated contour excludes it; this is the '
                           f'intended outcome.')
                 print(f'calcTSW converged: Eminf={Eminf:.2f}, TSW={TSW_new:.4f}')
+            if Eminf_warm is not None and Eminf > Eminf_warm:
+                print(f'WARNING: calcTSW Eminf={Eminf:.2e} shallower than warm-start {Eminf_warm:.2e}; flooring.')
+                Eminf = Eminf_warm
             return Eminf, TSW_new
         elif FERMI_DEBUG:
             print(f'DEBUG: Eminf={Eminf:.2f}, dTSW={dTSW:.2E}')
@@ -1117,11 +1127,17 @@ def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=FERMI_SEARCH_CYCLES,
             print(f'Warning: calcTSW would expand Eminf past Emin_floor ({Emin_floor:.2e}).')
             print(f'  Last Eminf={Eminf:.2e}, dTSW={dTSW:.2E}.')
             print(f'  If TSW is still undercounted, lower Emin_floor in config.')
+            if Eminf_warm is not None and Eminf > Eminf_warm:
+                print(f'WARNING: calcTSW Eminf={Eminf:.2e} shallower than warm-start {Eminf_warm:.2e}; flooring.')
+                Eminf = Eminf_warm
             return Eminf, TSW_ref
         Eminf = next_Eminf
 
     print(f'Warning: calcTSW did not converge after {maxN} iterations')
     print(f'  Last Eminf={Eminf:.2e}, dTSW={dTSW:.2E}')
+    if Eminf_warm is not None and Eminf > Eminf_warm:
+        print(f'WARNING: calcTSW Eminf={Eminf:.2e} shallower than warm-start {Eminf_warm:.2e}; flooring.')
+        Eminf = Eminf_warm
     return Eminf, TSW_ref
 
 def calcPseudoPoleFloor(F, S, g, alpha=0.1, min_buffer=50.0, E1=-1e3, E2=-1e4):

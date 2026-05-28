@@ -180,3 +180,24 @@ def test_calcemin_default_offset_is_EMIN_BUFFER():
     # emin ~ -296. Anything <= -290 confirms the new offset is in effect.
     assert emin <= -290.0, \
         f'calcEmin returned {emin}; expected <= -290 with EMIN_BUFFER={EMIN_BUFFER}'
+
+
+def test_calctsw_floors_eminf_to_warmstart_when_shallower(capsys):
+    # calcTSW's postcondition: never return Eminf shallower than the warm-start
+    # (would invert the caller's lower-contour integration in getFermiContact's
+    # densityComplex(F, S, g, Eminf, Emin, ...)). The loop structure preserves
+    # this for valid negative warm-starts (doubling deepens), but the guard
+    # catches invalid input -- here a positive warm-start, which the doubling
+    # loop would naturally drift more positive (= shallower in lower-contour
+    # terms). The postcondition floors to the warm-start and warns.
+    from gauNEGF.density import calcTSW
+    negf = _c2_setup()
+    F_eV = np.asarray(negf.F) * har_to_eV
+    S = np.asarray(negf.S)
+    bad_warm = 5.0   # invalid positive warm-start
+    Eminf_out, _ = calcTSW(F_eV, S, negf.g, tol=1e-3, maxN=2, Eminf=bad_warm)
+    out = capsys.readouterr().out
+    assert Eminf_out == bad_warm, \
+        f'calcTSW returned Eminf={Eminf_out}, expected floor to warm-start {bad_warm}'
+    assert 'shallower' in out and 'flooring' in out, \
+        f'calcTSW did not warn about flooring; captured stdout:\n{out[:400]}'
