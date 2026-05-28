@@ -211,7 +211,11 @@ class NEGFE(NEGF):
           self.X_asymp   : (N, N) asymptotic linear coefficient (Sigma' at E -> -inf)
           self.S_eff     : (N, N) complex effective overlap = S - X_asymp (non-Hermitian)
           self.Y_eff     : (N, N) S_eff^(-1/2) via general eig (inv_sqrt_general)
-          self.damle_buffer : float copy of EMIN_BUFFER (tunable per-instance)
+          self.damle_buffer : float copy of EMIN_BUFFER (tunable per-instance;
+                              retained for debug fixtures -- Emin now comes from
+                              calcEmin, so this is not on the production path)
+          self.damle_dN_warn : float, default 0.5 e. FockToP warns when any of
+                              |tr(P@S)|, |delta_N|, or their sum exceeds it.
 
         Two-probe fit (see docs/lower_contour_math_and_probes.md). Sigma(E) =
         X_asymp*E + Sigma_0 + O(1/E) is linear only deep below the lead band, so
@@ -260,7 +264,6 @@ class NEGFE(NEGF):
         # Y_eff = S_eff^(-1/2) via a general (non-symmetric) eigendecomposition,
         # NOT eigh -- eigh would assume Hermiticity and silently drop Im(X_asymp).
         S_eff = S - X_asymp
-        import jax.numpy as jnp
         Y_eff = np.asarray(inv_sqrt_general(jnp.asarray(S_eff)))
 
         self.Sigma_0 = Sigma_0
@@ -271,6 +274,11 @@ class NEGFE(NEGF):
         # the refit triggered by setVoltage to refresh stale Sigma_0).
         if not hasattr(self, 'damle_buffer'):
             self.damle_buffer = EMIN_BUFFER
+        if not hasattr(self, 'damle_dN_warn'):
+            # FockToP warns if ANY of |tr(P@S)|, |delta_N|, or their sum (the
+            # lower electron count) exceeds this (electrons). Name kept for
+            # continuity; it no longer thresholds delta_N alone.
+            self.damle_dN_warn = 0.5
 
         # Diagnostics: how far X_asymp / S_eff are from the Hermitian/symmetric
         # assumptions the old eigh path silently made, and the defining-property
@@ -368,11 +376,14 @@ class NEGFE(NEGF):
         Set integration parameters for density calculation.
 
         Two modes:
-          - Default (Emin is None, tol given): auto-compute Emin, Eminf, TSW
-            via calcEmin + calcPseudoPoleFloor + calcTSW. Used at initial
-            setup (called by setContact1D) so that the first FockToP cycle
-            has sensible bounds to start from. FockToP refreshes these each
-            SCF cycle thereafter.
+          - Default (Emin is None, tol given): place Emin below the band via
+            calcEmin (true-Sigma DOS loop) and pin the deep bound Eminf to the
+            wide config value ENERGY_MIN (TSW unused, set None). calcTSW /
+            calcPseudoPoleFloor are NOT on this path -- the lower contour is
+            handled analytically by damleLowerDensity, whose cross-term warning
+            in FockToP replaces calcTSW's dTSW<0 detection. Used at initial
+            setup (called by setContact1D) so the first FockToP cycle has
+            sensible bounds; FockToP refreshes these each SCF cycle thereafter.
           - Fixed-grid (N1/N2 given): DEPRECATED for production. The adaptive
             integration in FockToP replaces fixed-grid Emin/Eminf for the
             default tol path; N1/N2 is retained only for code paths that
@@ -392,14 +403,14 @@ class NEGFE(NEGF):
             Minimum energy for integration (default: None)
         """
         if Emin is None and tol is not None:
+            # Emin from the true-Sigma DOS loop (robust, incl. non-PSD S_eff);
+            # the deep bound is the wide config value. calcTSW /
+            # calcPseudoPoleFloor are NOT used on this path -- the lower contour
+            # is handled analytically by damleLowerDensity, whose cross-term
+            # delta_N warning (FockToP) replaces calcTSW's dTSW<0 detection.
             self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, tol=tol)
-            # Pseudo-pole detection: principled floor for calcTSW (replaces ENERGY_MIN).
-            # See docs/pseudo_pole_handling.md.
-            Eminf_floor = calcPseudoPoleFloor(self.F*har_to_eV, self.S, self.g)
-            Eminf_floor = min(self.Emin, Eminf_floor)
-            self.Eminf, self.TSW = calcTSW(self.F*har_to_eV, self.S, self.g,
-                                           Eminf=self.Emin, tol=tol,
-                                           Emin_floor=Eminf_floor)
+            self.Eminf = ENERGY_MIN
+            self.TSW = None
             self.tol = tol
         else:
             self.Emin = Emin
@@ -509,17 +520,42 @@ class NEGFE(NEGF):
         self._symmetrize_F()
         print('Calculating lower density matrix:')
         if self.N2 is None:
-            # Lower contour [ENERGY_MIN, Emin] handled analytically via Damle
-            # in the S_eff / Sigma_0 framework. See docs/superpowers/specs/
-            # 2026-05-22-damle-lower-contour-design.md. self.Emin is set HERE
-            # from min(D.real) - self.damle_buffer where D = eigvals(Fbar).
-            # The Mulliken cross-term delta_N that densityComplex would
-            # return is subsumed into the S_eff framework, so no separate
-            # cross-term term is needed (verified by tests/test_damle_seff_gate.py).
+            # self.F changes every SCF cycle, and the asymptotic fit
+            # (Sigma_0 / S_eff / Y_eff) AND Emin all depend on it -- recompute
+            # them on the CURRENT Fock before building the lower contour.
+            # Restores the pre-Damle per-call behavior: freezing them at setup
+            # let a stale Y_eff/Sigma_0 applied to an evolved F produce a garbage
+            # Fbar with spurious sub-Emin eigenvalues (the Au3-CRENBS SCF crash,
+            # job 35623534). Emin uses calcEmin as-is (true-Sigma DOS), same fresh
+            # call as setup; for PSD S_eff the Fbar floor ~= the true floor so
+            # this lands below the Damle band too.
+            self._initAsymptoticSigma()
+            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, tol=self.tol)
+            # Lower contour [ENERGY_MIN, Emin] via analytic Damle: damleLowerDensity
+            # returns the (sign-corrected) lower density matrix and the analytic
+            # cross-term delta_N. The lower contour should hold ~zero charge --
+            # Damle uses the constant asymptotic Sigma_0, valid only in the deep
+            # tail. If any term -- the bulk tr(P@S), the cross-term delta_N, or
+            # their sum (the lower electron count) -- exceeds damle_dN_warn, real
+            # spectral weight sits in the lower contour (Emin too shallow or a
+            # pseudo-pole), so Damle is being applied where its constant-Sigma_0
+            # approximation is suspect -- warn (replaces calcTSW's dTSW<0
+            # detection). See docs/superpowers/specs/
+            # 2026-05-26-damle-lower-contour-Q-warning.md.
             F_eV = self.F * har_to_eV
-            P, self.Emin = damleLowerDensity(F_eV, self.Y_eff, self.Sigma_0,
-                                             self.damle_buffer)
-            nLower = np.trace(self.S @ P).real
+            P, delta_N_lower = damleLowerDensity(F_eV, self.Y_eff, self.Sigma_0,
+                                                 self.g, self.Emin)
+            trLower = np.trace(self.S @ P).real
+            nLower = trLower + delta_N_lower
+            if (abs(trLower) > self.damle_dN_warn
+                    or abs(delta_N_lower) > self.damle_dN_warn
+                    or abs(nLower) > self.damle_dN_warn):
+                print(f'WARNING: lower-contour holds significant weight at '
+                      f'Emin={self.Emin:.2f} eV (tr(P@S)={trLower:.3e}, '
+                      f'delta_N={delta_N_lower:.3e}, total={nLower:.3e}); a term '
+                      f'exceeding {self.damle_dN_warn:.3e} means Emin is too shallow '
+                      f'or a pseudo-pole sits in the lower contour (Damle assumes a '
+                      f'negligible deep tail).')
         else:
             # DEPRECATED fixed-grid path. Retained for backward compatibility
             # only. Caller must supply explicit Emin via setIntegralLimits(

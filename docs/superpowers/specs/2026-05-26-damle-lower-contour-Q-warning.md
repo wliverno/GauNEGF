@@ -114,19 +114,54 @@ computes or returns Emin.
     because a correctly-placed Emin leaves the lower contour empty. It must be
     computed.
 
-(c) WARNING. After computing delta_N, if |delta_N| > self.damle_dN_warn
+(c) WARNING. The warning keys on the TOTAL lower count, not |delta_N| alone.
+    Because calcEmin places Emin BELOW the whole band, the lower contour should
+    hold ~zero charge (Damle uses the constant asymptotic Sigma_0, valid only in
+    the deep tail). After computing the lower density, if ANY of the three terms
+    -- the bulk tr(P@S), the cross-term delta_N, or their sum tr(P@S)+delta_N
+    (the lower electron count) -- exceeds self.damle_dN_warn in absolute value
     (new instance attribute, default 0.5 electrons; configurable), print a
-    warning that significant spectral weight lies below Emin (Emin too shallow,
-    or a pseudo-pole present). An empty lower contour gives ~0; a trapped pole
-    gives O(1). This is the diagnostic replacing calcTSW's dTSW<0.
+    warning that significant spectral weight lies in the lower contour (Emin too
+    shallow, or a pseudo-pole present), where Damle's constant-Sigma_0
+    approximation is suspect. An empty lower contour gives ~0 on all three; a
+    trapped real/core pole gives a large tr(P@S), and a trapped lead-coupled
+    pseudo-pole drives delta_N and the sum large (and the sum negative). This is
+    the diagnostic replacing calcTSW's dTSW<0. (Empirically on C2-STO3G: Emin
+    below the cores gives all terms ~1e-6; Emin at -145 traps the 2 core
+    electrons -> tr(P@S)~2.0 fires; Emin in the valence band -> sum goes
+    negative. See tests/fixtures/_diag_deltaN_vs_emin.py.)
+
+    Note: the attribute name damle_dN_warn is retained for continuity, but it
+    now thresholds all three terms, not delta_N alone.
 
 ### 3.3 `FockToP` -- wiring
 
-Default (N2=None) path: call damleLowerDensity(F, Y_eff, Sigma_0, self.Emin) to
-get (P_lo, delta_N); emit the warning; set the band via densityComplex[self.Emin,
-mu]; total density P = P_lo + P_hi; electron count uses tr(P S) + delta_N
+PER-CYCLE RECOMPUTE (critical). self.F changes every SCF cycle, and the
+asymptotic fit (Sigma_0, S_eff, Y_eff) AND Emin all depend on it. So at the top
+of the default (N2=None) path FockToP MUST recompute them on the current Fock:
+  self._initAsymptoticSigma()            # refit Sigma_0 / S_eff / Y_eff
+  self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, tol=self.tol)
+This restores the long-standing pre-Damle behavior (FockToP re-placed Emin every
+call). Freezing them at setup is a bug: a stale Y_eff/Sigma_0 applied to an
+evolved F yields a garbage Fbar with spurious sub-Emin eigenvalues, which Damle
+counts as huge spurious lower charge -> nLower wrong -> the band Fermi search
+asserts (observed: Au3-CRENBS SCF crash, job 35623534). C2 happened to survive
+the frozen bug only because its Emin sits ~270 eV below the band (huge margin).
+
+Then the lower contour: call damleLowerDensity(F, Y_eff, Sigma_0, g, self.Emin)
+to get (P_lo, delta_N); compute trLower = tr(S P_lo) and nLower = trLower +
+delta_N; emit the warning if any of |trLower|, |delta_N|, |nLower| >
+self.damle_dN_warn; set the band via densityComplex[self.Emin, mu]; total
+density P = P_lo + P_hi; lower electron count uses nLower = tr(P_lo S) + delta_N
 (delta_N now real, not discarded). The deprecated fixed-grid (N2 not None) path
 is untouched.
+
+Emin uses calcEmin as-is (true-Sigma DOS, fresh each cycle). The "use the Damle
+estimate (Fbar floor) as the Emin guess" refinement was investigated and found
+UNNECESSARY: with a fresh fit, the eig(Fbar) floor ~= the true band floor
+(within ~0.5 eV on both C2 and Au3), so calcEmin already lands below the Fbar
+band. The deep-Fbar-mismatch this would have addressed does not occur for PSD
+S_eff. See Section 9.
 
 ### 3.4 `setIntegralLimits` -- drop calcTSW + calcPseudoPoleFloor (keep calcEmin)
 
@@ -180,6 +215,12 @@ the kept term counts exactly the spectral weight inside the window.
 4. calcTSW / calcPseudoPoleFloor / calcEmin: left in the module. calcEmin stays
    live (Emin source); calcTSW + calcPseudoPoleFloor are retained as debugging
    tools, flagged as needing fixing, unused by the default path. [confirmed]
+5. Sigma_0/Y_eff and Emin are recomputed EVERY FockToP call on the current Fock,
+   not frozen at setup (they all depend on self.F, which changes each SCF cycle).
+   This is the pre-Damle behavior; the Damle rewiring had regressed it. [confirmed]
+6. Emin guess: plain calcEmin (true-Sigma DOS), NOT the Fbar-floor estimate.
+   For PSD S_eff the Fbar floor ~= the true floor, so calcEmin already lands
+   below the Damle band; the Fbar-guess refinement is unnecessary. [confirmed]
 
 ## 7. Non-goals
 
@@ -187,6 +228,11 @@ the kept term counts exactly the spectral weight inside the window.
   is OUT of scope; tracked separately. This spec targets the minimal-basis /
   ECP regime where S(k) is PSD. (The non-PSD SCF test in step 5 is only to
   confirm Emin placement is robust, not to fix non-PSD transport.)
+- Corollary (learned during validation): a non-PSD S_eff makes Y_eff complex and
+  the Fbar spectrum meaningless, so the Damle lower contour is garbage. There is
+  therefore no point trying to make the Damle contour "work" on a non-PSD S_eff
+  -- any future non-PSD correction MUST restore S_eff PSD as a precondition.
+  Both in-scope systems (C2-STO3G, Au3-CRENBS) have PSD S_eff (Section 9).
 - No change to the band integrator (densityComplex stays).
 - densityReal is not used for the lower contour (it silently zeros on sub-Emin
   poles; Section 8).
@@ -222,3 +268,54 @@ Fixture tests/fixtures/_diag_lower_tail_methods.py on C2-STO3G (1D contact,
   35580937); slurm-35580937.out
 - 2-probe implementation: gauNEGF/scfE.py:_initAsymptoticSigma (committed work
   in progress)
+
+### Implementation run (2026-05-27, subagent-driven)
+
+- Task 1 damleCrossTerm unit tests: jobs 35593602 (fail, ImportError), 35593629
+  (2 passed). gauNEGF/density.py, tests/test_damle_cross_term.py.
+- Task 2 damleLowerDensity rework (sign fix + cross-term + take Emin/g): jobs
+  35594112 (fail), 35594768 (2 passed). Also fixed a latent bug in commit
+  63f7f54: _initAsymptoticSigma had a local `import jax.numpy as jnp` AFTER an
+  earlier jnp use, raising UnboundLocalError (the committed milestone could not
+  run _initAsymptoticSigma). Removed the local import (module-level jnp exists).
+- delta_N vs Emin sweep (C2-STO3G): job 35614159,
+  tests/fixtures/_diag_deltaN_vs_emin.py. Showed |delta_N| alone is a poor signal
+  (cores below Emin give tr(P@S)~2.0 but delta_N~5e-6). Drove the warning
+  criterion to the TOTAL count: warn if any of |tr(P@S)|, |delta_N|, |sum| > 0.5.
+- Task 3 FockToP warning (total-count criterion) + damle_dN_warn: jobs 35614033
+  (1 failed, old delta_N-only premise), 35615592 (4 passed, new criterion +
+  no-false-positive test). gauNEGF/scfE.py, tests/test_damle_lower_contour.py.
+- Task 4 drop calcTSW/calcPseudoPoleFloor (keep calcEmin; Eminf=ENERGY_MIN,
+  TSW=None, self.tol kept): jobs 35615712 (fail, Eminf assertion), 35615848
+  (5 passed). gauNEGF/scfE.py.
+- Task 5 SCF validation: job 35615896,
+  tests/fixtures/_diag_damle_scf_validate.py.
+  VERDICT: Emin-below-floor PSD=True, non-PSD=True.
+    [C2-STO3G (PSD)]      Emin=-281.414 eV, band floor=-271.317 eV, below: True
+    [C2-LANL2DZ (non-PSD)] Emin=-324.974 eV, band floor=-280.971 eV, below: True
+  C2-STO3G FockToP completed; electron count 12.000 (bisectFermi sign sane);
+  NO spurious lower-contour warning fired in either run (warning silent in
+  normal operation, as designed). Non-PSD: X_asymp Im/||X||~0.51 (flagged
+  non-PSD) but calcEmin still placed Emin below the band.
+
+### Full-SCF convergence + the staleness root cause (2026-05-27)
+
+- Full SCF (negf.SCF), job 35623534, tests/fixtures/_diag_minimal_basis_scf.py:
+  C2-STO3G CONVERGED in 10 iterations (convLevel 5.9e-5). Au3-CRENBS CRASHED at
+  iter ~6: calcFermiMuller asserts ne < len(g.F) because the lower contour
+  reported tr(P@S)=30.5, delta_N=-97.7 (nLower=-67) -> ne-nLower ~ ne+67.
+- Spectrum comparison (setup, true vs Damle), job 35626565,
+  tests/fixtures/_diag_spectrum_compare.py:
+    C2-STO3G : true floor -271.32, Fbar floor -270.14, Emin -281.41; 0 poles
+               below Emin (both); S_eff 0/10 neg eig (PSD); ||Im Y_eff||/||Y|| 1e-16.
+    Au3-CRENBS: true floor -11.88, Fbar floor -11.36, Emin -16.89; 0 poles below
+               Emin (both); S_eff 0/54 neg eig (PSD); ||Im Y_eff||/||Y|| 1e-13.
+  => At setup BOTH systems are consistent (Emin below an empty contour), S_eff is
+  PSD, the two spectra agree to ~0.5 eV. This REFUTED the earlier "Sigma_0 shifts
+  Fbar deep" hypothesis.
+- Corrected root cause: the Au3 crash is STALENESS. FockToP had frozen
+  Sigma_0/Y_eff/Emin at setup; as self.F evolved over SCF cycles, the stale
+  transform Y_eff_0 (F_cycle + Sigma_0_0) Y_eff_0 produced a garbage Fbar with
+  spurious eigenvalues below the frozen Emin -> spurious lower charge -> crash.
+  Fix: recompute Sigma_0/Y_eff + Emin every FockToP (Section 3.3). C2 survived the
+  frozen bug only via its ~270 eV Emin margin.

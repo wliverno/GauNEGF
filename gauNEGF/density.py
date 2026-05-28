@@ -347,76 +347,114 @@ def density(V, Vc, D, Gam, Emin, mu):
     den = V@ prefactor @ V.conj().T
     return den
 
-def damleLowerDensity(F_eV, Y_eff, Sigma_0, buffer, ENERGY_MIN_=ENERGY_MIN):
-    """Analytic Damle density on the lower contour [ENERGY_MIN_, Emin].
+def damleCrossTerm(V, D, Vc, Y_eff, Q0, Q1, lo, hi):
+    """Analytic lower-contour cross-term delta_N for the Damle method.
 
-    Builds the effective-orthogonal Fock matrix Fbar = Y_eff @ (F + Sigma_0) @ Y_eff,
-    diagonalizes it once, picks Emin = min(D.real) - buffer from that same
-    diagonalization, builds the effective broadening matrix, calls the existing
-    density() analytic integrator, and back-transforms to the AO basis.
+    Reuses the eig (V, D, Vc) of Fbar already computed for the density matrix
+    (no second eigendecomposition). Q(E) ~ Q0 + Q1*E is linearized between two
+    anchors. The unphysical linear-Q 'flat' term b1*(hi-lo) is OMITTED -- only
+    the physical in-window-pole term is kept (see
+    docs/lower_contour_math_and_probes.md sec 5 and the spec sec 4):
+
+        delta_N = -(1/pi) Im sum_i (b0_i + b1_i*D_i)
+                                  * [log(1 - hi/D_i) - log(1 - lo/D_i)]
+
+    with b(E) = Vc^dagger Y_eff Q(E) Y_eff V, b0 = diag(...Q0...),
+    b1 = diag(...Q1...). Poles outside [lo, hi] give a real log-difference
+    (no contribution); in-window poles pick up the i*pi (the physical count).
+
+    Parameters
+    ----------
+    V, D, Vc : ndarray
+        Eigendecomposition of Fbar: Fbar = V diag(D) Vc^dagger, Vc = inv(V^dagger).
+    Y_eff : ndarray
+        S_eff^(-1/2).
+    Q0, Q1 : ndarray (N, N)
+        Linear model of crossTermQTot: Q(E) ~ Q0 + Q1*E.
+    lo, hi : float
+        Lower-contour energy limits in eV (lo = ENERGY_MIN, hi = Emin).
+
+    Returns
+    -------
+    float
+        Cross-term electron-count correction delta_N.
+    """
+    Ml = Vc.conj().T @ Y_eff
+    Mr = Y_eff @ V
+    b0 = jnp.diag(Ml @ jnp.asarray(Q0) @ Mr)
+    b1 = jnp.diag(Ml @ jnp.asarray(Q1) @ Mr)
+    logdiff = jnp.log(1.0 - hi / D) - jnp.log(1.0 - lo / D)
+    contrib = (b0 + b1 * D) * logdiff
+    return float(-(1.0 / jnp.pi) * jnp.imag(jnp.sum(contrib)))
+
+def damleLowerDensity(F_eV, Y_eff, Sigma_0, g, Emin, ENERGY_MIN_=ENERGY_MIN):
+    """Analytic Damle lower-contour density on [ENERGY_MIN_, Emin].
+
+    Builds Fbar = Y_eff (F + Sigma_0 + i*ETA) Y_eff, diagonalizes it ONCE, and
+    returns both the lower-contour density matrix (in the AO basis) and the
+    analytic cross-term delta_N (which reuses the same eig; no second
+    decomposition).
+
+    The matrix is NEGATED so its sign matches the trusted densityComplex
+    convention (the bare analytic density() result is globally sign-flipped
+    relative to densityComplex; confirmed in the bake-off, jobs 35562575/
+    35580937). The cross-term uses a linear model of crossTermQTot(E) anchored
+    near the band bottom at (Emin, 2*Emin) and DROPS the unphysical linear-Q
+    flat term (see damleCrossTerm and the spec).
 
     Parameters
     ----------
     F_eV : ndarray (N, N)
         Device Fock matrix in eV.
     Y_eff : ndarray (N, N)
-        S_eff^(-1/2), where S_eff = S - X_asymp. May be complex if S_eff is
-        indefinite. Computed once at contact setup by NEGFE._initAsymptoticSigma.
+        S_eff^(-1/2) (from NEGFE._initAsymptoticSigma).
     Sigma_0 : ndarray (N, N)
-        Asymptotic constant part of the contact self-energy. May be complex
-        (anti-Hermitian piece gives nonzero broadening).
-    buffer : float
-        Positive distance (eV) below min(D.real) used to place Emin.
-        Tunable via NEGFE.damle_buffer (default from config.EMIN_BUFFER).
+        Asymptotic constant contact self-energy.
+    g : surfG object
+        Provides crossTermQTot(E) for the cross-term. If it returns None
+        (orthogonal system), delta_N = 0.
+    Emin : float
+        Upper bound of the lower contour in eV (set by calcEmin upstream).
     ENERGY_MIN_ : float, optional
-        Lower bound of the lower-contour integral in eV. Defaults to the
-        global config.ENERGY_MIN (typically -1e6).
+        Lower bound in eV (default config.ENERGY_MIN).
 
     Returns
     -------
-    P_lower : ndarray (N, N)
-        Density matrix contribution from the deep tail [ENERGY_MIN_, Emin]
-        in the AO basis. Complex if Y_eff is complex.
-    Emin : float
-        Upper bound of the lower contour. The caller uses this as the lower
-        bound of the upper-contour integral [Emin, mu].
-
-    Notes
-    -----
-    Pure function: no state, no cross-term return. The Mulliken cross-term
-    delta_N that densityComplex returns is subsumed into the S_eff framework
-    here (verified by the pre-implementation gate test
-    tests/test_damle_seff_gate.py).
+    tuple (ndarray, float)
+        (P_lower, delta_N).
     """
     F_eV = jnp.asarray(F_eV)
     Y_eff = jnp.asarray(Y_eff)
     Sigma_0 = jnp.asarray(Sigma_0)
     N = F_eV.shape[0]
+    Emin = float(Emin)
+    lo = float(ENERGY_MIN_)
 
-    # Build effective-orthogonal Fock and broadening.
-    # The +i*ETA*I shift is the standard NEGF retarded-Green's-function
-    # regularization (G_R(E) = 1/((E+i*eta)*I - H - Sigma_R)); it guarantees
-    # nonzero anti-Hermitian piece so the analytic integrator's
-    # 1/(DD - DD^H) factor is finite. ETA is the canonical broadening
-    # constant defined in gauNEGF/config.py (default 1e-5 eV).
     H_eff = F_eV + Sigma_0 + 1j * ETA * jnp.eye(N)
     Fbar = Y_eff @ H_eff @ Y_eff
     Gam = (H_eff - H_eff.conj().T) * 1j
     GamBar = Y_eff @ Gam @ Y_eff
 
-    # Diagonalize Fbar once; D supplies both the integrand and Emin.
     D, V = jnp.linalg.eig(Fbar)
     Vc = jnp.linalg.inv(V.conj().T)
 
-    # Emin policy (spec 2.5): below every Re part by `buffer`.
-    Emin = float(np.min(D.real)) - float(buffer)
+    # Density matrix; negate to match densityComplex sign convention.
+    P_orth = density(V, Vc, D, GamBar, lo, Emin)
+    P_lower = -(Y_eff @ jnp.asarray(P_orth) @ Y_eff)
 
-    # Analytic Damle integral in the effective-orthogonal basis.
-    P_orth = density(V, Vc, D, GamBar, float(ENERGY_MIN_), Emin)
+    # Analytic cross-term: linear Q at near-band anchors (Emin, 2*Emin).
+    Qa = g.crossTermQTot(Emin)
+    if Qa is None:
+        delta_N = 0.0
+    else:
+        Ea, Eb = Emin, 2.0 * Emin
+        Qa = jnp.asarray(Qa)
+        Qb = jnp.asarray(g.crossTermQTot(Eb))
+        Q1 = (Qb - Qa) / (Eb - Ea)
+        Q0 = Qa - Q1 * Ea
+        delta_N = damleCrossTerm(V, D, Vc, Y_eff, Q0, Q1, lo, Emin)
 
-    # Back-transform to AO. Symmetric inverse sqrt -> sandwich on both sides.
-    P_lower = Y_eff @ jnp.asarray(P_orth) @ Y_eff
-    return P_lower, Emin
+    return P_lower, delta_N
 
 def bisectFermi(V, Vc, D, Gam, Nexp, conv=FERMI_CALCULATION_TOL, Eminf=ENERGY_MIN):
     """

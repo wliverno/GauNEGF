@@ -1,32 +1,33 @@
-# Damle Lower Contour: Replacing the Pseudo-Pole Machinery
+# Damle Lower Contour: Analytic Deep-Tail Integration
 
 Date: 2026-05-22
-Status: Design (pending implementation plan)
+Status: Design (implemented Phases 0-3; lower-half Emin policy in debug)
 
 ## 1. Problem
 
-The lower-contour density integral `densityComplex(F, S, g, Eminf, Emin)`
-trips on pseudo-poles when the device-contact coupling is non-orthogonal
-(asymptotically E-linear contact Sigma). The current production code stacks
-three workarounds on top of each other to suppress the symptom:
+The density integral is split into two contours that meet at `Emin`:
 
-  - `calcPseudoPoleFloor`: detect where pseudo-poles live and refuse to
-    integrate past them.
+  - UPPER `[Emin, mu]`: `densityComplex` with the full energy-dependent
+    `Sigma(E)`. This has historically worked and is NOT modified by this
+    spec. Any bug is in the lower contour, never here.
+  - LOWER `[ENERGY_MIN, Emin]`: the deep tail. This is what we replace.
+
+The old lower-contour path, `densityComplex(F, S, g, Eminf, Emin)`,
+misbehaves for E far below the band, where the non-orthogonal contact
+self-energy grows linearly (`Sigma(E) ~ Sigma_0 + E*X`) and the device
+Green function looks like a generalized eigenproblem in an indefinite
+metric. Production stacked three workarounds to suppress the symptom:
+
+  - `calcPseudoPoleFloor`: pick a floor and refuse to integrate past it.
   - `calcTSW`: iteratively search for the deepest Eminf at which Total
-    Spectral Weight is stable, accepting `dTSW < 0` as a signal that a
-    deep pseudo-pole has been crossed.
-  - `Eminf_floor` clamping in `FockToP`/`setIntegralLimits`: enforce the
-    floor and prevent the contour from inverting.
+    Spectral Weight is stable.
+  - `Eminf_floor` clamping in `FockToP`/`setIntegralLimits`.
 
-Each layer has been patched repeatedly; the math underneath was never
-right. The contour integration with energy-dependent Sigma simply does not
-behave for E far below the band, where Sigma(E) ~ Sigma_0 + E*X makes
-the device Green function look like a generalized eigenproblem in an
-indefinite metric.
-
-This spec replaces all three layers with a single principled scheme:
-analytic Damle integration of the lower contour using the effective
-overlap `S_eff = S - X` and the asymptotic constant `Sigma_0`.
+Each layer has been patched repeatedly; the lower-contour math underneath
+was never right. This spec replaces all three with a single principled
+scheme: analytic Damle integration of the lower contour using the
+effective overlap `S_eff = S - X` and the asymptotic constant `Sigma_0`.
+The upper contour is left exactly as-is.
 
 ## 2. Math
 
@@ -62,25 +63,32 @@ overlap. The Damle analytic density formula, derived under the
 assumption of energy-independent Sigma, becomes exact in this
 representation in the asymptotic regime.
 
-### 2.3 Indefinite S_eff and pseudo-poles
+### 2.3 Complex-symmetric, non-Hermitian S_eff
 
-S_eff need not be positive definite. Its negative eigenvalues correspond
-exactly to the pseudo-poles of the original problem: device states
-pulled outside the physical positive-norm Hilbert space by the contact
-coupling. The empirical test on C2 LANL2DZ confirmed this: 4 negative
-eigenvalues of S_eff matched the 4 pseudo-poles reported by the old
-`calcPseudoPoleFloor`.
+S_eff is in general NEITHER Hermitian NOR positive definite. The retarded
+contact self-energy has the form Sigma = A @ g_surf @ A^dagger with g_surf
+complex-symmetric (the inverse of (E+i*eta)*S_c - H_c, both real-symmetric),
+so Sigma -- and hence X_asymp and `S_eff = S - X_asymp` -- is
+COMPLEX-SYMMETRIC (S_eff = S_eff^T) but NOT Hermitian: it carries broadening,
+Gamma = i(Sigma - Sigma^dagger) != 0.
 
-The effective inverse square root
+Empirically on C2 LANL2DZ: ||Im X||/||X|| = 0.51, ||X - X^dag||/||X|| = 1.03
+(fully non-Hermitian), ||X - X^T||/||X|| = 3e-16 (exactly complex-symmetric).
+
+Consequence for the effective inverse square root
 
     Y_eff = S_eff^(-1/2)                                         (5)
 
-is real-symmetric when S_eff is PSD and complex-symmetric otherwise
-(eigh + np.emath.sqrt). The Damle density formula in the orthogonalized
-basis uses Y_eff for the symmetric transformation and tolerates a
-complex Y_eff: pseudo-poles appear as complex eigenvalues of the
-transformed Fock matrix and contribute through standard residue
-arithmetic.
+it MUST be computed with a general (non-symmetric) eigendecomposition,
+`Y_eff = V @ diag(D^(-1/2)) @ V^(-1)` where `S_eff = V @ diag(D) @ V^(-1)`
+(see `utils.inv_sqrt_general`). This satisfies `Y_eff @ S_eff @ Y_eff = I` to
+machine precision for any diagonalizable S_eff. Using eigh (which assumes a
+Hermitian matrix and uses one triangle) is WRONG here: on C2 LANL2DZ the
+eigh-based Y_eff gives ||Y S_eff Y - I|| = 4.26 versus 9e-15 for general eig --
+a complete failure, not a small approximation. The physical lower-contour
+density is independent of the sqrt branch, since
+G(E) = Y(EI - Fbar)^(-1)Y reduces to [E*S_eff - H_eff]^(-1) for any Y with
+Y @ Y = S_eff^(-1).
 
 ### 2.4 Lower contour density
 
@@ -101,38 +109,48 @@ exercises this function with complex Y_eff (indefinite S_eff case)
 and produces finite output via `np.emath.sqrt` machinery, so no
 modification is anticipated. Implementation must spot-check that
 the function tolerates complex D (eigenvalues of Fbar with non-zero
-imaginary part from pseudo-poles) without internal real-cast bugs.
+imaginary part) without internal real-cast bugs.
 
-### 2.5 Emin policy
+### 2.5 Emin policy (split point) -- validation pending
 
 The split point between Damle (lower) and densityComplex (upper) is
 
     Emin = min(D.real) - buffer                                  (7)
 
-over ALL eigenvalues of Fbar, real and complex. This places Emin below
-every eigenvalue Re part. Consequently:
+over ALL eigenvalues of Fbar (D from eig(Fbar)), real and complex. With a
+CORRECT Y_eff (section 2.3), Fbar = Y_eff @ H_eff @ Y_eff has as its
+eigenvalues the genuine generalized eigenvalues of (F + Sigma_0, S_eff) -- the
+poles of the asymptotic Green's function [E*S_eff - H_eff]^(-1), i.e. the
+physical pole locations in the deep tail. So (7) places Emin below the deepest
+such pole:
 
-  - `[ENERGY_MIN, Emin]` contains no real poles -- it is the deep
-    asymptotic tail. Damle handles it analytically; the asymptotic
-    Sigma framework is exact at these energies.
-  - `[Emin, mu]` contains all bound states and any pseudo-poles.
-    Standard `densityComplex` with energy-dependent Sigma handles
-    this region; pseudo-poles inside this contour are not a problem
-    when the contour closes correctly at the physical Fermi level
-    (empirically verified: `densityComplex(Emin, mu=+1e6) = 23.2`
-    matches Total Spectral Weight = 2N for C2 LANL2DZ).
+  - `[ENERGY_MIN, Emin]` is the deep asymptotic tail; Damle handles it
+    analytically (the asymptotic Sigma form (1) holds there).
+  - `[Emin, mu]` is handled by standard `densityComplex` with the full
+    energy-dependent Sigma(E). This upper contour has historically worked and
+    is NOT modified here.
 
-The pp pathology the old machinery was fighting was a symptom of the
-LOWER contour being numerically misbehaved, not of the upper contour
-having a real problem. Fixing the lower contour properly leaves the
-upper contour alone.
+The total density is correct for any Emin that (a) lies where (1) holds and
+(b) is stable across SCF cycles.
 
-Buffer default: 20 eV (single value, not a range). Exposed as
-`self.damle_buffer` initialized from a constant `EMIN_BUFFER`
-in `gauNEGF/config.py`. Tunable via config. Small enough to stay near
-the spectrum edge for Damle accuracy; large enough that broadening
-does not push physical density across the boundary. Noteably, this 
-replaces the hardcoded buffer in scf.py as a tunable parameter
+IMPORTANT (validation pending, see the lower-half debug plan): the earlier
+C2 LANL2DZ divergence was diagnosed against an Emin computed from a GARBAGE
+eigh-based Y_eff (section 2.3 -- the old Y_eff had ||Y S_eff Y - I|| = 4.26,
+so Fbar and its eigenvalues were meaningless). The "Emin is the bug" diagnosis
+therefore rests on invalid data. With the corrected Y_eff, policy (7) may be
+fine as-is. Two residual risks to confirm by the DEFINITIVE C2 LANL2DZ SCF run
+(no presumed Fermi value -- the contacted Fermi is unknown a priori; success =
+the SCF converges to a stable self-consistent Fermi with a sensible electron
+count and Hermitian P): (a) S_eff is indefinite/near-singular, so a near-zero
+S_eff direction could throw a large-magnitude generalized eigenvalue and a
+pathological Emin; (b) cycle-to-cycle Emin instability. If the SCF prints a
+stable, sane Emin and converges, NO Emin change is made. Only if it does not
+do we switch Emin to a stable integrability-based split (e.g. the (F,S) band
+bottom) -- the single contingency change.
+
+Buffer default: 20 eV. Exposed as `self.damle_buffer`, initialized from
+`EMIN_BUFFER` in `gauNEGF/config.py`, tunable via config. Replaces the
+hardcoded buffer that used to live in scf.py.
 
 ### 2.6 Cache freshness under mu changes
 
@@ -198,39 +216,46 @@ Called from `setContact1D` / `setContactBethe` / `setSigma` after
 `self.g` exists. ALSO called from `setVoltage` after `self.g.setF`
 to refresh stale `Sigma_0` (see 2.6). Sets/refreshes:
 
-    self.Sigma_0   # asymptotic constant from (1)
-    self.X_asymp   # asymptotic linear coefficient from (1)
-    self.S_eff     # S - X_asymp
-    self.Y_eff     # S_eff^(-1/2), possibly complex
+    self.Sigma_0   # asymptotic constant from (1), complex-symmetric
+    self.X_asymp   # asymptotic linear coefficient from (1), complex-symmetric
+    self.S_eff     # S - X_asymp, complex-symmetric / non-Hermitian (NOT real)
+    self.Y_eff     # S_eff^(-1/2) via general eig (inv_sqrt_general), complex
     self.damle_buffer  # initialized to EMIN_BUFFER on first call only,
                        # preserved on re-fit so user customization survives
 
 Implementation: three deep probes (E1 = -1e3, E2 = -1e4, E3 = -1e5
 defaults), fit a line through Sigma(E_i), report residual to caller,
 warn if asymptotic linearity is poor (||residual|| / ||Sigma|| > 1%
-at the deepest probe). Computes `Y_eff = S_eff^(-1/2)` using the
-new utils helper described in 3.3.
+at the deepest probe). X_asymp is kept FULLY COMPLEX (no Re(), no
+symmetrization -- see 2.3), and `Y_eff = S_eff^(-1/2)` is computed with the
+general-eig helper in 3.3. Also prints diagnostics: ||Im X||/||X||, the
+non-Hermiticity ||X - X^dag||/||X||, the non-symmetry ||X - X^T||/||X||, and
+the defining-property defect ||Y_eff @ S_eff @ Y_eff - I||.
 
 On re-fit calls (from setVoltage), X_asymp/S_eff/Y_eff are recomputed
 but mathematically guaranteed invariant (see 2.6); the redundant work
 is accepted for code simplicity over per-component caching.
 
-### 3.3 Extend `gauNEGF/utils.py`: indefinite-tolerant matrix power
+### 3.3 Extend `gauNEGF/utils.py`: general (non-Hermitian) inverse sqrt
 
-The existing `fractional_matrix_power(S, power)` in `utils.py`
-clamps eigenvalues with `jnp.maximum(eigenvalues, 1e-16)` before
-applying the power, which silently corrupts the result for
-indefinite S. Add a sibling JAXed function:
+S_eff is complex-symmetric and non-Hermitian (section 2.3), so a Hermitian
+eigendecomposition (eigh) is the wrong tool. Add a JAXed helper that makes no
+symmetry assumption:
 
-    fractional_matrix_power_signed(S, power)
-        -> S^power; real output if S is PSD, complex if indefinite
+    inv_sqrt_general(M)
+        -> M^(-1/2) via general eig: V @ diag(D^(-1/2)) @ V^(-1)
 
-Implementation: `eigh(S)` (S is real-symmetric or complex-Hermitian,
-both supported by `jnp.linalg.eigh`), then
-`jnp.power(eigenvalues.astype(jnp.complex128), power)` so negative
-eigenvalues' fractional powers come out via complex arithmetic
-without a separate NaN-producing branch. Output is complex-symmetric.
-Lives alongside `fractional_matrix_power` and `inv` for discoverability.
+Implementation: `D, V = jnp.linalg.eig(M)` (the same general-eig wrapper used
+elsewhere in the module), `D_inv_sqrt = jnp.power(D.astype(complex128), -0.5)`,
+return `V @ diag(D_inv_sqrt) @ jnp.linalg.inv(V)`. Satisfies `Y @ M @ Y = I` to
+machine precision for any diagonalizable M (Hermitian, complex-symmetric, or
+neither). `@jit`, requires `jax_enable_x64` (set at package import via
+`density.py`). Lives alongside `fractional_matrix_power` and `inv`.
+
+HISTORICAL NOTE: an earlier draft used an eigh-based
+`fractional_matrix_power_signed`, which silently assumed a Hermitian S_eff.
+That was a bug -- on C2 LANL2DZ it produced `||Y S_eff Y - I|| = 4.26`. It has
+been removed (function + tests) and replaced by `inv_sqrt_general`.
 
 The existing PSD-only `fractional_matrix_power` is kept unchanged
 (faster real-only path for callers that know S is PSD).
@@ -261,15 +286,26 @@ After:
 
 The `compContourP2(mu)` helper for the upper piece is unchanged.
 
-### 3.5 Removed
+### 3.5 Removed / to-remove
 
+Already removed:
+  - `fractional_matrix_power_signed` (utils.py) + its tests -- replaced by
+    `inv_sqrt_general` (the eigh assumption was wrong; see 2.3 / 3.3).
+
+To remove once the Emin policy is validated (the definitive C2 LANL2DZ SCF run,
+which still exercises the old setup path -- task: simplify `setIntegralLimits`):
   - `calcPseudoPoleFloor` (density.py)
   - `calcTSW` (density.py) and its `dTSW < 0` branch
-  - `calcEmin` (density.py) -- redundant once D supplies Emin
   - pp-floor clamping in `FockToP` and `setIntegralLimits` (scfE.py)
   - `Emin_floor` / `Eminf_` derivations
   - `self.TSW` attribute and its warm-start logic
   - Corresponding test files (see Section 6)
+
+NOT removed -- status revised:
+  - `calcEmin` (density.py): RETAINED. The earlier "redundant once D supplies
+    Emin" claim is withdrawn -- if the Fbar-based Emin (7) proves unstable on
+    the definitive SCF run, `calcEmin`'s (F,S) band bottom is the contingency
+    split. It is also still used at initial setup. Not pp machinery.
 
 ### 3.6 Kept, neutered
 
