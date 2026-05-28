@@ -154,6 +154,7 @@ class NEGFE(NEGF):
                     'WARNING: symmetrize_contacts=True but contact overlap blocks differ. '
                     'Contacts may not be equivalent materials.'
                 )
+                print(np.max(abs(SL-SR)))
         # if tauList is a list of atom numbers (rather than a matrix), generate orbital indices
         if tauList is not None:
             if len(np.shape(tauList[0])) == 1:
@@ -535,22 +536,15 @@ class NEGFE(NEGF):
             # self.F changes every SCF cycle, and the asymptotic fit
             # (Sigma_0 / S_eff / Y_eff) AND Emin all depend on it -- recompute
             # them on the CURRENT Fock before building the lower contour.
-            # Restores the pre-Damle per-call behavior: freezing them at setup
-            # let a stale Y_eff/Sigma_0 applied to an evolved F produce a garbage
-            # Fbar with spurious sub-Emin eigenvalues (the Au3-CRENBS SCF crash,
-            # job 35623534). Emin uses calcEmin as-is (true-Sigma DOS), same fresh
-            # call as setup; for PSD S_eff the Fbar floor ~= the true floor so
-            # this lands below the Damle band too.
             self._initAsymptoticSigma()
             # Seed calcEmin with the Damle-anchored Emin guess (Fbar band floor
             # minus buffer); the DOS loop only goes deeper from there, so this
             # keeps Emin below the operator Damle actually integrates -- not just
-            # below the bare-Fock floor. Resolves the spectrum mismatch on
-            # high-||Sigma_0|| systems (CNT33_5cell, Au10FullPDT).
+            # below the bare-Fock floor. 
             self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g,
                                  tol=self.tol, Emin=self.damleEmin)
             # Lower contour [ENERGY_MIN, Emin] via analytic Damle: damleLowerDensity
-            # returns the (sign-corrected) lower density matrix and the analytic
+            # returns the lower density matrix and the analytic
             # cross-term delta_N. The lower contour should hold ~zero charge --
             # Damle uses the constant asymptotic Sigma_0, valid only in the deep
             # tail. If any term -- the bulk tr(P@S), the cross-term delta_N, or
