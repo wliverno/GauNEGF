@@ -124,3 +124,59 @@ def test_focktop_refits_stale_sigma0_for_current_fock():
     negf.FockToP()
     rel = norm(np.asarray(negf.Sigma_0) - sigma0_setup) / max(norm(sigma0_setup), 1e-30)
     assert rel < 1e-6, f'FockToP did not refit Sigma_0 (rel diff {rel:.3e})'
+
+
+def test_init_asymptotic_sigma_sets_damle_emin_from_fbar_floor():
+    # damleEmin is the Damle-anchored Emin guess: band floor of the operator
+    # Damle integrates, Fbar = Y_eff (F + Sigma_0) Y_eff, minus damle_buffer.
+    # For large-Sigma_0 systems Fbar's floor sits well below the bare-Fock floor,
+    # so this is the right anchor (CNT33_5cell mismatch case).
+    negf = _c2_setup()
+    F_eV = np.asarray(negf.F) * har_to_eV
+    Y = np.asarray(negf.Y_eff)
+    S0 = np.asarray(negf.Sigma_0)
+    Fbar = Y @ (F_eV + S0) @ Y
+    fbar_floor = float(np.real(np.linalg.eigvals(Fbar)).min())
+    expected = fbar_floor - negf.damle_buffer
+    assert hasattr(negf, 'damleEmin'), 'damleEmin not set by _initAsymptoticSigma'
+    assert abs(negf.damleEmin - expected) < 1e-6, \
+        f'damleEmin={negf.damleEmin}, expected={expected} (Fbar floor {fbar_floor} - buffer {negf.damle_buffer})'
+
+
+def test_focktop_seeds_calcemin_with_damle_emin_guess(monkeypatch):
+    # FockToP recomputes Emin via calcEmin every cycle (per-cycle update). The
+    # seed handed to calcEmin must be self.damleEmin (the Fbar-anchored guess),
+    # not None. This keeps the DOS loop confirming/deepening from where Damle
+    # actually has its band floor, fixing the true-vs-Damle spectrum mismatch
+    # that CNT33_5cell hits.
+    negf = _c2_setup()
+    negf.updFermi = False
+    captured = {}
+    def fake_calcEmin(F, S, g, tol=None, maxN=None, Emin=None):
+        captured['Emin'] = Emin
+        return -281.0  # plausible deep value so FockToP downstream runs cleanly
+    import gauNEGF.scfE as scfE
+    monkeypatch.setattr(scfE, 'calcEmin', fake_calcEmin)
+    negf.FockToP()
+    assert 'Emin' in captured, 'FockToP did not call calcEmin'
+    assert captured['Emin'] is not None, \
+        'FockToP called calcEmin without an Emin seed (the Fbar-anchored guess)'
+    assert abs(captured['Emin'] - negf.damleEmin) < 1e-9, \
+        f'FockToP seeded calcEmin with {captured["Emin"]}, expected damleEmin={negf.damleEmin}'
+
+
+def test_calcemin_default_offset_is_EMIN_BUFFER():
+    # calcEmin without an Emin seed used to subtract a hardcoded 5 eV from the
+    # band-floor eigenvalue; it now subtracts EMIN_BUFFER (20 eV by default).
+    # For C2-STO3G this puts the no-seed start ~15 eV deeper than before.
+    from gauNEGF.density import calcEmin
+    from gauNEGF.config import EMIN_BUFFER
+    assert EMIN_BUFFER > 10.0, f'EMIN_BUFFER unexpectedly small: {EMIN_BUFFER}'
+    negf = _c2_setup()
+    F_eV = np.asarray(negf.F) * har_to_eV
+    S = np.asarray(negf.S)
+    emin = float(calcEmin(F_eV, S, negf.g, tol=1e-3))
+    # Old behavior (5 eV offset): emin ~ -281 (C2). New (EMIN_BUFFER=20):
+    # emin ~ -296. Anything <= -290 confirms the new offset is in effect.
+    assert emin <= -290.0, \
+        f'calcEmin returned {emin}; expected <= -290 with EMIN_BUFFER={EMIN_BUFFER}'

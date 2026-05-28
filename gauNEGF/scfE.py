@@ -280,6 +280,18 @@ class NEGFE(NEGF):
             # continuity; it no longer thresholds delta_N alone.
             self.damle_dN_warn = 0.5
 
+        # Damle-anchored Emin guess: band floor of Fbar = Y_eff (F + Sigma_0) Y_eff
+        # -- the operator the analytic lower contour ACTUALLY integrates -- minus
+        # damle_buffer. For systems where Sigma_0 is large (e.g. CNT33_5cell with
+        # ||Sigma_0|| ~ 100+), Fbar's floor sits well below the bare-Fock floor,
+        # so seeding calcEmin from here (then DOS-loop confirming) prevents the
+        # true-vs-Damle spectrum mismatch that traps spurious charge in the lower
+        # contour. For low-||Sigma_0|| systems (Au3, ~23) the two floors agree
+        # and this collapses to the bare-Fock guess. See Section 9 of the spec.
+        Fbar_guess = jnp.asarray(Y_eff) @ (jnp.asarray(F_eV) + jnp.asarray(Sigma_0)) @ jnp.asarray(Y_eff)
+        D_fbar = np.real(np.asarray(jnp.linalg.eig(Fbar_guess)[0]))
+        self.damleEmin = float(D_fbar.min()) - self.damle_buffer
+
         # Diagnostics: how far X_asymp / S_eff are from the Hermitian/symmetric
         # assumptions the old eigh path silently made, and the defining-property
         # check Y_eff @ S_eff @ Y_eff = I (must be ~machine precision).
@@ -530,7 +542,13 @@ class NEGFE(NEGF):
             # call as setup; for PSD S_eff the Fbar floor ~= the true floor so
             # this lands below the Damle band too.
             self._initAsymptoticSigma()
-            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, tol=self.tol)
+            # Seed calcEmin with the Damle-anchored Emin guess (Fbar band floor
+            # minus buffer); the DOS loop only goes deeper from there, so this
+            # keeps Emin below the operator Damle actually integrates -- not just
+            # below the bare-Fock floor. Resolves the spectrum mismatch on
+            # high-||Sigma_0|| systems (CNT33_5cell, Au10FullPDT).
+            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g,
+                                 tol=self.tol, Emin=self.damleEmin)
             # Lower contour [ENERGY_MIN, Emin] via analytic Damle: damleLowerDensity
             # returns the (sign-corrected) lower density matrix and the analytic
             # cross-term delta_N. The lower contour should hold ~zero charge --
