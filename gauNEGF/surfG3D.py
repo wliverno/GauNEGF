@@ -1481,9 +1481,16 @@ class surfGAt3D:
                 S_k += phase * self.Slist[i]
 
             # Solve generalized eigenvalue problem: H|psi> = E S|psi>
-            # First transform to standard eigenvalue problem: S^(-1/2) H S^(-1/2) |phi> = E |phi>
-            S_inv = LA.inv(S_k)
-            H_transformed = S_inv @ H_k
+            # Transform to standard eigenvalue problem via symmetric Lowdin:
+            #     X H X |phi> = E |phi>      with X = S^(-1/2).
+            # X H X is Hermitian (both X and H Hermitian, conjugation preserves
+            # Hermiticity), so eigh is correct. The previous form S_inv @ H is
+            # NOT Hermitian for non-trivial S, and eigh would silently take its
+            # upper triangle and return wrong band eigenvalues. (Comment and
+            # math now agree.) fractional_matrix_power is @jit-decorated, so
+            # the per-k cost is dominated by a small eigh on S_k.
+            X_k = fractional_matrix_power(S_k, -0.5)
+            H_transformed = X_k @ H_k @ X_k
             evals, _ = LA.eigh(H_transformed)
             bands.append(jnp.sort(jnp.real(evals)) - E_fermi)
 

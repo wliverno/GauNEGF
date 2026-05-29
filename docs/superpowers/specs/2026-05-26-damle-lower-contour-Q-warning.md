@@ -156,21 +156,26 @@ density P = P_lo + P_hi; lower electron count uses nLower = tr(P_lo S) + delta_N
 (delta_N now real, not discarded). The deprecated fixed-grid (N2 not None) path
 is untouched.
 
-Emin is seeded with self.damleEmin (the Fbar-anchored guess set by
-_initAsymptoticSigma: min(Re eig(Y_eff (F + Sigma_0) Y_eff)) - damle_buffer);
-calcEmin's DOS loop only goes deeper from that seed, so the result is the
-deeper of (Damle floor - buffer) and (point where true-Sigma DOS falls below
-tol). For low-||Sigma_0|| systems (Au3, ~23) the Damle and true band floors
-agree and the seed reduces to the bare-Fock guess. For high-||Sigma_0||
-systems (CNT33_5cell ~80-220, Au10FullPDT-GSO comparable), Fbar's floor sits
-tens of eV below the bare-Fock floor; without the Damle-anchored seed,
-calcEmin stops where true-Sigma DOS first drops, leaving Fbar's spurious
-deeper eigenvalues *inside* the lower contour -- the warning correctly fires
-with tr(P@S) of tens of electrons. Seeding with the Damle anchor places Emin
-where Damle actually has its band floor and prevents the mismatch by
-construction. (Earlier draft claimed this seed was unnecessary based on Au3
-evidence alone -- that conclusion was overgeneralized; the CNT data refuted
-it. See Section 9.)
+Emin is anchored to calcEmin's F-based default (`min eigh(F) - EMIN_BUFFER`,
+all JAX/precompiled via gauNEGF.utils), then deepened by the DOS loop using the
+true energy-dependent Sigma(E). FockToP passes no `Emin=` seed; calcEmin's
+own start path runs. Rationale: F is Hermitian and perfectly conditioned, so
+the anchor is purely a function of the device's molecular orbital spectrum and
+moves smoothly with self.F. The DOS loop uses the operator best suited for
+deepening (true Sigma(E) near the band, where Sigma_0 would not be accurate).
+
+This replaces a previous attempt to seed `Emin` with a Fbar-anchored guess
+(`damleEmin = min Re eig Fbar - buffer`). The CNT33_5cell data overturned that
+design: Fbar's eigenvalues are all well-conditioned (kappa_eig ~ 1-16 across all
+iterations), but they include modes that are artifacts of the constant-Sigma_0
+approximation applied to F outside its asymptotic regime. Those artifact modes
+drifted as deep as -38,000 eV during SCF, and seeding calcEmin from them yanked
+Emin to unphysical depths (the DOS loop only deepens, never shallows). The
+F-based anchor is immune to this because F itself does not depend on Sigma_0
+and has only physical content. See Section 9 for the CNT diagnostic data.
+
+`damleEmin` and `damle_buffer` were removed. The Damle-anchored guess is no
+longer computed.
 
 ### 3.4 `setIntegralLimits` -- drop calcTSW + calcPseudoPoleFloor (keep calcEmin)
 
@@ -227,12 +232,16 @@ the kept term counts exactly the spectral weight inside the window.
 5. Sigma_0/Y_eff and Emin are recomputed EVERY FockToP call on the current Fock,
    not frozen at setup (they all depend on self.F, which changes each SCF cycle).
    This is the pre-Damle behavior; the Damle rewiring had regressed it. [confirmed]
-6. Emin guess: Fbar-floor anchor (self.damleEmin = min(Re eig Fbar) -
-   damle_buffer) seeded into calcEmin; the DOS loop confirms/deepens. Earlier
-   draft claimed this was unnecessary based on Au3 alone (where Fbar floor ~=
-   true floor); CNT33_5cell with ||Sigma_0|| ~ 100+ refuted that. The seed
-   collapses to the bare-Fock guess for low-Sigma_0 systems and protects the
-   high-Sigma_0 mismatch case. calcEmin's no-seed default offset is also
+6. Emin anchor: calcEmin's F-based default (`min eigh(F) - EMIN_BUFFER`, all
+   JAX/precompiled via gauNEGF.utils); FockToP calls calcEmin with no `Emin=`
+   seed. The DOS loop then deepens using the true energy-dependent Sigma(E).
+   The previously-attempted Fbar-floor seed was reverted: CNT33_5cell data
+   showed Fbar has well-conditioned (kappa_eig ~ 1-16) but unphysical deep
+   modes -- artifacts of the constant-Sigma_0 approximation, not actual G^R
+   poles -- that drift to -10^4 / -10^5 eV during SCF. Seeding from them
+   yanked Emin to unphysical depths since the DOS loop only goes deeper. F is
+   Hermitian and depends only on the device's MO content, so the F-based
+   anchor is purely physical and stable. calcEmin's no-seed default offset is
    widened from a hardcoded 5 eV to EMIN_BUFFER (config: 20 eV). [confirmed]
 
 ## 7. Non-goals
@@ -371,3 +380,51 @@ Fixture tests/fixtures/_diag_lower_tail_methods.py on C2-STO3G (1D contact,
   jobs); the unit tests + minimal-basis integration suffice to validate the
   mechanism; the predicted effect is that the lower-contour warning frequency
   drops sharply on those systems.
+
+### Fbar-floor seed reverted; F-based anchor restored (2026-05-28)
+
+- CNT33_5cell SCF (NEGFTests/CNT33_5cell_ESCF.out) instrumented with a `[cond]`
+  diagnostic in `_initAsymptoticSigma` printing per FockToP call: kappa(S_eff),
+  kappa_eig (=||u_i||*||v_i||) distribution of Fbar's eigendecomposition, and
+  three candidate damleEmin values (naive = `min Re eig Fbar - buffer`,
+  filtered = naive with kappa_eig<100 modes only, bare = `min Re eig(F+Sigma_0)
+  - buffer`).
+- Evidence:
+    kappa(S_eff)=123 (vs 5.7 for C2, 9 for Au3), |eig S_eff| min = 0.023.
+    kappa_eig: min=1.00, median=1.00-1.01, max across whole run 16.2. All 300
+        modes well-conditioned at every iteration. *Story A (near-defective
+        non-Hermitian eigenvalues) refuted for CNT.*
+    naive across 37 prints: range [-361, -38543] eV; 8 iterations exceed
+        -1000 eV depth; worst is -38543.
+    bare across the same prints: range [-348, -1066] eV; ~30x more stable.
+    filtered == naive at every print (the kappa<100 filter never triggered).
+- Conclusion: Fbar's deep eigenvalues are well-conditioned mathematical
+  artifacts of the constant-Sigma_0 approximation applied where it is not
+  asymptotically exact; they are NOT poles of the true G^R. Filtering by
+  kappa_eig is the wrong fix because the artifacts are *not* near-defective;
+  switching to bare partially helps because the Y_eff sandwich is what
+  introduces them.
+- The cleanest fix is even simpler: drop the Fbar-floor seed entirely and let
+  calcEmin run its F-based default each FockToP call. F is Hermitian, perfectly
+  conditioned, and depends only on the device's MO content. The DOS loop then
+  deepens using true Sigma(E) (the operator most accurate near the band).
+- Code revert (this commit):
+    (a) `_initAsymptoticSigma` no longer computes self.damleEmin; the
+        damle_buffer attribute is removed; the temporary `[cond]` diagnostic
+        is removed.
+    (b) FockToP calls `calcEmin(... tol=self.tol)` with no Emin seed.
+    (c) calcEmin's no-seed default (eigh + EMIN_BUFFER offset, JAX/precompiled
+        via gauNEGF.utils) is unchanged; it is now the only Emin source.
+- Tests (RED job 35685925, GREEN job 35687416, 12/12 passed):
+    Deleted: test_init_asymptotic_sigma_sets_damle_emin_from_fbar_floor,
+             test_focktop_seeds_calcemin_with_damle_emin_guess.
+    Added: test_focktop_calls_calcemin_without_emin_seed (monkeypatch
+           calcEmin and assert Emin=None passed).
+- Minimal-basis integration (job 35687543, _diag_minimal_basis_scf.py):
+    C2-STO3G : CONVERGED in 10 iters (convLevel 2.24e-6); Emin=-296.40,
+               trace(S@P)=5.4458, ne=12, fermi=-1.607. 0 warnings.
+    Au3-CRENBS: CONVERGED in 16 iters (convLevel 9.74e-4); Emin=-42.55,
+               trace(S@P)=31.5258, ne=33, fermi=-15.805. 0 warnings.
+  Same converged states as the prior baseline (under either Fbar-floor seed or
+  no seed); Emin differs by a few eV (F-based anchor vs Fbar-based), well
+  within the EMIN_BUFFER=20 margin. Au3 cycle count comparable to baseline.

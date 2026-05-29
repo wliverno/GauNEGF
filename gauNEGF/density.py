@@ -44,7 +44,7 @@ from gauNEGF.fermiSearch import DOSFermiSearch
 from gauNEGF.integrate import GrInt, GrLessInt, GrIntCross
 
 # JIT-compiled functions
-from gauNEGF.utils import inv, eig, eigh
+from gauNEGF.utils import inv, eig, eigh, fractional_matrix_power
 
 @jit
 def _compute_dos_at_energy(E, F, S, sigma_total, Qtot, eta=ETA):
@@ -969,7 +969,7 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
 
 ## INTEGRATION LIMIT FUNCTIONS
 # Calculate Emin using DOS
-def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES, Emin=None):
+def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES, Emin=None, X=None):
     """
     Calculate minimum energy bound for numerical integration.
 
@@ -993,20 +993,36 @@ def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES, Emin=None):
         Maximum number of expansion iterations (default: MAX_CYCLES).
     Emin : float or None, optional
         Initial lower bound in eV. If None, initialized from minimum eigenvalue
-        of inv(S)@F minus 5 eV offset (default: None).
+        of X @ F @ X (symmetric Lowdin orthogonalization with X = S^(-1/2))
+        minus EMIN_BUFFER (default: None).
+    X : ndarray or None, optional
+        Lowdin orthogonalizer S^(-1/2). If None (default), computed locally
+        via fractional_matrix_power(S, -0.5). Passing the caller's cached X
+        avoids recomputing it. Used only when Emin is None.
 
     Returns
     -------
     float
         Lower energy bound in eV where DOS is below tolerance.
 
+    Notes on the X @ F @ X form
+    ---------------------------
+    The previous default `eigh(inv(S) @ F)` was silently incorrect when S is
+    non-trivial: inv(S) @ F is NOT Hermitian (S and F Hermitian does not make
+    their product Hermitian), so eigh would take the upper triangle and return
+    wrong eigenvalues. X @ F @ X is Hermitian by construction (conjugation of
+    Hermitian F by Hermitian X), and its eigenvalues are the proper device MO
+    energies (the generalized eigenvalues of F v = lambda S v).
+
     Notes
     -----
     Prints warning if maximum iterations reached without achieving convergence.
     Prints final Emin value and corresponding DOS for debugging purposes.
     """
+    if X is None:
+        X = fractional_matrix_power(S, -0.5)
     if Emin is None:
-        D,_ = eigh(inv(S)@F)
+        D,_ = eigh(X@F@X)
         Emin = min(D.real.flatten()) - EMIN_BUFFER
     counter = 0
     dP = _compute_dos_at_energy(Emin, F, S, g.sigmaTot(Emin), g.crossTermQTot(Emin))
@@ -1082,7 +1098,12 @@ def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=FERMI_SEARCH_CYCLES,
 
     # Initialize from eigenvalues if no warm-start values
     if Eminf is None:
-        D, _ = eigh(inv(S) @ F)
+        # Symmetric Lowdin: X @ F @ X with X = S^(-1/2) is Hermitian, so eigh
+        # is correct. eigh(inv(S) @ F) is silently wrong -- inv(S) @ F is NOT
+        # Hermitian for non-trivial S, and eigh would take its upper triangle
+        # and return nonsense eigenvalues.
+        X = fractional_matrix_power(S, -0.5)
+        D, _ = eigh(X @ F @ X)
         eigs = np.real(D).flatten()
         Eminf = float(min(eigs))
 

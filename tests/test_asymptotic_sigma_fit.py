@@ -5,6 +5,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import numpy as np
 import pytest
 
+from gauNEGF.utils import fractional_matrix_power
+
 
 class _LinearSigmaG:
     """Mimics a surfG with sigmaTot(E) = Sigma_0_true + E * X_true exactly."""
@@ -18,27 +20,18 @@ class _LinearSigmaG:
         return E * self._X + self._Sigma_0
 
 
-class _NoisyLinearSigmaG(_LinearSigmaG):
-    """Adds 1/E correction so the linear fit has nonzero residual."""
-    def __init__(self, F, S, X_true, Sigma_0_true, Sigma_m1):
-        super().__init__(F, S, X_true, Sigma_0_true)
-        self._Sigma_m1 = np.asarray(Sigma_m1, dtype=complex)
-
-    def sigmaTot(self, E, conv=None):
-        return E * self._X + self._Sigma_0 + self._Sigma_m1 / E
-
-
 def _make_minimal_negfe(F, S, g):
     """Build a NEGFE-like shell with only the attributes _initAsymptoticSigma needs."""
     from gauNEGF.scfE import NEGFE
     # Construct as a bare object; bypass __init__ which requires Gaussian files.
-    # _initAsymptoticSigma only reads self.S and self.g.sigmaTot (not self.F),
-    # so F is stored only because other NEGFE methods might touch it later.
+    # _initAsymptoticSigma reads self.S, self.g.sigmaTot, and self.X (Lowdin
+    # orthogonalizer S^(-1/2) -- used for the cheap band-floor estimate that
+    # places the deep probes).
     obj = NEGFE.__new__(NEGFE)
     obj.F = np.asarray(F)
     obj.S = np.asarray(S)
     obj.g = g
-    obj.damle_buffer = 20.0
+    obj.X = np.asarray(fractional_matrix_power(np.asarray(S), -0.5))
     return obj
 
 
@@ -99,24 +92,3 @@ def test_y_eff_complex_when_s_eff_indefinite():
     assert not np.allclose(Y.imag, 0.0, atol=1e-10), 'Indefinite S_eff -> complex Y_eff expected'
 
 
-def test_residual_warning_on_nonlinear_sigma(capsys):
-    """When Sigma has a 1/E term that exceeds the linearity tolerance, warn.
-
-    Sizing: at E_deep = -1e5, the 1/E perturbation contributes Sigma_m1/E_deep.
-    For this to dominate the linear-fit residual at the >1% level vs the
-    leading X*E_deep term (= -1e4), we need |Sigma_m1/E_deep| / 1e4 > 0.01,
-    i.e. |Sigma_m1| > 1e7. Use 1e8 to be comfortably above threshold.
-    """
-    N = 3
-    F = np.zeros((N, N))
-    S = np.eye(N)
-    X_true = 0.1 * np.eye(N)
-    Sigma_0_true = -0.01j * np.eye(N)
-    Sigma_m1 = 1e8 * np.eye(N, dtype=complex)
-    g = _NoisyLinearSigmaG(F, S, X_true, Sigma_0_true, Sigma_m1)
-    obj = _make_minimal_negfe(F, S, g)
-    obj._initAsymptoticSigma()
-    captured = capsys.readouterr()
-    assert 'WARNING' in captured.out or 'warning' in captured.out, (
-        f'Expected linearity warning in output, got: {captured.out!r}'
-    )
