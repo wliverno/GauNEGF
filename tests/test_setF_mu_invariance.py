@@ -39,6 +39,7 @@ import pytest
 
 from gauNEGF.surfG1D import surfG
 from gauNEGF.scfE import NEGFE
+from gauNEGF.utils import fractional_matrix_power
 
 
 def _build_minimal_negfe_with_surfg(non_orth_coupling=True):
@@ -83,6 +84,9 @@ def _build_minimal_negfe_with_surfg(non_orth_coupling=True):
     obj.F = F
     obj.S = S
     obj.g = g
+    # _initAsymptoticSigma uses self.X (Lowdin orthogonalizer S^(-1/2)) for
+    # its band-floor estimate; supply it directly since we bypassed __init__.
+    obj.X = np.asarray(fractional_matrix_power(np.asarray(S), -0.5))
     return obj
 
 
@@ -206,24 +210,6 @@ def test_asymmetric_bias_sigma_0_shift():
     print(f'  ||predicted|| = {np.linalg.norm(predicted):.3e}')
     print(f'  rel err       = {rel_err:.3e}')
     assert rel_err < 5e-2, f'Asymmetric bias prediction off: rel_err = {rel_err:.3e}'
-
-
-def test_damle_buffer_preserved_across_refit():
-    """User-set damle_buffer must survive a subsequent _initAsymptoticSigma call.
-
-    Motivating scenario: setVoltage triggers a refit to refresh stale Sigma_0
-    after a mu shift. If the user has customized self.damle_buffer (e.g., to
-    handle a system needing a deeper safety margin below Emin), the refit
-    must not clobber it back to EMIN_BUFFER.
-    """
-    obj = _build_minimal_negfe_with_surfg(non_orth_coupling=True)
-    obj._initAsymptoticSigma()
-    obj.damle_buffer = 42.0  # user customization
-
-    obj._initAsymptoticSigma()  # refit (as would happen in setVoltage)
-    assert obj.damle_buffer == 42.0, (
-        f'damle_buffer was clobbered by refit: got {obj.damle_buffer}, expected 42.0'
-    )
 
 
 def test_setVoltage_refreshes_cached_sigma_0():

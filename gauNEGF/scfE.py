@@ -212,9 +212,6 @@ class NEGFE(NEGF):
           self.X_asymp   : (N, N) asymptotic linear coefficient (Sigma' at E -> -inf)
           self.S_eff     : (N, N) complex effective overlap = S - X_asymp (non-Hermitian)
           self.Y_eff     : (N, N) S_eff^(-1/2) via general eig (inv_sqrt_general)
-          self.damle_buffer : float copy of EMIN_BUFFER (tunable per-instance;
-                              retained for debug fixtures -- Emin now comes from
-                              calcEmin, so this is not on the production path)
           self.damle_dN_warn : float, default 0.5 e. FockToP warns when any of
                               |tr(P@S)|, |delta_N|, or their sum exceeds it.
 
@@ -241,11 +238,15 @@ class NEGFE(NEGF):
         eigendecomposition (inv_sqrt_general), NOT eigh.
         """
         # Cheap band-floor estimate (self.Emin is not set until setIntegralLimits
-        # runs after this): min eig of inv(S) F in eV, minus the standard buffer.
+        # runs after this): min eig of X @ F @ X in eV, minus the standard buffer.
+        # X @ F @ X (X = S^(-1/2)) is the symmetric Lowdin orthogonalization and
+        # is Hermitian -- so eigh is correct. The previous form eigh(inv(S) @ F)
+        # was silently wrong: inv(S) @ F is NOT Hermitian for non-trivial S, and
+        # eigh would take its upper triangle and return nonsense eigenvalues.
         # eig runs on jax (GPU); large-matrix eigendecompositions must not use numpy.
         F_eV = np.asarray(self.F) * har_to_eV
-        S = np.asarray(self.S)
-        D_dev, _ = eigh(inv(jnp.asarray(S)) @ jnp.asarray(F_eV))
+        S = np.asarray(self.S)  # consumed below at S_eff = S - X_asymp
+        D_dev, _ = eigh(jnp.asarray(self.X) @ jnp.asarray(F_eV) @ jnp.asarray(self.X))
         Emin_est = float(np.real(np.asarray(D_dev)).min()) - EMIN_BUFFER
 
         # Deep probes, RELATIVE to the integration window [ENERGY_MIN, Emin].
@@ -271,27 +272,11 @@ class NEGFE(NEGF):
         self.X_asymp = X_asymp
         self.S_eff = S_eff
         self.Y_eff = Y_eff
-        # Preserve a user-customized damle_buffer across re-fit calls (e.g.,
-        # the refit triggered by setVoltage to refresh stale Sigma_0).
-        if not hasattr(self, 'damle_buffer'):
-            self.damle_buffer = EMIN_BUFFER
         if not hasattr(self, 'damle_dN_warn'):
             # FockToP warns if ANY of |tr(P@S)|, |delta_N|, or their sum (the
             # lower electron count) exceeds this (electrons). Name kept for
             # continuity; it no longer thresholds delta_N alone.
             self.damle_dN_warn = 0.5
-
-        # Damle-anchored Emin guess: band floor of Fbar = Y_eff (F + Sigma_0) Y_eff
-        # -- the operator the analytic lower contour ACTUALLY integrates -- minus
-        # damle_buffer. For systems where Sigma_0 is large (e.g. CNT33_5cell with
-        # ||Sigma_0|| ~ 100+), Fbar's floor sits well below the bare-Fock floor,
-        # so seeding calcEmin from here (then DOS-loop confirming) prevents the
-        # true-vs-Damle spectrum mismatch that traps spurious charge in the lower
-        # contour. For low-||Sigma_0|| systems (Au3, ~23) the two floors agree
-        # and this collapses to the bare-Fock guess. See Section 9 of the spec.
-        Fbar_guess = jnp.asarray(Y_eff) @ (jnp.asarray(F_eV) + jnp.asarray(Sigma_0)) @ jnp.asarray(Y_eff)
-        D_fbar = np.real(np.asarray(jnp.linalg.eig(Fbar_guess)[0]))
-        self.damleEmin = float(D_fbar.min()) - self.damle_buffer
 
         # Diagnostics: how far X_asymp / S_eff are from the Hermitian/symmetric
         # assumptions the old eigh path silently made, and the defining-property
@@ -421,7 +406,7 @@ class NEGFE(NEGF):
             # calcPseudoPoleFloor are NOT used on this path -- the lower contour
             # is handled analytically by damleLowerDensity, whose cross-term
             # delta_N warning (FockToP) replaces calcTSW's dTSW<0 detection.
-            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, tol=tol)
+            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, tol=tol, X=self.X)
             self.Eminf = ENERGY_MIN
             self.TSW = None
             self.tol = tol
@@ -537,12 +522,14 @@ class NEGFE(NEGF):
             # (Sigma_0 / S_eff / Y_eff) AND Emin all depend on it -- recompute
             # them on the CURRENT Fock before building the lower contour.
             self._initAsymptoticSigma()
-            # Seed calcEmin with the Damle-anchored Emin guess (Fbar band floor
-            # minus buffer); the DOS loop only goes deeper from there, so this
-            # keeps Emin below the operator Damle actually integrates -- not just
-            # below the bare-Fock floor. 
-            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g,
-                                 tol=self.tol, Emin=self.damleEmin)
+            # Emin is anchored to calcEmin's F-based default (eigh on F minus
+            # EMIN_BUFFER), then deepened by the DOS loop using true Sigma(E).
+            # The Fbar-floor seed was tried and reverted: Fbar's eigenvalues
+            # include spurious deep modes (artifacts of the constant-Sigma_0
+            # approximation outside its asymptotic regime) that pulled Emin
+            # to -10^4 to -10^5 eV on CNT33_5cell. F is Hermitian and the
+            # F-based anchor is purely a function of the device spectrum.
+            self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, tol=self.tol, X=self.X)
             # Lower contour [ENERGY_MIN, Emin] via analytic Damle: damleLowerDensity
             # returns the lower density matrix and the analytic
             # cross-term delta_N. The lower contour should hold ~zero charge --
