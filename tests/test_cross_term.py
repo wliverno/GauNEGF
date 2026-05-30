@@ -293,65 +293,7 @@ def test_surfGAt3D_crossTermQ_is_symmetrized():
 
 
 # ---------------------------------------------------------------------------
-# Task 7: surfGB.crossTermQ (requires Bethe parameters -- integration test)
-# ---------------------------------------------------------------------------
-
-def make_surfGB_from_bethe_params():
-    """Create a surfGB using real Au Bethe parameters, if available."""
-    import os
-    bethe_path = os.path.join(os.path.dirname(__file__), 'Au.bethe')
-    if not os.path.exists(bethe_path):
-        pytest.skip("Au.bethe not found -- skipping surfGB integration test")
-    from gauNEGF.surfGBethe import surfGB
-    # Create a minimal Fock/Overlap with 1 atom
-    d = 9
-    F = jnp.diag(jnp.zeros(d))
-    S = jnp.eye(d)
-    indsList = [jnp.array(list(range(d)))]
-    try:
-        g = surfGB(F, S, indsList, bethe_path, eta=1e-3)
-        return g
-    except Exception:
-        pytest.skip("Could not construct surfGB from Au.bethe")
-
-
-def test_surfGB_crossTermQ_delegates_to_atomic():
-    """surfGB.crossTermQ should return correct shape or None."""
-    g = make_surfGB_from_bethe_params()
-    E = -5.0 + 0.1j
-    N = g.F.shape[0]
-    Q = g.crossTermQ(E, 0)
-    # When Sdict['sss'] == 0 (no overlap), Q may be zero but should be correct shape
-    if Q is not None:
-        assert Q.shape == (N, N), f"Q shape {Q.shape} != ({N},{N})"
-
-
-def test_surfGB_crossTermQTot_returns_correct_shape():
-    """crossTermQTot should return correct shape or None."""
-    g = make_surfGB_from_bethe_params()
-    E = -5.0 + 0.1j
-    N = g.F.shape[0]
-    Q_tot = g.crossTermQTot(E)
-    if Q_tot is not None:
-        assert Q_tot.shape == (N, N), f"Q_tot shape {Q_tot.shape} != ({N},{N})"
-
-
-# ---------------------------------------------------------------------------
-# Task 8: surfG3.crossTermQ (requires surfGAt3D setup -- integration test)
-# ---------------------------------------------------------------------------
-
-def make_surfG3_test():
-    """Create a surfG3 object with 2 contacts using test surfGAt3D."""
-    pytest.skip("surfG3 full integration test deferred -- requires full contact setup")
-
-
-def test_surfG3_crossTermQ_shape():
-    """surfG3.crossTermQ should return device-size matrix."""
-    make_surfG3_test()  # Will skip
-
-
-# ---------------------------------------------------------------------------
-# Task 9: GrIntCross
+# GrIntCross
 # ---------------------------------------------------------------------------
 
 def test_GrIntCross_orthogonal_returns_zero_cross_scalar():

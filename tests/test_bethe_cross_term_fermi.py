@@ -41,7 +41,6 @@ def au_params():
 # Tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.slow
 def test_bethe_single_cell_fermi(au_params):
     """calcFermi on surfGBAt should work directly (no wrapper, no nOrbs).
 
@@ -58,7 +57,6 @@ def test_bethe_single_cell_fermi(au_params):
         f"Au Fermi {fermi:.4f} eV differs from benchmark {AU_BULK_FERMI_EV} eV"
 
 
-@pytest.mark.slow
 def test_bethe_cross_term_fermi_consistency(au_params):
     """Two independent surfGBAt instances should agree on Fermi energy.
 
@@ -77,7 +75,6 @@ def test_bethe_cross_term_fermi_consistency(au_params):
         f"Two independent instances differ: {fermi1:.4f} vs {fermi2:.4f} eV"
 
 
-@pytest.mark.slow
 def test_cross_term_symmetrization_consistency(au_params):
     """Symmetrized Q_sym formula must match unsymmetrized (c_Q, c_Q_rev).
 
@@ -178,7 +175,6 @@ def test_cross_term_symmetrization_consistency(au_params):
         f"delta_N = {delta_N_sym:.6f} is unexpectedly small for Au"
 
 
-@pytest.mark.slow
 def test_3d_single_cell_fermi(au_params):
     """calcFermi on surfGAt3D should work directly (no wrapper, no nOrbs).
 
