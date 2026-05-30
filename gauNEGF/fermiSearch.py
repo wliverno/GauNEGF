@@ -1,20 +1,11 @@
 """
 Fermi energy search using density of states (DOS) information.
 
-[DEPRECATED] This module has been replaced by the constant sigma approximation
-method, which provides better stability and performance. It is kept for
-reference and historical purposes.
+[DEPRECATED] DOSFermiSearch has been superseded by the Fermi search methods
+in density.py (calcFermiBisect, calcFermiSecant, calcFermiMuller, etc.).
 
-This module implements a Fermi energy search algorithm based on DOS information
-using Taylor series expansion and finite difference methods. The algorithm:
-1. Computes DOS and its derivatives using finite difference
-2. Constructs a Taylor series approximation
-3. Solves for the root to find the Fermi energy shift
-
-The implementation supports:
-- Arbitrary-order finite difference calculations
-- Automatic step size adjustment
-- Debug output for troubleshooting
+Implements a Fermi energy search via Taylor series expansion of the DOS
+using finite difference, then polynomial root-finding for the energy shift.
 """
 
 import numpy as np
@@ -23,48 +14,27 @@ from math import factorial
 
 class DOSFermiSearch:
     """
-    Fermi energy search using DOS information.
+    Fermi energy search using DOS Taylor series expansion.
 
-    [DEPRECATED] This class has been replaced by simpler and more stable methods.
-    It uses a Taylor series expansion of the DOS to predict Fermi energy shifts
-    that will achieve a target electron count.
+    [DEPRECATED] Use calcFermiBisect / calcFermiMuller in density.py instead.
+
+    Predicts Fermi energy shifts to reach a target electron count by computing
+    DOS derivatives via finite difference and solving a polynomial root equation.
 
     Parameters
     ----------
     initialEf : float
-        Initial guess for the Fermi energy in eV
+        Initial guess for the Fermi energy in eV.
     nTarget : float
-        Target number of electrons
+        Target number of electrons.
     deltaE : float, optional
-        Step size for finite difference calculations in eV (default: 0.01)
+        Step size for finite difference in eV (default: 0.01).
     numPoints : int, optional
-        Number of points to use in finite difference method (default: 5)
+        Number of finite difference points (default: 5).
     debug : bool, optional
-        Enable debug output (default: False)
-
-    Notes
-    -----
-    The algorithm uses finite difference to compute DOS derivatives,
-    then constructs and solves a Taylor series equation to predict
-    the required Fermi energy shift.
+        Enable debug output (default: False).
     """
     def __init__(self, initialEf, nTarget, deltaE=0.01, numPoints=5, debug=False):
-        """
-        Initialize the Fermi energy search object.
-
-        Parameters
-        ----------
-        initialEf : float
-            Initial guess for the Fermi energy in eV
-        nTarget : float
-            Target number of electrons
-        deltaE : float, optional
-            Step size for finite difference calculations in eV (default: 0.01)
-        numPoints : int, optional
-            Number of points to use in finite difference method (default: 5)
-        debug : bool, optional
-            Enable debug output (default: False)
-        """
         self.Ef = initialEf
         self.nTarget = nTarget
         self.deltaE = deltaE
@@ -177,9 +147,6 @@ class DOSFermiSearch:
                 print("Warning: No real roots found, using Newton's method...")
             root = delta_N/dos_derivatives[0]
         
-        # Relaxation 
-        #root *= 0.5 
-
         if np.abs(root)>stepLim:
             print(f'Warning: deltaEf cutoff reached! Incrementing by {stepLim} eV')
             if self.deltaEf == -np.sign(root)*stepLim:

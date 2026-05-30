@@ -304,9 +304,9 @@ def constructSOCterm(lambdas):
     """
     Construct spin-orbit coupling term for s, p and d orbitals.
 
-    Uses the correct L·S operator construction via transformation from
-    spherical harmonic basis to real orbital basis, following the verified
-    approach in calcSOCOrbs.py.
+    Builds the L·S operator in the real orbital basis by transforming from the
+    spherical harmonic basis, then assembles a block-diagonal 18x18 matrix
+    scaled by the per-shell coupling parameters.
 
     Parameters
     ----------
@@ -365,11 +365,6 @@ def constructSOCterm(lambdas):
         Returns a (2*(2l+1)) x (2*(2l+1)) matrix in the basis
         (orb_0 up, orb_0 dn, orb_1 up, orb_1 dn, ..., orb_(2l) up, orb_(2l) dn),
         matching the kron(H0, eye(2)) convention used everywhere else.
-
-        Earlier versions (1) used the wrong direction of the spherical-to-real
-        transform and (2) returned a spin-major-within-the-L-block matrix that
-        was then added to an interleaved kron(H0, I2) -- a basis mismatch that
-        placed SOC matrix elements on the wrong orbital pairs.
         """
         Lx, Ly, Lz = LOps(l)
         V = genOrbList(l)

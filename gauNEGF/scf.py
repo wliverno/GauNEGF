@@ -3,35 +3,23 @@ Self-consistent field (SCF) implementation for Non-Equilibrium Green's Function 
 
 This module provides the base NEGF class for performing self-consistent DFT+NEGF
 calculations using Gaussian quantum chemistry package. It implements the energy-independent
-self-energy approach developed by Damle et al., which provides an efficient approximation
-for molecular transport calculations. The module handles:
+self-energy approach (Damle et al. [1]) for molecular transport calculations. The module
+handles:
     - Integration with Gaussian for DFT calculations
-    - SCF convergence with Pulay mixing [2]
+    - SCF convergence with Pulay DIIS mixing [2]
     - Contact self-energy calculations
     - Voltage bias and electric field effects
     - Spin-polarized calculations
 
-The implementation follows the standard NEGF formalism where the density matrix
-is calculated self-consistently with the Fock matrix from Gaussian DFT calculations.
-Convergence is accelerated using the direct inversion in the iterative subspace (DIIS)
-method developed by Pulay [2]. The core NEGF-DFT implementation is based on the
-ANT.Gaussian approach developed by Palacios et al. [3], which pioneered the integration
-of NEGF with Gaussian-based DFT calculations.
-
 References
 ----------
-[1] Damle, P., Ghosh, A. W., & Datta, S. (2002). First-principles analysis of molecular 
-    conduction using quantum chemistry software. Chemical Physics, 281(2-3), 171-187. 
+[1] Damle, P., Ghosh, A. W., & Datta, S. (2002). First-principles analysis of molecular
+    conduction using quantum chemistry software. Chemical Physics, 281(2-3), 171-187.
     DOI: 10.1016/S0301-0104(02)00496-2
 
 [2] Pulay, P. (1980). Convergence acceleration of iterative sequences. The case of SCF
     iteration. Chemical Physics Letters, 73(2), 393-398.
     DOI: 10.1016/0009-2614(80)80396-4
-
-[3] Palacios, J. J., Pérez-Jiménez, A. J., Louis, E., & Vergés, J. A. (2002).
-    Fullerene-based molecular nanobridges: A first-principles study.
-    Physical Review B, 66(3), 035322.
-    DOI: 10.1103/PhysRevB.66.035322
 """
 
 # Python packages
@@ -69,23 +57,9 @@ class NEGF(object):
     """
     Non-Equilibrium Green's Function calculator integrated with Gaussian DFT.
 
-    This class implements the energy-independent NEGF approach developed by Damle et al. [1]
-    for efficient molecular transport calculations. It manages the self-consistent field 
-    calculation between NEGF transport calculations and DFT electronic structure calculations 
-    using Gaussian.
-
-    The energy-independent approximation assumes constant self-energies,
-    which significantly reduces computational cost while maintaining accuracy for many
-    molecular systems.
-
-    The class handles:
-    - Interaction with Gaussian
-    - Management of density and Fock matrices
-    - Pulay mixing for convergence [2]
-    - Constant (energy-independent) contact self-energies
-    - Voltage bias effects
-
-    For energy-dependent calculations, see the NEGFE subclass.
+    Manages the self-consistent field cycle between NEGF transport calculations and
+    Gaussian DFT. Uses constant (energy-independent) self-energies; for
+    energy-dependent calculations see the NEGFE subclass.
 
     Parameters
     ----------
@@ -124,15 +98,6 @@ class NEGF(object):
         Fermi energy in eV
     nelec : float
         Number of electrons
-
-    References
-    ----------
-    [1] Damle, P., Ghosh, A. W., & Datta, S. (2002). First-principles analysis of molecular 
-        conduction using quantum chemistry software. Chemical Physics, 281(2-3), 171-187.
-        DOI: 10.1016/S0301-0104(02)00496-2
-
-    [2] Pulay, P. (1980). DOI: 10.1016/0009-2614(80)80396-4
-
     """
 
     def __init__(self, fn, basis="chkbasis", func="hf", spin="r", fullSCF=True, route=None, section=None, nPulay=PULAY_MIXING_SIZE):
@@ -481,8 +446,8 @@ class NEGF(object):
         self.nelecContacts = sum([self.bar.atmchg[i-1] for i in contInds])
         return lInd, rInd
     
-    # Set self-energies of left and right contacts (TODO: n>2 terminal device?)
-    def setSigma(self, lContact=None, rContact=None, sig=-0.1j, sig2=None): 
+    # TODO: n>2 terminal device support
+    def setSigma(self, lContact=None, rContact=None, sig=-0.1j, sig2=None):
         """
         Set self-energies for left and right contacts.
 
@@ -587,28 +552,14 @@ class NEGF(object):
         """
         Calculate density matrix from Fock matrix using energy-independent approach.
 
-        This method implements the energy-independent density matrix calculation from
-        Damle et al. (2002). By assuming constant self-energies, the density matrix
-        can be calculated analytically without energy integration, significantly
-        reducing computational cost.
-
-        The method:
-        1. Transforms Fock and Gamma matrices to orthogonal basis
-        2. Diagonalizes the transformed Fock matrix
-        3. Updates Fermi energy if needed
-        4. Calculates density matrix analytically
-        5. Transforms back to non-orthogonal basis
+        Diagonalizes the orthogonalized Fock+Sigma matrix, integrates analytically
+        for constant self-energies (Damle et al. 2002), and transforms back to the
+        non-orthogonal basis. Updates self.P and optionally self.fermi.
 
         Returns
         -------
         tuple
             (eigenvalues, occupations) sorted by energy
-
-        References
-        ----------
-        [1] Damle, P., Ghosh, A. W., & Datta, S. (2002). First-principles analysis of molecular 
-            conduction using quantum chemistry software. Chemical Physics, 281(2-3), 171-187.
-            DOI: 10.1016/S0301-0104(02)00496-2
         """
         # Prepare Variables for Analytical Integration
         X = np.array(self.X)
@@ -638,29 +589,23 @@ class NEGF(object):
         else:
             P1 = density(V, Vc, D, GamBar1, self.Eminf, self.mu1)
             P2 = density(V, Vc, D, GamBar2, self.Eminf, self.mu2)
-            P = P1 + P2 #+ Pw
-        
+            P = P1 + P2
+
         # Calculate Level Occupation, Lowdin TF,  Return
         pshift = V.conj().T @ P @ V
         self.P = X @ P @ X
-        occList = np.diag(np.real(pshift)) 
+        occList = np.diag(np.real(pshift))
         EList = np.array(np.real(D)).flatten()
         inds = np.argsort(EList)
-        
-        #DEBUG:
-        #for pair in zip(occList[inds], EList[inds]):                       
-        #    print("Energy=", str(pair[1]), ", Occ=", str(pair[0]))
 
         return EList[inds], occList[inds]
     
     def PMix(self, damping, Pulay=False):
         """
-        Mix old and new density matrices using damping or Pulay DIIS method [2].
+        Mix old and new density matrices using damping or Pulay DIIS method.
 
-        The Pulay mixing method (also known as DIIS - Direct Inversion in the 
-        Iterative Subspace) uses information from previous iterations to predict
-        the optimal density matrix. This method is particularly effective for
-        systems with challenging convergence behavior, and closely follows ANT.Gaussian approaches.
+        Applies simple linear damping by default. When Pulay=True, applies the
+        DIIS update using the accumulated history buffer (length set in __init__).
 
         Parameters
         ----------
@@ -673,18 +618,6 @@ class NEGF(object):
         -------
         tuple
             (RMSDP, MaxDP) - RMS and maximum density matrix differences
-
-        Notes
-        -----
-        The Pulay DIIS method [2] minimizes the error in the iterative subspace
-        spanned by previous density matrices. This often provides faster and more
-        stable convergence compared to simple damping, especially for systems
-        with strong electron correlation or near degeneracies [3].
-
-        References
-        ----------
-        .. [2] Pulay, P. (1980). DOI: 10.1016/0009-2614(80)80396-4
-        .. [3] Palacios, J. J., et al. (2002). DOI: 10.1103/PhysRevB.66.035322
         """
         # Apply spin-locking if enabled (before mixing)
         Pback = getDen(self.bar, self.spin)
@@ -724,8 +657,6 @@ class NEGF(object):
                     
                     newSpinor = U_i@block_current@U_i.conj().T
                     
-                    # Place in transformation matrix (Unused, commented out below)
-                    # Rotate spinor on main diagonal, leave off-diagonals untouched
                     if self.spin == 'g':
                         U[2*i:2*i+2, 2*i:2*i+2] = U_i
                         self.P = self.P.at[2*i:2*i+2, 2*i:2*i+2].set(newSpinor)
@@ -733,16 +664,7 @@ class NEGF(object):
                         idx = np.ix_([i, n_orbitals+i], [i, n_orbitals+i])
                         U[idx] = U_i
                         self.P = self.P.at[idx].set(newSpinor)
-                
-            # Apply transformation to Fock matrix 
-            #U_nonorth = self.X@U@LA.inv(self.X)
-            #self.F = U_nonorth @ self.F @ U_nonorth.conj().T
-            #self.FockToP()
 
-            # Apply transformation directly to density matrix
-            #U_nonorth = self.X@U@LA.inv(self.X)
-            #self.P = U_nonorth @ self.P @ U_nonorth.conj().T
-        
         # Store Old Density Info
         Dense_old = np.diag(Pback)
         Dense_diff = abs(np.diag(self.P) - Dense_old)
@@ -810,49 +732,27 @@ class NEGF(object):
         """
         Run self-consistent field calculation until convergence.
 
-        The SCF cycle alternates between Fock matrix construction and density matrix
-        updates until convergence is reached. Convergence acceleration is achieved
-        through either simple damping or Pulay DIIS mixing [2]. The Pulay method
-        is applied every nPulay iterations (where nPulay is set in __init__) [3].
-
-        References
-        ----------
-        .. [3] Palacios, J. J., et al. (2002). DOI: 10.1103/PhysRevB.66.035322
+        Alternates FockToP / PMix / PToFock until all three criteria (dE, RMSDP,
+        MaxDP) fall below conv, or maxcycles is reached. Pulay DIIS is applied every
+        nPulay iterations when pulay=True.
 
         Parameters
         ----------
         conv : float, optional
-            Convergence criterion for energy and density (default: 1e-5)
+            Convergence criterion for energy and density (default: SCF_CONVERGENCE_TOL)
         damping : float, optional
-            Mixing parameter between 0 and 1 (default: 0.02)
+            Mixing parameter between 0 and 1 (default: SCF_DAMPING)
         maxcycles : int, optional
-            Maximum number of SCF cycles (default: 100)
+            Maximum number of SCF cycles (default: SCF_MAX_CYCLES)
         checkpoint : bool, optional
             Save density matrix at each iteration and load if job interrupted (default: True)
         pulay : bool, optional
-            Whether to use Pulay DIIS mixing [2] (default: True)
+            Whether to use Pulay DIIS mixing (default: True)
 
         Returns
         -------
         tuple
             (count, PP, TotalE) - cycle number, number of electrons, and DFT energy at each cycle
-
-        Notes
-        -----
-        Convergence is determined by three criteria:
-        1. Energy change (dE)
-        2. RMS density matrix difference (RMSDP)
-        3. Maximum density matrix difference (MaxDP)
-        
-        All three must be below the convergence threshold.
-        
-        The Pulay DIIS method [2] is applied every nPulay iterations when enabled,
-        which often provides faster and more stable convergence compared to simple
-        damping, especially for challenging systems.
-
-        References
-        ----------
-        .. [2] Pulay, P. (1980). DOI: 10.1016/0009-2614(80)80396-4
         """
         # Check to make sure contacts and voltage set 
         assert hasattr(self, 'mu1') and hasattr(self, 'mu2'), "Voltage not set!"
@@ -940,16 +840,8 @@ class NEGF(object):
         """
         Write current state to a Gaussian binary checkpoint (.chk) file.
 
-        gauopen's bar.writefile() handles the .chk output path directly:
-        it writes a binary array file (BAF) to a temporary location and
-        invokes Gaussian's unfchk utility with the -faf flag (see
-        gauopen/QCUtil.py:486-493), so no .fchk intermediate is needed.
-
-        The earlier implementation routed through .fchk via "mat2fchk",
-        which is an unsupported utility name in gauopen's dispatcher
-        (gauopen/QCUtil.py:498 only recognizes formchk, inp2baf,
-        fchk2baf, inp2mat, and unfchk). That path was effectively dead
-        on installs without a mat2fchk binary on PATH.
+        Uses gauopen's bar.writefile(), which routes through the BAF/unfchk
+        path internally -- no .fchk intermediate is needed.
         """
         print(f'Writing {self.chkfile} via gauopen.writefile (BAF -> unfchk)...')
         self.bar.writefile(self.chkfile)

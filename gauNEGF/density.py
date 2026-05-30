@@ -40,7 +40,6 @@ from multiprocessing import Pool
 import os
 
 # Developed Packages:
-from gauNEGF.fermiSearch import DOSFermiSearch
 from gauNEGF.integrate import GrInt, GrLessInt, GrIntCross
 
 # JIT-compiled functions
@@ -355,7 +354,7 @@ def damleCrossTerm(V, D, Vc, Y_eff, Q0, Q1, lo, hi):
     (no second eigendecomposition). Q(E) ~ Q0 + Q1*E is linearized between two
     anchors. The unphysical linear-Q 'flat' term b1*(hi-lo) is OMITTED -- only
     the physical in-window-pole term is kept (see
-    docs/lower_contour_math_and_probes.md sec 5 and the spec sec 4):
+    docs/lower_contour_math_and_probes.md sec 5):
 
         delta_N = -(1/pi) Im sum_i (b0_i + b1_i*D_i)
                                   * [log(1 - hi/D_i) - log(1 - lo/D_i)]
@@ -396,12 +395,10 @@ def damleLowerDensity(F_eV, Y_eff, Sigma_0, g, Emin, ENERGY_MIN_=ENERGY_MIN):
     analytic cross-term delta_N (which reuses the same eig; no second
     decomposition).
 
-    The matrix is NEGATED so its sign matches the trusted densityComplex
-    convention (the bare analytic density() result is globally sign-flipped
-    relative to densityComplex; confirmed in the bake-off, jobs 35562575/
-    35580937). The cross-term uses a linear model of crossTermQTot(E) anchored
+    The density matrix is negated so its sign matches the densityComplex
+    convention. The cross-term uses a linear model of crossTermQTot(E) anchored
     near the band bottom at (Emin, 2*Emin) and DROPS the unphysical linear-Q
-    flat term (see damleCrossTerm and the spec).
+    flat term (see damleCrossTerm).
 
     Parameters
     ----------
@@ -1005,19 +1002,12 @@ def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES, Emin=None, X=N
     float
         Lower energy bound in eV where DOS is below tolerance.
 
-    Notes on the X @ F @ X form
-    ---------------------------
-    The previous default `eigh(inv(S) @ F)` was silently incorrect when S is
-    non-trivial: inv(S) @ F is NOT Hermitian (S and F Hermitian does not make
-    their product Hermitian), so eigh would take the upper triangle and return
-    wrong eigenvalues. X @ F @ X is Hermitian by construction (conjugation of
-    Hermitian F by Hermitian X), and its eigenvalues are the proper device MO
-    energies (the generalized eigenvalues of F v = lambda S v).
-
     Notes
     -----
-    Prints warning if maximum iterations reached without achieving convergence.
-    Prints final Emin value and corresponding DOS for debugging purposes.
+    Prints a warning if maximum iterations are reached without convergence.
+    X @ F @ X (X = S^(-1/2)) is used for the initial Emin seed because it
+    is Hermitian by construction and its eigenvalues are the true device MO
+    energies; eigh(inv(S) @ F) would silently fail for non-trivial S.
     """
     if X is None:
         X = fractional_matrix_power(S, -0.5)
@@ -1029,7 +1019,6 @@ def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES, Emin=None, X=N
     while dP>tol and counter<maxN:
         Emin -= 10
         dP = _compute_dos_at_energy(Emin, F, S, g.sigmaTot(Emin), g.crossTermQTot(Emin))
-        #print(Emin, dP)
         counter += 1
     if counter == maxN:
         print(f'Warning: Emin still not within tolerance (final value = {dP}) after {maxN} energy samples')
@@ -1098,10 +1087,7 @@ def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=FERMI_SEARCH_CYCLES,
 
     # Initialize from eigenvalues if no warm-start values
     if Eminf is None:
-        # Symmetric Lowdin: X @ F @ X with X = S^(-1/2) is Hermitian, so eigh
-        # is correct. eigh(inv(S) @ F) is silently wrong -- inv(S) @ F is NOT
-        # Hermitian for non-trivial S, and eigh would take its upper triangle
-        # and return nonsense eigenvalues.
+        # X @ F @ X (X = S^(-1/2)) is Hermitian by construction; eigh is correct.
         X = fractional_matrix_power(S, -0.5)
         D, _ = eigh(X @ F @ X)
         eigs = np.real(D).flatten()
@@ -1173,8 +1159,7 @@ def calcPseudoPoleFloor(F, S, g, alpha=0.1, min_buffer=50.0, E1=-1e3, E2=-1e4):
     for GHF / SOC where F, S, X, Sigma_0 have nontrivial imaginary parts as
     well as the real-symmetric closed-shell case.
 
-    See docs/pseudo_pole_handling.md for the math and AuBetheFerrocene
-    empirical verification.
+    See docs/pseudo_pole_handling.md for the derivation and worked examples.
 
     Algorithm:
         1. Two-point asymptotic probe of Sigma:
@@ -1233,30 +1218,20 @@ def calcPseudoPoleFloor(F, S, g, alpha=0.1, min_buffer=50.0, E1=-1e3, E2=-1e4):
     Notes
     -----
     Buffer formula: per pseudo-pole, the gap is max(alpha * |E_pp|, min_buffer).
-    The fractional component handles scale-invariance (deep poles need
-    proportionally larger gaps; constant-eV would be either over- or under-
-    sized depending on system); the absolute min_buffer prevents the gap
-    from collapsing to numerical noise near shallow poles. Defaults of 0.1
-    and 50 eV give ~300 eV gap at -3000 eV poles (AuBetheFerrocene scale)
-    and 50 eV gap at -100 eV poles.
+    The fractional term handles scale-invariance (deep poles need proportionally
+    larger gaps); min_buffer prevents a meaninglessly tight gap near shallow poles.
+    Defaults of 0.1 and 50 eV give ~300 eV gap at -3000 eV poles.
 
-    Positive pseudo-poles are filtered out before buffer/floor computation:
-    they cannot be excluded by Eminf (which is a LOWER bound on the contour
-    integration range). They get captured by both reference and truncated
-    contours in calcTSW and cancel in dTSW.
+    Positive pseudo-poles are filtered out: they cannot be excluded by Eminf
+    (a LOWER bound) and cancel in calcTSW's dTSW comparison.
 
-    Return value semantics: a returned floor is GUARANTEED strictly negative
-    (or exactly ENERGY_MIN). If the shallowest buffered floor across all
-    deep pseudo-poles lands at >= 0 (e.g. C2_chain LANL2DZ has a pseudo-pole
-    at ~ -7 eV mixed with physical states), the function returns ENERGY_MIN
-    and calcTSW's dTSW<0 truncation handles the system.
+    A returned floor is GUARANTEED strictly negative (or exactly ENERGY_MIN). If
+    the shallowest buffered floor is >= 0 (pseudo-pole mixed with physical states),
+    returns ENERGY_MIN and lets calcTSW's dTSW<0 path handle the system.
 
-    Why we do NOT take Re(...) of F, S, X, Sigma_0: for Hermitian A, A.real
-    drops the antisymmetric imaginary part and gives a SYMMETRIC matrix that
-    is not equal to A. Eigenvalues of (Re(F), Re(S)) do not match eigenvalues
-    of (F, S) when the imaginary part is non-trivial -- this matters for
-    GHF/SOC where Sigma's imaginary structure contributes to pseudo-pole
-    locations.
+    F, S, X, Sigma_0 are kept fully complex: taking Re() of a Hermitian matrix
+    drops its antisymmetric imaginary part, giving a symmetric matrix with
+    different eigenvalues -- this matters for GHF/SOC.
     """
     # Two-point asymptotic probe of Sigma (preserves complex-Hermitian structure).
     Sigma1 = jnp.asarray(g.sigmaTot(E1))
@@ -1930,28 +1905,6 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         root_distances = np.abs(roots - E_pts[-1])
         nearest_idx = np.argmin(root_distances)
         E_next = roots[nearest_idx].real
-    
-        # Enforce monotonicity: Higher E -> higher N 
-        # If N-nE > 0: need lower E, so E_next must be < E_pts[-1]
-        # If N-nE < 0: need higher E, so E_next must be > E_pts[-1]
-        #if n_pts[-1] > 0 and E_next > E_pts[-1]:
-        #    # Polynomial violated monotonicity - discard it and step in correct direction
-        #    E_next = E_pts[-1] - abs(dE) * 10
-        #    # Remove the last point that led to bad interpolation
-        #    E_pts.pop()
-        #    n_pts.pop()
-        #    counter -= 1  # Don't count this as a valid iteration
-        #    if FERMI_DEBUG:
-        #        print('Warning: monotonicity exception corrected!')
-        #elif n_pts[-1] < 0 and E_next < E_pts[-1]:
-        #    # Polynomial violated monotonicity - discard it and step in correct direction
-        #    E_next = E_pts[-1] + abs(dE) * 10
-        #    # Remove the last point that led to bad interpolation
-        #    E_pts.pop()
-        #    n_pts.pop()
-        #    counter -= 1  # Don't count this as a valid iteration
-        #    if FERMI_DEBUG:
-        #        print('Warning: monotonicity exception corrected!')
 
         # Calculate new point
         E = E_next

@@ -1,7 +1,7 @@
 # Developed packages
 from gauNEGF.density import *
-from gauNEGF.config import (ETA, TEMPERATURE, ENERGY_MIN, FERMI_DEBUG,shard_array)
-from gauNEGF.utils import fractional_matrix_power, eig
+from gauNEGF.config import (ETA, TEMPERATURE, shard_array)
+from gauNEGF.utils import fractional_matrix_power
 
 # Python packages
 import jax
@@ -9,10 +9,8 @@ import jax.numpy as jnp
 from jax.numpy import linalg as LA
 
 #Constants
-kB = 8.617e-5           # eV/Kelvin
 dim = 9                 # size of single atom matrix: 1s + 3p + 5d
 har_to_eV = 27.211386   # eV/Hartree
-Eminf = ENERGY_MIN      # Setting lower bound to -1e6 eV
 
 
 # 3D k-grid lattice surface Green's function for a device with 111 contacts
@@ -415,7 +413,7 @@ class surfG3:
         i : int
             Index of the contact to calculate self-energy for
         conv : float, optional
-            Convergence criterion for self-energy calculation (default: 1e-5)
+            Convergence criterion for self-energy calculation (default: 1e-4)
 
         Returns
         -------
@@ -426,10 +424,10 @@ class surfG3:
 
         References
         ----------
-        [1] Jacob, D., & Palacios, J. J. (2011). Critical comparison of electrode models 
+        [1] Jacob, D., & Palacios, J. J. (2011). Critical comparison of electrode models
             in density functional theory based quantum transport calculations.
             The Journal of Chemical Physics, 134(4), 044118.
-            DOI: 10.1063/1.3526044  
+            DOI: 10.1063/1.3526044
         """
         # Shift E to reference frame of immutable H0/Vlist0
         E_shifted = E - self.gList[i].dFermi
@@ -451,12 +449,9 @@ class surfG3:
     
     def sigmaTot(self, E, conv=1e-4):
         """
-        Calculate total self-energy matrix for the extended system.
+        Calculate total self-energy matrix from all contacts.
 
-        Computes self-energies for all sites in the extended system (12 neighbors + 1 center).
-        The total self-energy is constructed following the Bethe lattice model described in
-        Jacob & Palacios [1], which provides an efficient representation of bulk metallic
-        electrodes while maintaining proper orbital symmetries.
+        Sums sigma(E, i) over all contacts and returns the result in the full device basis.
 
         Parameters
         ----------
@@ -468,14 +463,7 @@ class surfG3:
         Returns
         -------
         ndarray
-            Total self-energy matrix for the extended system
-
-        References
-        ----------
-        [1] Jacob, D., & Palacios, J. J. (2011). Critical comparison of electrode models 
-            in density functional theory based quantum transport calculations.
-            The Journal of Chemical Physics, 134(4), 044118.
-            DOI: 10.1063/1.3526044
+            Total self-energy matrix in the full device basis
         """
         sigs = [self.sigma(E, i, conv) for i in range(len(self.indsLists))]
         return sum(sigs)
@@ -514,10 +502,10 @@ class surfG3:
         Parameters
         ----------
         Elist : tuple, optional
-            A list of contact energies for selecting sigma, 
-            (default: use contact ermi energy)
+            A list of contact energies for selecting sigma,
+            (default: use contact Fermi energy)
         conv: float, optional
-            Convergence criterial for the self-energy matrix
+            Convergence criterion for the self-energy matrix
 
         Returns
         -------
@@ -545,16 +533,8 @@ class surfG3:
         Ef : float
             New Fermi energy in eV
         """
-        fermiPrev = self.gList[i].fermi +0.0
-        #if i==-1:
-        #    print(f'Changing right contact fermi energy: {fermiPrev} --> {Ef}')
-        #elif i==0:
-        #    print(f'Changing left contact fermi energy: {fermiPrev} --> {Ef}')
-        #else:
-        #    print(f'Changing contact {i+1} fermi energy: {fermiPrev} --> {Ef}')
-        # Onsite energies
         self.gList[i].updateH(Ef)
-    
+
     def setF(self, F, muL, muR):
         """
         Update Fock matrix and contact chemical potentials.
@@ -575,9 +555,9 @@ class surfG3:
         if self.gList[0].fermi != muL:
             self.updateFermi(0, muL)
         if self.gList[-1].fermi != muR:
-            self.updateFermi(-1, muR) 
+            self.updateFermi(-1, muR)
 
-   
+
     ## TESTING METHODS FOR SLATER-KOSTER INTERACTIONS:
     def testDOrbitalFunctions(self):
         """
@@ -740,7 +720,7 @@ class surfG3:
             print(f"s-pz: {V[0,3]:.3f}, pz-s: {V[3,0]:.3f}")
             print(f"Total s-p magnitude: {s_p_total:.3f}")
     
-        print("\nAll hopping physics tests passed!")    # Update run_all_tests to include new test
+        print("\nAll hopping physics tests passed!")
 
     def runAllTests(self):
         """
@@ -788,10 +768,6 @@ class surfGAt3D:
     ----------
     NN : int
         Number of nearest neighbors (fixed to 12 for FCC)
-    sigmaKprev : ndarray or None
-        Previous bulk self-energy for convergence
-    Eprev : float
-        Previous energy point for convergence
     fermi : float
         Current Fermi energy
     F : ndarray
@@ -853,11 +829,8 @@ class surfGAt3D:
         # Reciprocal lattice vectors computed separately for 2D (surface) and 3D (bulk)
         # See _setup_kmesh_2D() and _setup_kmesh_3D()
 
-        #self.Slist = [jnp.zeros((dim,dim)) for n in range(self.NN)] #To match ANT.Gaussian default
         self.eta = eta
         self.T = T
-        self.sigmaKprev = None
-        self.Eprev = Eminf
         self.fermi = None
         self.fermi0 = None    # reference Fermi level
         self.dFermi = 0.0    # shift from reference
@@ -1112,9 +1085,7 @@ class surfGAt3D:
                 # Update Green's function
                 gNew = LA.inv(A_k - sig)
 
-                # Apply mixing to ensure retarded Green's function with Im[g] < 0
                 g_ = g.copy()
-                #g = jnp.where(gNew.imag > 0, g, gNew * mix + (1 - mix) * g)
                 g = gNew * mix + (1 - mix) * g
 
                 # Convergence check: use relative change in norm
@@ -1570,10 +1541,6 @@ class surfGAt3D:
         float
             Calculated Fermi energy in eV
 
-        Notes
-        -----
-        Previous implementation used ANT.Gaussian approach with complex contour
-        integration. Current version uses simpler bisection method from density.py.
         """
         print('Calculating Bulk Lattice Fermi Energy...')
         self.fermi = getFermiContact(self, ne, conv=tol, maxcycles=1000, T=self.T)

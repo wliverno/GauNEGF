@@ -78,14 +78,11 @@ else:
     print(f"JAX {_backend.upper()} backend: {len(_devices)} device(s)")
 
 # Create global device mesh for automatic sharding
-# This enables parallel computation across all available devices (CPU/GPU/TPU)
 from jax.sharding import Mesh, PartitionSpec as P, NamedSharding
 from jax.experimental.mesh_utils import create_device_mesh
 
-# Create 1D mesh along 'data' axis using all available devices
 DEVICE_MESH = Mesh(create_device_mesh((len(_devices),)), ('data',))
 
-# Helper function to shard arrays across the device mesh
 def shard_array(array, axis=0):
     """
     Shard an array across all devices along the specified axis.

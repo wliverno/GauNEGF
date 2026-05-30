@@ -1,6 +1,6 @@
 # Lower-Contour Density: Logic, Math, and Probe-Energy Design
 
-Status: working analysis (2026-05-25). ASCII-only math: `Sigma`, `mu`, `eta`,
+ASCII-only math: `Sigma`, `mu`, `eta`,
 `pi` spelled out; `->` is "tends to"; `~` is "asymptotically/approximately";
 `^dagger` is conjugate transpose; `Tr` is trace; `Im` imaginary part.
 
@@ -8,8 +8,8 @@ This note derives, from scratch, why the lower contour works the way it does:
 the energy-dependent contact self-energy and its linear tail, the effective
 overlap `S_eff = S - X`, the density-of-states behavior in the deep tail, the
 analytic density matrix, the analytic cross-term `delta_N` (which needs no extra
-eigendecomposition), and finally a principled replacement for the hardcoded
-probe energies `(-1e3, -1e4, -1e5)`.
+eigendecomposition), and the two-probe relative scheme used in production for
+extracting `X` and `Sigma_0` from the asymptotic.
 
 --------------------------------------------------------------------------------
 
@@ -125,16 +125,16 @@ The DOS dies like `1/E^2`. The charge sitting below a cutoff `Emin` (with
 
 So: IF `Emin` is placed below every pole `E_star`, the deep contour
 `[ENERGY_MIN, Emin]` contains negligible charge, falling off like
-`1 / |Emin - E_star|`. This is exactly what the bake-off measured:
-`||tail|| / ||band|| ~ 1e-5 to 1e-7` for both C2 and Au3 when `Emin` is below
-all poles. CONCLUSION: when `Emin` is below all poles, no separate lower-contour
-correction is needed -- a single `densityComplex[Emin, mu]` suffices.
+`1 / |Emin - E_star|`. The charge ratio `||tail|| / ||band||` drops to 1e-5
+to 1e-7 when `Emin` is below all poles. CONCLUSION: when `Emin` is below all
+poles, no separate lower-contour correction is needed -- a single
+`densityComplex[Emin, mu]` suffices.
 
 The lower contour only does real work in the contingency where `Emin` CANNOT be
 pushed below a pole (a deep core, or a pseudo-pole). Then `[ENERGY_MIN, Emin]`
 straddles real spectral weight and must be integrated -- and the right tool is
 the analytic Damle method below (real-axis `densityReal` fails silently on the
-sharp pole; see the bake-off).
+sharp pole).
 
 --------------------------------------------------------------------------------
 
@@ -221,14 +221,13 @@ energies. Two rules follow directly from (1):
       basis. So accuracy of `X` matters more than convenience of sampling.
 
 Therefore the probes must sit DEEP (where `C/E` is negligible), and `Emin` is
-specifically the wrong place to sample. The current code's
-`(-1e3, -1e4, -1e5)` are "deep enough" guesses, log-spaced so the lstsq
-residual can flag non-linearity. The weakness is only that they are hardcoded
-constants, blind to the actual problem scale.
+specifically the wrong place to sample. The production scheme (Section 7) places
+both probes relative to `ENERGY_MIN`, which is deep by construction and avoids
+any hardcoded probe depths that could be wrong for unusual system scales.
 
 --------------------------------------------------------------------------------
 
-## 7. Probe redesign: relative to `ENERGY_MIN` and `Emin`; do we need three?
+## 7. Probe design: relative to `ENERGY_MIN` and `Emin`; why two suffice
 
 ### 7.1 Error of a two-point fit
 
@@ -252,31 +251,31 @@ Read off the key facts:
 So two probes at `ENERGY_MIN` scale drive both errors to `~ C / ENERGY_MIN^2`
 and `~ C / ENERGY_MIN`, i.e. negligible.
 
-### 7.2 Do we need a third point?
+### 7.2 Why two probes, not three?
 
 The model has TWO parameters (`X`, `Sigma_0`). Two points determine them
 exactly -- the fit is not improved by a third. A third point does exactly one
 thing: it makes the system overdetermined, so the lstsq RESIDUAL becomes a
-measurement of how non-linear `Sigma` still is at the probe depth (the current
-`linearity_tol` warning). With only two points the residual is identically zero
-by construction -- you lose the self-check, not the fit.
+measurement of how non-linear `Sigma` still is at the probe depth. With only
+two points the residual is identically zero by construction -- you lose the
+self-check, not the fit.
 
-Verdict: NO, we do not need a third number to FIT. We only need a third if we
-want to keep the automatic linearity diagnostic. Given that both probes will sit
-at `ENERGY_MIN` scale (deep, where linearity is essentially guaranteed by the
-physics of (1)), dropping to two is sound. If a cheap guard is still wanted, the
-third evaluation can be gated behind a debug flag rather than paid every setup.
+Both probes sitting at `ENERGY_MIN` scale (deep, where linearity is essentially
+guaranteed by the physics of (1)) means the linearity diagnostic adds little:
+non-linearity there would signal a contact whose band extends anomalously deep,
+detectable in other ways. The third probe is not computed in production; it
+could be gated behind a debug flag if the self-check were ever needed.
 
-### 7.3 Proposed probe scheme (relative, not hardcoded)
+### 7.3 Production probe scheme
 
     E1 = ENERGY_MIN
     E2 = (Emin + ENERGY_MIN) / 2          (the midpoint)
 
 Because `|ENERGY_MIN| >> |Emin|` in every realistic case, `E2 ~ ENERGY_MIN/2`:
 both probes are deep (good linearity), a factor ~2 apart (a clean baseline for
-the slope). This is exactly the user's proposal, and (12)-(13) show it is
-well-justified: slope error `~ C/(0.5*ENERGY_MIN^2)`, intercept error
-`~ 3C/ENERGY_MIN`. Both tiny. And it is fully scale-relative: no magic numbers.
+the slope). From (12)-(13): slope error `~ C/(0.5*ENERGY_MIN^2)`, intercept
+error `~ 3C/ENERGY_MIN`. Both tiny. Fully scale-relative: no hardcoded probe
+depths.
 
 ### 7.4 One caveat: cancellation in `Sigma_0`
 
@@ -297,7 +296,7 @@ use a fixed deep multiple of `Emin` instead.)
      `X` is an overlap artifact, removed by `S_eff = S - X` (eqs 1-2, toy 3).
   2. DOS in the tail dies like `1/E^2`, so the deep contour holds negligible
      charge once `Emin` is below all poles -> no correction needed in the normal
-     case (eqs 4-6; confirmed by the bake-off).
+     case (eqs 4-6).
   3. The density matrix is one `eig(Fbar)` (eq 7).
   4. The cross-term `delta_N` reuses that same eig, needs no second one, and
      automatically counts only in-window states (eqs 8-11).

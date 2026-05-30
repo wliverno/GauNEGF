@@ -14,7 +14,7 @@ Spin-dependent transport follows the formalism described in [1].
 References
 ----------
 .. [1] Herrmann, C., Solomon, G. C., & Ratner, M. A. J. Chem. Theory Comput. 6, 3078 (2010)
-      DOI: 10.1021/acs.jctc.9b01078
+      DOI: 10.1021/ct1006949
 """
 
 import numpy as np
@@ -236,7 +236,7 @@ def _dos_kernel(E, F, S, sigma_total, Q):
 
 def transmission_single_energy(E, F_jax, S_jax, sigma_calc, spin=None):
     """
-    Calculate transmission at a single energy using linalg.py functions.
+    Calculate transmission at a single energy.
 
     Parameters
     ----------
@@ -317,7 +317,7 @@ def transmission_single_energy(E, F_jax, S_jax, sigma_calc, spin=None):
 
 def dos_single_energy(E, F_jax, S_jax, sigma_calc, spin=None):
     """
-    Calculate density of states at a single energy using linalg.py functions.
+    Calculate density of states at a single energy.
 
     Parameters
     ----------
@@ -780,22 +780,6 @@ def current(F, S, sig1, sig2, fermi, qV, T=TEMPERATURE, spin="r",dE=ENERGY_STEP)
     float
         Current in Amperes
     """
-    # Create energy grid
-    if qV < 0:
-        dE = -1*abs(dE)
-    else:
-        dE = abs(dE)
-    muL = fermi - qV/2
-    muR = fermi + qV/2
-
-    if T == 0:
-        Elist = np.arange(muL, muR, dE)
-    else:
-        kT = kB*T
-        spread = np.sign(dE)*N_KT*kT
-        Elist = np.arange(muL-spread, muR+spread, dE)
-
-    # Create sigma calculator and use checkpointable current calculation
     sigma_calc = SigmaCalculator(sig1, sig2, energy_dependent=False)
     return calculate_current(F, S, sigma_calc, fermi=fermi, qV=qV, T=T, spin=spin, dE=dE)
 
@@ -997,7 +981,6 @@ def cohTransSpin(Elist, F, S, sig1, sig2, spin='u'):
             print("Energy:", E, "eV, Transmission=", T)
         return (result.tolist(), np.zeros((len(Elist), 4)))
 
-# H0 is an NxN matrix, sig1 and sig2 are Nx1 vectors
 def DOS(Elist, F, S, sig1, sig2):
     """
     Calculate density of states with energy-independent self-energies.
