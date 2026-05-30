@@ -121,14 +121,30 @@ Choose the most central cells. For a 10-cell system extracting 5 cells:
 b) Count electrons
 ~~~~~~~~~~~~~~~~~~~
 
+For 1D contacts the per-unit-cell electron count is needed by
+:meth:`gauNEGF.scfE.NEGFE.setContact1D` (the ``neList`` argument). Use
+the physical electron count of the unit cell -- it is exact and
+basis-set independent:
+
 .. code-block:: python
 
-    PS_full = P_full @ S_full
-    ne = np.trace(PS_full[ind1:ind2, ind1:ind2]).real
+    # CNT example: 12 carbons per layer x 6 electrons per neutral C
+    ne_per_unit_cell = 12 * 6   # = 72
 
-This gives the Mulliken electron count in the device block from the
-full DFT calculation. Divide by ``nCells`` to get the electron count per
-unit cell.
+For a generic system the count is ``sum(Z_atom)`` over the atoms of one
+unit cell, minus core electrons for ECP basis sets (e.g., 11 valence
+electrons per Au atom in LANL2DZ).
+
+.. note::
+
+   Earlier revisions of this guide computed ``ne`` via
+   ``np.trace(P @ S)`` on a sub-block of the device. That form
+   silently drops the non-orthogonal cross-term contribution
+   (:math:`\delta N`) and gives a Mulliken count off by the
+   cross-term weight on systems where the contact overlap
+   ``stau`` is non-zero. Use the physical electron count instead;
+   it does not depend on the basis set or on whether the contact
+   is orthogonal.
 
 c) Extract coupling matrices from the deep interior
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
