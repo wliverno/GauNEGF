@@ -393,7 +393,6 @@ def test_surfGB_constructMat_nosoc():
 
 # ========== TEST 6: Fermi energy convergence with SOC ==========
 
-@pytest.mark.slow
 def test_surfGBAt_soc_fermi_convergence():
     """Fermi energy search with SOC should converge for Au (ne=11).
 
