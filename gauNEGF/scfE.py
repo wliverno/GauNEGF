@@ -230,7 +230,7 @@ class NEGFE(NEGF):
         probes sit safely in the linear regime. Two points determine the two
         parameters (X_asymp, Sigma_0) exactly; the slope error from any residual
         1/E term scales as ~1/(E1*E2) and is negligible at this depth. No third
-        probe / linearity residual is computed (see the doc, sec 7).
+        probe / linearity residual is computed.
 
         X_asymp is in general NON-Hermitian (the retarded self-energy carries
         broadening), so S_eff = S - X_asymp is complex/non-Hermitian and
@@ -239,10 +239,7 @@ class NEGFE(NEGF):
         """
         # Cheap band-floor estimate (self.Emin is not set until setIntegralLimits
         # runs after this): min eig of X @ F @ X in eV, minus the standard buffer.
-        # X @ F @ X (X = S^(-1/2)) is the symmetric Lowdin orthogonalization and
-        # is Hermitian -- so eigh is correct. The previous form eigh(inv(S) @ F)
-        # was silently wrong: inv(S) @ F is NOT Hermitian for non-trivial S, and
-        # eigh would take its upper triangle and return nonsense eigenvalues.
+        # X @ F @ X (X = S^(-1/2)) is Hermitian by construction -- eigh is correct.
         # eig runs on jax (GPU); large-matrix eigendecompositions must not use numpy.
         F_eV = np.asarray(self.F) * har_to_eV
         S = np.asarray(self.S)  # consumed below at S_eff = S - X_asymp
@@ -273,14 +270,13 @@ class NEGFE(NEGF):
         self.S_eff = S_eff
         self.Y_eff = Y_eff
         if not hasattr(self, 'damle_dN_warn'):
-            # FockToP warns if ANY of |tr(P@S)|, |delta_N|, or their sum (the
-            # lower electron count) exceeds this (electrons). Name kept for
-            # continuity; it no longer thresholds delta_N alone.
+            # FockToP warns if ANY of |tr(P@S)|, |delta_N|, or their sum
+            # (the lower electron count) exceeds this threshold (electrons).
             self.damle_dN_warn = 0.5
 
-        # Diagnostics: how far X_asymp / S_eff are from the Hermitian/symmetric
-        # assumptions the old eigh path silently made, and the defining-property
-        # check Y_eff @ S_eff @ Y_eff = I (must be ~machine precision).
+        # Diagnostics: non-Hermiticity / non-symmetry fractions of X_asymp
+        # (should be small for near-Hermitian contacts; non-zero for SOC/GHF),
+        # and the defining-property check Y_eff @ S_eff @ Y_eff = I (must be ~machine precision).
         Xn = max(np.linalg.norm(X_asymp), 1e-30)
         imag_frac = np.linalg.norm(np.imag(X_asymp)) / Xn
         herm_frac = np.linalg.norm(X_asymp - X_asymp.conj().T) / Xn
@@ -352,12 +348,10 @@ class NEGFE(NEGF):
         super().setVoltage(qV, fermi, Emin, Eminf)
         self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
         # The setF call above shifts each contact's surface Green's function by
-        # dFermi_i = mu_i - fermi0_i. This invalidates self.Sigma_0 cached by
-        # the previous _initAsymptoticSigma: Sigma_0 shifts by sum_i X_i*dFermi_i.
-        # X_asymp / S_eff / Y_eff are invariant (rigid-band shift theorem),
-        # but we re-fit them too for simplicity -- the cost is dominated by
-        # the three sigmaTot probes which converge fast well below the band.
-        # See tests/test_setF_mu_invariance.py for the empirical verification.
+        # dFermi_i = mu_i - fermi0_i, which invalidates the cached Sigma_0.
+        # X_asymp / S_eff / Y_eff are invariant under rigid-band shifts,
+        # but we re-fit them too for simplicity -- cost is dominated by the
+        # sigmaTot probes, which converge fast well below the band.
         self._initAsymptoticSigma()
         if self.mu1 != self.mu2 and self.N1 is not None:
             self.Nnegf=50 # Default grid
@@ -366,7 +360,6 @@ class NEGFE(NEGF):
                 self.fermiMethod = 'muller' if fermiMethod is None else fermiMethod
             elif fermiMethod is not None:
                 self.fermiMethod = fermiMethod
-        #jax.clear_caches() # reset compiled functions
     
     def setIntegralLimits(self, N1=None, N2=None, Nnegf=None, tol=ADAPTIVE_INTEGRATION_TOL, Emin=None):
 
@@ -522,13 +515,11 @@ class NEGFE(NEGF):
             # (Sigma_0 / S_eff / Y_eff) AND Emin all depend on it -- recompute
             # them on the CURRENT Fock before building the lower contour.
             self._initAsymptoticSigma()
-            # Emin is anchored to calcEmin's F-based default (eigh on F minus
-            # EMIN_BUFFER), then deepened by the DOS loop using true Sigma(E).
-            # The Fbar-floor seed was tried and reverted: Fbar's eigenvalues
-            # include spurious deep modes (artifacts of the constant-Sigma_0
-            # approximation outside its asymptotic regime) that pulled Emin
-            # to -10^4 to -10^5 eV on CNT33_5cell. F is Hermitian and the
-            # F-based anchor is purely a function of the device spectrum.
+            # Emin is anchored to calcEmin's F-based default (eigh on X @ F @ X
+            # minus EMIN_BUFFER), then deepened by the DOS loop using true Sigma(E).
+            # A Fbar-based seed is avoided: Fbar's eigenvalues include spurious deep
+            # modes from the constant-Sigma_0 approximation outside its asymptotic
+            # regime. The F-based anchor depends only on the device spectrum.
             self.Emin = calcEmin(self.F*har_to_eV, self.S, self.g, tol=self.tol, X=self.X)
             # Lower contour [ENERGY_MIN, Emin] via analytic Damle: damleLowerDensity
             # returns the lower density matrix and the analytic
@@ -539,8 +530,7 @@ class NEGFE(NEGF):
             # spectral weight sits in the lower contour (Emin too shallow or a
             # pseudo-pole), so Damle is being applied where its constant-Sigma_0
             # approximation is suspect -- warn (replaces calcTSW's dTSW<0
-            # detection). See docs/superpowers/specs/
-            # 2026-05-26-damle-lower-contour-Q-warning.md.
+            # detection).
             F_eV = self.F * har_to_eV
             P, delta_N_lower = damleLowerDensity(F_eV, self.Y_eff, self.Sigma_0,
                                                  self.g, self.Emin)
@@ -558,10 +548,9 @@ class NEGFE(NEGF):
         else:
             # DEPRECATED fixed-grid path. Retained for backward compatibility
             # only. Caller must supply explicit Emin via setIntegralLimits(
-            # N2=..., Emin=...); this path uses self.Eminf which (after Task
-            # 3.3 pins it to ENERGY_MIN) makes densityComplexN integrate over
-            # [-1e6, Emin] with a fixed point count -- numerically poor. The
-            # default (N2=None) Damle path above is preferred.
+            # N2=..., Emin=...); this path uses self.Eminf (ENERGY_MIN) and
+            # integrates over [-1e6, Emin] with a fixed point count -- numerically
+            # poor. The default (N2=None) Damle path above is preferred.
             P, _delta_N_lower = densityComplexN(self.F*har_to_eV, self.S, self.g,
                                                 self.Eminf, self.Emin, self.N2, T=0)
             nLower = np.trace(self.S @ P).real + _delta_N_lower
@@ -675,7 +664,6 @@ class NEGFE(NEGF):
                                                  '\'secant\', \'bisect\' or \'predict\' or \'default\'')
             # Shift Emin, mu1, and mu2 and update contact self-energies
             self.setVoltage(self.qV)
-            #self.Emin += self.fermi-fermi_old
             self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
         else:
             print('Calculating equilibrium density matrix:')
@@ -688,10 +676,9 @@ class NEGFE(NEGF):
                 P += densityGridN(self.F*har_to_eV, self.S, self.g, self.mu1, self.mu2, ind=-1, 
                                     N=self.Nnegf, T=self.T)
             else:
-                P += densityGrid(self.F*har_to_eV, self.S, self.g, self.mu1, self.mu2, ind=-1, 
-                                    tol=self.tol, T=self.T)                     
-            #P2 = self.g.densityComplex(self.Emin, self.mu2, 1)
-       
+                P += densityGrid(self.F*har_to_eV, self.S, self.g, self.mu1, self.mu2, ind=-1,
+                                    tol=self.tol, T=self.T)
+
         # Calculate Level Occupation, Lowdin TF,  Return
         D,V = eigh(self.X@(self.F*har_to_eV)@self.X)
         self.Xi = inv(self.X)
@@ -699,12 +686,7 @@ class NEGFE(NEGF):
         self.P = P.copy()
         occList = np.diag(np.real(pshift)) 
         EList = np.array(np.real(D)).flatten()
-        inds = np.argsort(EList)        
-        
-        
-        #DEBUG:
-        #for pair in zip(occList[inds], EList[inds]):                       
-        #    print("Energy=", str(pair[1]), ", Occ=", str(pair[0]))
+        inds = np.argsort(EList)
 
         return EList[inds], occList[inds]
 

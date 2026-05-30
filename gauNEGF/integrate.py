@@ -62,14 +62,12 @@ BYTES_TO_GB = 1e9                     # Conversion factor
 # MODULE-LEVEL JIT FUNCTIONS (clean, no nesting)
 # =============================================================================
 
-# Jit G^R function: (g is static)
 @jit
 def _gr_matrix_ops(sigTot, E, F, S, eta):
     """Retarded Green's function matrix operations (used by both vmap and workers)."""
     mat = (E + 1j*eta) * S - F - sigTot
     return jnp.linalg.solve(mat, jnp.eye(F.shape[0]))
 
-# Jit G< function: (g, ind are static)
 @jit
 def _gless_matrix_ops(sig, sigTot, E, F, S, eta):
     """Lesser Green's function matrix operations (used by both vmap and workers)."""
@@ -81,44 +79,6 @@ def _gless_matrix_ops(sig, sigTot, E, F, S, eta):
     gamma_E = 1j * (sig - jnp.conj(sig).T)
     gless = Gr_E @ gamma_E @ Ga_E
     return gless
-
-def _GIntSeq(weighted_func, F, S, g, Elist, weights, ind=None):
-    assert Elist.size == weights.size, "Elist and weights must have the same length"
-    assert F.shape == S.shape, "F and S must have the same shape"
-    assert F.shape[0] == F.shape[1], "F and S must be square matrices"
-
-    start_time = time.time()
-
-    # Convert to JAX arrays
-    F_jax = jnp.array(F)
-    S_jax = jnp.array(S)
-    Elist_jax = jnp.array(Elist)
-    weights_jax = jnp.array(weights)
-
-    matrix_size = F.shape[0]
-    num_energies = len(Elist_jax)
-    parallel_logger.info(f"GInt using sequencial (lax.scan): {matrix_size}x{matrix_size} matrix, {num_energies} energies")
-    start_time = time.time()
-    
-    # Function for lax.scan
-    def scan_fn(carry, inputs):
-        E, w = inputs
-        carry += weighted_func(E, w, F_jax, S_jax, g)
-        return carry, 1
-
-    # Integrate
-    result = jnp.zeros_like(F_jax, dtype=complex)
-    result, count = jax.lax.scan(scan_fn, result, (Elist_jax, weights_jax))
-    total = np.sum(count)
-    assert total == num_energies, f"Integration only used {total} points, expected {num_energies} points"
-
-    # Time and return
-    if FORCE_SYNCHRONOUS:
-        jax.block_until_ready(result)
-    elapsed = time.time() - start_time
-    parallel_logger.debug(f"GInt seq completed in {elapsed:.3f}s")
-    return result
-
 
 
 def _GInt(weighted_func, F, S, g, Elist, weights, ind=None):

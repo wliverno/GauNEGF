@@ -189,7 +189,6 @@ class surfG:
         #   (2) Add an explicit orthogonal=True flag to scfE.setContact1D that
         #       overrides aOverlaps/bOverlaps to I and 0 respectively. Removes
         #       the foot-gun for the common Lowdin-orthogonal case entirely.
-        # See debugging session 2026-05-15 (CNT33_5cell_orthESCF.out).
         self.tauList = taus
         self.stauList = ([None] * len(taus) if staus is None
                          else [None if stau is None else jnp.array(stau) for stau in staus])
@@ -284,7 +283,6 @@ class surfG:
             for i in range(len(self.indsList)):
                 S0 = self.aSList[i]
                 S1 = self.bSList[i]
-                zeros = jnp.zeros_like(S0)
                 S2 = jnp.block([[S0, S1],
                                 [S1.T, S0]])
                 n = S1.shape[0]
@@ -315,7 +313,6 @@ class surfG:
         for i in range(len(self.indsList)):
             H0 = self.aList[i]
             H1 = self.bList[i]
-            zeros = jnp.zeros_like(H0)
             n=len(H0)
             H2 = jnp.block([[H0, H1],
                             [H1.conj().T, H0]])
@@ -395,13 +392,6 @@ class surfG:
         # Initial state: (count, diff, g)
         init_state = (0, jnp.inf, inv(A))
         count, diff, g = lax.while_loop(cond_fun, body_fun, init_state)
-        #lax.cond(diff > conv,
-        #         lambda _: jax.debug.print(
-        #             "WARNING: surfG.g() did not converge at E={E:.4f} eV, diff={d:.2e} (after {n} iters)",
-        #             E=E, d=diff, n=count),
-        #         lambda _: None,
-        #         None)
-
         return g
 
     def setF(self, F, mu1=None, mu2=None):
@@ -497,7 +487,9 @@ class surfG:
         sig = t_reg @ self.g(E_shifted, i, conv) @ bar_t_reg
         sigma = jnp.zeros(self.F.shape, dtype=complex)
         sigma = sigma.at[jnp.ix_(inds, inds)].add(sig)
-        # De-orthogonalization - TODO: makes sure that alpha/beta also orthogonal!
+        # De-orthonormalize: stau is None signals orthonormal tau, so Xi @ sig @ Xi
+        # maps sigma back to the non-orthogonal AO basis. Only safe when alpha/beta
+        # are also orthonormal (i.e., contactFromFock=False with identity aOverlaps).
         sigma = lax.cond(stau is None,
                           lambda s: self.Xi @ s @ self.Xi,
                           lambda s: s,

@@ -132,16 +132,12 @@ them does not.
 
 ## 4. Direct empirical confirmation (AuBetheFerroceneHSE, HSE/Au-SOC)
 
-> Note: figures in this section were collected before the SOC basis-
-> convention fix in `spinTools.py:genLSMatrix` (see section 13). The bug
-> affected only on-site Hamiltonian matrix elements (kron(H0, I2) was
-> added to a spin-major Hsoc instead of interleaved); the E-linear Sigma
-> asymptotic is set by the contact `S_k` overlaps alone, so the
-> localization and mechanism conclusions here are independent of the
-> SOC fix. Absolute Fermi-level, charge, and weight numbers should be
-> re-collected post-fix before being relied upon for physics; the ~0.3255
-> asymptote per direction and the -315 dTSW magnitude are dominated by
-> the overlap-driven mechanism and are expected to change negligibly.
+> Note: the E-linear Sigma asymptotic is set by the contact `S_k` overlaps
+> alone, so localization and mechanism conclusions here are independent of
+> the contact on-site Hamiltonian. Absolute Fermi-level, charge, and weight
+> numbers should not be used for physics conclusions without re-running with
+> a current checkout; the ~0.3255 asymptote per direction and the -315 dTSW
+> magnitude are expected to be stable to small corrections.
 
 Three diagnostics in `AuStudies/` establish this concretely.
 
@@ -383,11 +379,10 @@ if dTSW / |TSW_ref| < tol: converged   # accepts dTSW <= 0 too
   contour excluded. Accept the truncated contour - it is the SCF-usable
   one.
 
-The previously tried two-sided test `|dTSW|/|TSW_ref| < tol` would have
-detected the `dTSW < 0` case but then kept widening `Eminf` in an attempt
-to make the truncated contour also enclose the pseudo-pole. That
-produces an SCF-failing density matrix; it was tested in production and
-confirmed to break AuBetheFerroceneHSE and CNT33.
+A two-sided test `|dTSW|/|TSW_ref| < tol` would detect the `dTSW < 0`
+case but then keep widening `Eminf` in an attempt to make the truncated
+contour also enclose the pseudo-pole. That produces an SCF-failing density
+matrix. The one-sided test is correct: accept `dTSW <= 0` and stop.
 
 When `dTSW < 0` is hit, `calcTSW` prints a `FERMI_DEBUG`-gated note
 pointing here. That is informational only - the truncation is the
@@ -600,28 +595,29 @@ story documented above does not.
 
 ---
 
-## 14. Production fix: pseudo-pole detection
+## 14. Production detection function
 
-The investigation in sections 1-13 motivated a production fix that replaces
-the magic `ENERGY_MIN = -1e6` config constant in `calcTSW` with a principled
-floor computed per SCF cycle from the asymptotic structure of Sigma(E).
+The investigation in sections 1-13 motivated `calcPseudoPoleFloor` in
+`gauNEGF/density.py`. See `docs/pseudo_pole_handling.md` for the math and
+AuBetheFerrocene empirical verification.
 
-See `docs/pseudo_pole_handling.md` for the math and AuBetheFerrocene
-empirical verification. The implementation lives in:
+Signature: `calcPseudoPoleFloor(F, S, g, alpha=0.1, min_buffer=50.0, E1=-1e3, E2=-1e4)`.
+It does a two-point asymptotic probe of `g.sigmaTot` to extract X and Sigma_0,
+forms `(H_eff = F + Sigma_0, S_eff = S - X)`, reduces to the standard
+non-Hermitian eigproblem `T = S_eff^{-1} H_eff` (so indefinite S_eff is
+handled correctly), classifies each eigenvector by Hermitian S_eff-norm
+`v^H S_eff v < 0`, and returns a buffered floor above the shallowest
+negative-energy pseudo-pole. All matrices are treated as complex Hermitian,
+so this works for GHF/SOC as well as the real-symmetric case.
 
-- `gauNEGF/density.py::calcPseudoPoleFloor(F, S, g, buffer, E1, E2)` --
-  single end-to-end function: two-point asymptotic probe of `g.sigmaTot`
-  to extract X and Sigma_0, form `(H_eff = F + Sigma_0, S_eff = S - X)`,
-  reduce to standard non-Hermitian eigproblem `T = S_eff^{-1} H_eff`
-  (so indefinite S_eff is handled correctly), classify each eigenvector
-  by Hermitian S_eff-norm `v^H S_eff v < 0`, and return
-  `max(E_pseudopole) + buffer`. All matrices treated as complex Hermitian
-  throughout (works for GHF/SOC F and S, not just real-symmetric).
-- `gauNEGF/scfE.py::setIntegralLimits` -- calls `calcPseudoPoleFloor` and
-  passes the result as `Emin_floor` to `calcTSW`.
+The production SCF path (FockToP / damleLowerDensity) does not call
+`calcPseudoPoleFloor` or `calcTSW`; instead FockToP warns when the lower
+contour holds significant weight, which is the corresponding signal that
+pseudo-pole content has entered the integration window. `calcPseudoPoleFloor`
+is available for direct use in fixed-grid or custom workflows.
 
-Tests: `tests/test_pseudo_pole_detection.py` (10 tests including a
+Tests: `tests/test_pseudo_pole_detection.py` (unit tests including a
 general-coupling test that catches the failure mode of a whitening-only
 approach, and a complex-Hermitian test that catches a `.real`-only
 approach) and `tests/test_calcTSW.py::test_calcTSW_with_pseudo_pole_floor`
-(slow regression test on the Au Bethe-lattice fixture).
+(regression test on the Au Bethe-lattice fixture).

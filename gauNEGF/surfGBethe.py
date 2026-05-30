@@ -26,7 +26,7 @@ References
 # Developed packages (import config BEFORE jax)
 from gauNEGF.density import getFermiContact
 from gauNEGF.config import (ETA, TEMPERATURE, SURFACE_GREEN_CONVERGENCE,
-                            FERMI_CALCULATION_TOL, ENERGY_MIN)
+                            FERMI_CALCULATION_TOL)
 from gauNEGF.utils import fractional_matrix_power
 
 # Python packages
@@ -37,10 +37,8 @@ from jax import jit
 import jax.lax as lax
 
 #Constants
-kB = 8.617e-5           # eV/Kelvin
 dim = 9                 # size of single atom matrix: 1s + 3p + 5d
 har_to_eV = 27.211386   # eV/Hartree
-Eminf = ENERGY_MIN      # Setting lower bound from config
 bohr_to_ang = 0.529177  # Bohr radius to Angstrom
 
 # Bethe lattice surface Green's function for a device with contacts
@@ -515,7 +513,7 @@ class surfGB:
         i : int
             Index of the contact to calculate self-energy for
         conv : float, optional
-            Convergence criterion for self-energy calculation (default: 1e-5)
+            Convergence criterion for self-energy calculation (default: SURFACE_GREEN_CONVERGENCE)
 
         Returns
         -------
@@ -580,12 +578,9 @@ class surfGB:
     
     def sigmaTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
         """
-        Calculate total self-energy matrix for the extended system.
+        Calculate total self-energy matrix from all contacts.
 
-        Computes self-energies for all sites in the extended system (12 neighbors + 1 center).
-        The total self-energy is constructed following the Bethe lattice model described in
-        Jacob & Palacios [1], which provides an efficient representation of bulk metallic
-        electrodes while maintaining proper orbital symmetries.
+        Sums sigma(E, i) over all contacts and returns the result in the full device basis.
 
         Parameters
         ----------
@@ -597,16 +592,8 @@ class surfGB:
         Returns
         -------
         ndarray
-            Total self-energy matrix for the extended system
-
-        References
-        ----------
-        [1] Jacob, D., & Palacios, J. J. (2011). Critical comparison of electrode models
-            in density functional theory based quantum transport calculations.
-            The Journal of Chemical Physics, 134(4), 044118.
-            DOI: 10.1063/1.3526044
+            Total self-energy matrix in the full device basis
         """
-        # Use JAX operations for better performance
         num_contacts = len(self.indsLists)
         sigs = [self.sigma(E, i, conv) for i in range(num_contacts)]
         return sum(sigs)
@@ -672,10 +659,10 @@ class surfGB:
         Parameters
         ----------
         Elist : tuple, optional
-            A list of contact energies for selecting sigma, 
-            (default: use contact ermi energy)
+            A list of contact energies for selecting sigma,
+            (default: use contact Fermi energy)
         conv: float, optional
-            Convergence criterial for the self-energy matrix
+            Convergence criterion for the self-energy matrix
 
         Returns
         -------
@@ -703,14 +690,6 @@ class surfGB:
         Ef : float
             New Fermi energy in eV
         """
-        fermiPrev = self.gList[i].fermi +0.0
-        #if i==-1:
-        #    print(f'Changing right contact fermi energy: {fermiPrev} --> {Ef}')
-        #elif i==0:
-        #    print(f'Changing left contact fermi energy: {fermiPrev} --> {Ef}')
-        #else:
-        #    print(f'Changing contact {i+1} fermi energy: {fermiPrev} --> {Ef}')
-        # Onsite energies
         self.gList[i].updateH(Ef)
     
     def setF(self, F, muL, muR):
@@ -898,7 +877,7 @@ class surfGB:
             print(f"s-pz: {V[0,3]:.3f}, pz-s: {V[3,0]:.3f}")
             print(f"Total s-p magnitude: {s_p_total:.3f}")
     
-        print("\nAll hopping physics tests passed!")    # Update run_all_tests to include new test
+        print("\nAll hopping physics tests passed!")
 
     def runAllTests(self):
         """
@@ -948,10 +927,6 @@ class surfGBAt:
     ----------
     NN : int
         Number of nearest neighbors (fixed to 12 for FCC)
-    sigmaKprev : ndarray or None
-        Previous bulk self-energy for convergence
-    Eprev : float
-        Previous energy point for convergence
     fermi : float
         Current Fermi energy
     F : ndarray
@@ -993,11 +968,8 @@ class surfGBAt:
         self.spin = 'r'         # spin-dependence not implemented yet
         self.NN = len(Slist)
         assert self.NN == 12, "Error: surfGBAt only implemented for FCC using 12 NN"
-        #self.Slist = [jnp.zeros((dim,dim)) for n in range(self.NN)] #To match ANT.Gaussian default
         self.eta = eta
         self.T = T
-        self.sigmaKprev = None
-        self.Eprev = Eminf
         self.fermi = None
         self.H0 = jnp.array(H)          # immutable reference (never mutated)
         self.Vlist0 = jnp.array(Vlist)  # immutable reference (never mutated)
@@ -1069,10 +1041,6 @@ class surfGBAt:
         Uses previous solution as initial guess when energy point is close to
         previous calculation to improve convergence.
         """
-        #Initialize sigmaK and A matrices for Dyson equation
-        #if self.sigmaKprev is not None and self.Eprev != Eminf and abs(self.Eprev - E) <1:
-        #    sigmaK = self.sigmaKprev.copy()
-        #else:
         sigmaK = jnp.array([jnp.eye(self.dim)*-1j for k in range(self.NN)], dtype=complex)
         # E is pre-shifted by the caller (wrapper subtracts dFermi before entering
         # the JIT boundary).  Using E directly keeps H0/Vlist0 as immutable
@@ -1107,14 +1075,6 @@ class surfGBAt:
         # Initial state: (count, diff, sigmaK, sigmaK_)
         init_state = (0, jnp.inf, sigmaK, sigmaK.copy())
         count, diff, sigmaK, sigmaK_ = lax.while_loop(cond_fun, body_fun, init_state)
-        
-        # Diagnostic output 
-        # lax.cond(diff > conv, lambda _: jax.debug.print("sigma: count={count}, diff={diff}",
-        #               count=count, diff=diff), lambda _: None, count, diff)
-        
-        self.sigmaKprev = sigmaK
-        self.Eprev= E
-
         return sigmaK
 
     def sigmaSurf(self, E, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5):
@@ -1187,14 +1147,8 @@ class surfGBAt:
             count += 1
             return (count, diff, sigSurf, sigSurf_)
         
-        # Initial state: (count, diff, sigSurf, sigSurf_)
-        init_state = (0, jnp.inf, sigSurf, sigSurf.copy()) # set diff to 0 to bypass second loop
+        init_state = (0, jnp.inf, sigSurf, sigSurf.copy())
         count, diff, sigSurf, sigSurf_ = lax.while_loop(cond_fun, body_fun, init_state)
-        
-        # Diagnostic output - Cond doesn't work anyway
-        # lax.cond(diff > conv, lambda _: jax.debug.print("sigma: count={count}, diff={diff}",
-        #               count=count, diff=diff), lambda _: None, count, diff)
-        
         return sigSurf
 
     def crossTermQSurf(self, E, sigInds=None, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5):
@@ -1320,8 +1274,6 @@ class surfGBAt:
         ----------
         ne : float
             Target number of electrons
-        fGuess : float, optional
-            Initial guess for Fermi energy in eV (default: 5)
         tol : float, optional
             Convergence tolerance (default: 1e-5)
 
@@ -1329,11 +1281,6 @@ class surfGBAt:
         -------
         float
             Calculated Fermi energy in eV
-
-        Notes
-        -----
-        Previous implementation used ANT.Gaussian approach with complex contour
-        integration. Current version uses simpler bisection method from density.py.
         """
         print('Calculating Bulk Bethe Lattice Fermi level...')
         self.fermi = getFermiContact(self, ne, conv=tol, maxcycles=1000, T=self.T)
