@@ -31,6 +31,7 @@ Documentation Contents
 
    installation
    quickstart
+   supported_configurations
 
 .. toctree::
    :maxdepth: 2

@@ -5,15 +5,33 @@ Choosing a Contact Type
 Overview
 --------
 
-gauNEGF offers four contact type options for modeling electron-electrode coupling:
+gauNEGF offers four contact type options for modeling electron-electrode
+coupling. The release status of each is summarized in
+:doc:`/supported_configurations` (the green / yellow / red matrix).
 
-- **Energy-independent (constant) self-energy:** Static self-energy matrices set via :meth:`gauNEGF.scf.NEGF.setSigma` or :meth:`gauNEGF.scfE.NEGFE.setSigma`. Simplest approach; energy-independent broadening matrices.
-  
-- **1D chain contacts:** Energy-dependent frequency-dependent self-energy for semi-infinite linear chain electrodes via :meth:`gauNEGF.scfE.NEGFE.setContact1D`. Uses :class:`gauNEGF.surfG1D.surfG` internally.
-  
-- **Bethe lattice contacts:** Energy-dependent self-energy for metallic FCC [111] surfaces with Slater-Koster parameters via :meth:`gauNEGF.scfE.NEGFE.setContactBethe`. Uses :class:`gauNEGF.surfGBethe.surfGB` internally.
-  
-- **3D atomic contacts:** Direct explicit 3D bulk k-point contact construction for advanced users via :class:`gauNEGF.surfG3D.surfGAt3D`. Provides full control; manual construction required.
+- **Energy-independent (constant) self-energy** -- green. Static
+  self-energy matrices set via :meth:`gauNEGF.scf.NEGF.setSigma` or
+  :meth:`gauNEGF.scfE.NEGFE.setSigma`. Simplest approach;
+  energy-independent broadening matrices.
+
+- **1D chain contacts** -- green on minimal basis with
+  ``contactFromFock=True``; yellow with external alpha/beta on minimal
+  basis; red on non-minimal basis (LANL2DZ-class). Energy-dependent
+  self-energy for semi-infinite linear chain electrodes via
+  :meth:`gauNEGF.scfE.NEGFE.setContact1D`. Uses
+  :class:`gauNEGF.surfG1D.surfG` internally.
+
+- **Bethe lattice contacts** -- green. Energy-dependent self-energy for
+  metallic FCC [111] surfaces with Slater-Koster parameters via
+  :meth:`gauNEGF.scfE.NEGFE.setContactBethe`. Uses
+  :class:`gauNEGF.surfGBethe.surfGB` internally. Non-orthogonal
+  cross-term Q correction is now applied automatically (this release).
+
+- **3D atomic contacts** -- per-atom :class:`gauNEGF.surfG3D.surfGAt3D`
+  builder is green; the full ``surfG3`` wrapper for periodic 3D
+  contacts is red (DOS and band structure plot correctly but
+  end-to-end transport is not validated yet). Direct explicit
+  construction required for advanced users.
 
 Choosing Your Contact Type
 ---------------------------
