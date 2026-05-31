@@ -22,7 +22,7 @@ jax.config.update("jax_enable_x64", True)
 from gauNEGF.matTools import *
 from gauNEGF.density import *
 from gauNEGF.utils import inv, eig, eigh, inv_sqrt_general
-from gauNEGF.config import (ETA, TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, EMIN_BUFFER, ENERGY_MIN)
+from gauNEGF.config import (ETA, TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, EMIN_BUFFER, ENERGY_MIN, FERMI_DEBUG)
 from gauNEGF.scf import NEGF
 from gauNEGF.surfG1D import surfG
 from gauNEGF.surfGBethe import surfGB
@@ -277,18 +277,19 @@ class NEGFE(NEGF):
         # Diagnostics: non-Hermiticity / non-symmetry fractions of X_asymp
         # (should be small for near-Hermitian contacts; non-zero for SOC/GHF),
         # and the defining-property check Y_eff @ S_eff @ Y_eff = I (must be ~machine precision).
-        Xn = max(np.linalg.norm(X_asymp), 1e-30)
-        imag_frac = np.linalg.norm(np.imag(X_asymp)) / Xn
-        herm_frac = np.linalg.norm(X_asymp - X_asymp.conj().T) / Xn
-        symm_frac = np.linalg.norm(X_asymp - X_asymp.T) / Xn
-        I_defect = np.linalg.norm(Y_eff @ S_eff @ Y_eff - np.eye(S_eff.shape[0]))
-        print(f'Asymptotic Sigma fit (2-probe E1={E1:.2e}, E2={E2:.2e} eV): '
-              f'||Sigma_0||_F = {np.linalg.norm(Sigma_0):.3e}, '
-              f'||X_asymp||_F = {np.linalg.norm(X_asymp):.3e}')
-        print(f'  X_asymp structure: ||Im X||/||X|| = {imag_frac:.3e}, '
-              f'||X-X^dag||/||X|| = {herm_frac:.3e} (non-Hermiticity), '
-              f'||X-X^T||/||X|| = {symm_frac:.3e} (non-symmetry)')
-        print(f'  Y_eff @ S_eff @ Y_eff = I defect: {I_defect:.3e}')
+        if FERMI_DEBUG:
+            Xn = max(np.linalg.norm(X_asymp), 1e-30)
+            imag_frac = np.linalg.norm(np.imag(X_asymp)) / Xn
+            herm_frac = np.linalg.norm(X_asymp - X_asymp.conj().T) / Xn
+            symm_frac = np.linalg.norm(X_asymp - X_asymp.T) / Xn
+            I_defect = np.linalg.norm(Y_eff @ S_eff @ Y_eff - np.eye(S_eff.shape[0]))
+            print(f'Asymptotic Sigma fit (2-probe E1={E1:.2e}, E2={E2:.2e} eV): '
+                  f'||Sigma_0||_F = {np.linalg.norm(Sigma_0):.3e}, '
+                  f'||X_asymp||_F = {np.linalg.norm(X_asymp):.3e}')
+            print(f'  X_asymp structure: ||Im X||/||X|| = {imag_frac:.3e}, '
+                  f'||X-X^dag||/||X|| = {herm_frac:.3e} (non-Hermiticity), '
+                  f'||X-X^T||/||X|| = {symm_frac:.3e} (non-symmetry)')
+            print(f'  Y_eff @ S_eff @ Y_eff = I defect: {I_defect:.3e}')
 
     # Set constant sigma contact for testing or adding non-zero temperature
     def setSigma(self, lContact=None, rContact=None, sig=-0.1j, sig2=None, T=TEMPERATURE):
