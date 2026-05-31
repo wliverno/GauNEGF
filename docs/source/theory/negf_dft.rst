@@ -87,7 +87,7 @@ Energy-Independent Case (NEGF):
     
     # Initialize with constant self-energies
     negf = NEGF('molecule', basis='lanl2dz')
-    negf.setSigma([1], [6])  # Simple constant self-energy
+    negf.setSigma(lContact=[1], rContact=[6], sig=-0.1j)  # Simple constant self-energy
     
 
 Energy-Dependent Case (NEGFE):
@@ -116,19 +116,24 @@ The Pulay mixing method [Pulay1980]_ is a powerful convergence acceleration tech
     negf.SCF(damping=0.02, pulay=True, nPulay=4)  # Use 4 previous iterations
 
 Fermi Energy Search
-~~~~~~~~~~~~~~~~
-Methods for finding the Fermi energy (NEGFE only):
+~~~~~~~~~~~~~~~~~~~
+The Fermi energy is found by a root-finding search on the contact electron
+count (NEGFE only). The search algorithm is selected via the ``fermiMethod``
+keyword on :meth:`gauNEGF.scfE.NEGFE.setVoltage`:
 
 .. code-block:: python
 
-    # Constant self-energy approximation
-    negf.setVoltage(qV, fermiMethod='predict')
-    
-    # Secant method (recommended for NEGFE)
-    negf.setVoltage(qV, fermiMethod='secant')
-    
-    # Muller method (alternative for NEGFE)
-    negf.setVoltage(qV, fermiMethod='muller')
+    # Default search (Muller's method, falls back to bisection)
+    negf.setVoltage(qV)
+
+    # Explicit method selection
+    negf.setVoltage(qV, fermiMethod='poly')    # 3rd-order polynomial fit
+    negf.setVoltage(qV, fermiMethod='secant')  # for strongly-coupled contacts
+    negf.setVoltage(qV, fermiMethod='bisect')  # always-safe fallback
+
+For 1D auto-extract contacts, do **not** pass an explicit Fermi energy to
+``setVoltage``; let the search run. See :doc:`/guides/config_tuning` for the
+full method comparison and selection guidance.
 
 Practical Considerations
 ---------------------
@@ -171,36 +176,39 @@ Example Workflows
 --------------
 
 Basic NEGF Calculation
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 Quick test with energy-independent self-energies:
 
 .. code-block:: python
 
-    from gauNEGF.scfE import NEGFE
-    
+    from gauNEGF.scf import NEGF
+
     # Initialize system
     negf = NEGF('molContact', basis='lanl2dz')
-    negf.setContacts([1], [2], sig=-0.05j)
+    negf.setSigma(lContact=[1], rContact=[2], sig=-0.05j)
     negf.setVoltage(0.0)
-    
+
     # Run SCF
     negf.SCF(conv=1e-4, damping=0.02)
 
 Production NEGFE Calculation
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Accurate calculation with temperature effects:
 
 .. code-block:: python
 
     from gauNEGF.scfE import NEGFE
-    
+
     # Initialize system
     negf = NEGFE('molecule', basis='lanl2dz')
-    negf.setContactBethe([1,2,3], [4,5,6], latFile='Au2', T=300)
-    
-    # Set voltage and run SCF
-    negf.setVoltage(0.0, fermiMethod='predict')
+    negf.setContactBethe([[1,2,3], [4,5,6]], latFile='Au', T=300)
+
+    # Use defaults for fermiMethod -- see /guides/config_tuning for tuning
+    negf.setVoltage(0.0)
     negf.SCF(conv=1e-4, damping=0.02)
+
+See :doc:`/guides/contacts_bethe` and :doc:`/guides/config_tuning` for
+production workflows and Fermi-search tuning.
 
 Next Steps
 ---------

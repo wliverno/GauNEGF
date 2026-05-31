@@ -1,0 +1,138 @@
+{
+  "group": "C",
+  "files_audited": [
+    "docs/source/examples/ethane.rst",
+    "docs/source/examples/silicon_nanowire.rst",
+    "docs/source/examples/advanced_examples.rst",
+    "docs/source/examples/index.rst",
+    "docs/source/api/index.rst"
+  ],
+  "findings": [
+    {
+      "file_path": "docs/source/examples/silicon_nanowire.rst",
+      "line_range": [106, 107],
+      "current_snippet": "    negf = NEGFE(fn='Si2', func='b3lyp', basis='lanl2dz')\n    inds = negf.setContact1D([[1],[2]], eta=1e-4) #Again, some broadening to speed up convergence",
+      "issue": "NEGFE constructor takes a NEGF object argument, not keyword arguments like fn, func, basis",
+      "proposed_fix": "    negf_base = NEGF(fn='Si2', func='b3lyp', basis='lanl2dz')\n    negf = NEGFE(negf_base)\n    inds = negf.setContact1D([[1],[2]], eta=1e-4) #Again, some broadening to speed up convergence",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/examples/silicon_nanowire.rst",
+      "line_range": [113, 113],
+      "current_snippet": "    Torth = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist+negf.fermi)",
+      "issue": "NEGFE object does not have attribute 'g'; surfG object must be passed to SigmaCalculator explicitly",
+      "proposed_fix": "    Torth = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.contacts[0]), Elist+negf.fermi)",
+      "confidence": "judgment",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/examples/silicon_nanowire.rst",
+      "line_range": [120, 120],
+      "current_snippet": "    Torth = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist+negf.fermi)",
+      "issue": "NEGFE object does not have attribute 'g'; surfG object must be passed to SigmaCalculator explicitly",
+      "proposed_fix": "    Torth = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.contacts[0]), Elist+negf.fermi)",
+      "confidence": "judgment",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/examples/advanced_examples.rst",
+      "line_range": [25, 28],
+      "current_snippet": "    inds = negf.setSigma([1], [2])\n    sig1 = np.diag(sig_up*len(inds[0]) + sig_down*len(inds[0]))\n    sig2 = np.diag(sig_down*len(inds[1]) + sig_up*len(inds[1]))\n    negf.setSigma([1], [2], sig1, sig2)",
+      "issue": "NEGF.setSigma does not return a value; inds assignment on line 25 will be None, causing IndexError on subsequent lines",
+      "proposed_fix": "    negf.setSigma([1], [2], -0.1j)\n    # Manually construct sigma matrices based on contact indices if custom values needed\n    inds = [[1], [2]]  # Define contact indices explicitly\n    sig1 = np.diag(np.concatenate([sig_up*len(inds[0]), sig_down*len(inds[0])]))\n    sig2 = np.diag(np.concatenate([sig_down*len(inds[1]), sig_up*len(inds[1])]))\n    negf.setSigma([1], [2], sig1, sig2)",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/examples/advanced_examples.rst",
+      "line_range": [37, 40],
+      "current_snippet": "    sigma1, sigma2 = negf.getSigma()\n    Elist = np.linspace(-5, 5, 1000)\n    T, Tspin = calculate_transmission(\n        negf.F, negf.S, SigmaCalculator(sigma1, sigma2), \n        Elist + negf.fermi, spin='u'\n    )",
+      "issue": "calculate_transmission returns a single array, not a tuple; unpacking to T, Tspin will fail",
+      "proposed_fix": "    sigma1, sigma2 = negf.getSigma()\n    Elist = np.linspace(-5, 5, 1000)\n    T = calculate_transmission(\n        negf.F, negf.S, SigmaCalculator(sigma1, sigma2), \n        Elist + negf.fermi, spin='u'\n    )",
+      "confidence": "mechanical",
+      "code_bug": true
+    },
+    {
+      "file_path": "docs/source/examples/advanced_examples.rst",
+      "line_range": [56, 60],
+      "current_snippet": "    # Set basic temperature-dependent contact \n    negf.setSigma(\n        [1], [2],  \n        -0.05j, \n        T=300     # Temperature in Kelvin\n    )",
+      "issue": "NEGF.setSigma does not accept a T parameter; T is only valid for NEGFE.setSigma",
+      "proposed_fix": "    # Set basic temperature-dependent contact (use NEGFE for temperature-dependent calculations)\n    # negf.setSigma(\n    #     [1], [2],  \n    #     -0.05j\n    # )\n    # For temperature support, use NEGFE instead:\n    # negf.setSigma([1], [2], -0.05j, T=300)",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/examples/advanced_examples.rst",
+      "line_range": [62, 67],
+      "current_snippet": "    # Set up temperature-dependent Bethe Lattice contacts\n    negf.setContactBethe(\n        contactList=[[1,2,3], [4,5,6]],\n        latFile='Au',\n        T=300  # Temperature in Kelvin\n    )",
+      "issue": "NEGF class does not have setContactBethe method; this method exists only on NEGFE",
+      "proposed_fix": "    # Set up temperature-dependent Bethe Lattice contacts (use NEGFE)\n    # negf = NEGFE(negf_base)  # Must use NEGFE for this feature\n    # negf.setContactBethe(\n    #     contactList=[[1,2,3], [4,5,6]],\n    #     latFile='Au',\n    #     T=300  # Temperature in Kelvin\n    # )",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/examples/advanced_examples.rst",
+      "line_range": [84, 89],
+      "current_snippet": "    # 1D chain contacts attached to atoms 1 and 6\n    negf.setContact1D(\n        contactList= [[1],[6]],\n        tauList = [[2], [5]],   # hopping calculated from 1 to 2 and 6 to 5\n        neList = [4,  4],       # 4 electrons per cell\n        eta = 1e-6              # Broadening term (eV)\n    )",
+      "issue": "NEGF class does not have setContact1D method; this method exists only on NEGFE",
+      "proposed_fix": "    # 1D chain contacts attached to atoms 1 and 6 (use NEGFE)\n    # negf = NEGFE(negf_base)  # Must use NEGFE for this feature\n    # negf.setContact1D(\n    #     contactList= [[1],[6]],\n    #     tauList = [[2], [5]],   # hopping calculated from 1 to 2 and 6 to 5\n    #     neList = [4,  4],       # 4 electrons per cell\n    #     eta = 1e-6              # Broadening term (eV)\n    # )",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/examples/advanced_examples.rst",
+      "line_range": [106, 106],
+      "current_snippet": "    dos, dos_list = calculate_dos(negf.F, negf.S, SigmaCalculator(g), E)",
+      "issue": "calculate_dos returns a single array, not a tuple; unpacking to dos, dos_list will fail",
+      "proposed_fix": "    dos = calculate_dos(negf.F, negf.S, SigmaCalculator(g), E)",
+      "confidence": "mechanical",
+      "code_bug": true
+    }
+  ],
+  "missing_modules": [
+    {
+      "module": "gauNEGF.surfG3D",
+      "reason": "not registered in api/index.rst",
+      "size_lines": 1576,
+      "deprecated": false
+    },
+    {
+      "module": "gauNEGF.spinTools",
+      "reason": "not registered in api/index.rst",
+      "size_lines": 378,
+      "deprecated": false
+    },
+    {
+      "module": "gauNEGF.utils",
+      "reason": "not registered in api/index.rst",
+      "size_lines": 63,
+      "deprecated": false
+    },
+    {
+      "module": "gauNEGF.protocols",
+      "reason": "not registered in api/index.rst",
+      "size_lines": 63,
+      "deprecated": false
+    },
+    {
+      "module": "gauNEGF.config",
+      "reason": "not registered in api/index.rst",
+      "size_lines": 102,
+      "deprecated": false
+    },
+    {
+      "module": "gauNEGF.fermiSearch",
+      "reason": "not registered in api/index.rst (DEPRECATED module)",
+      "size_lines": 197,
+      "deprecated": true
+    }
+  ],
+  "missing_modules_note": "Patched by main session after Group C verifier returned only 1 of 6 expected entries. List built directly by comparing truth table modules vs. api/index.rst automodule directives, both verified in context.",
+  "summary": {
+    "total_findings": 8,
+    "mechanical_count": 6,
+    "judgment_count": 2,
+    "code_bug_count": 2
+  }
+}

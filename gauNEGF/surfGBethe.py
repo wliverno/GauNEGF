@@ -23,24 +23,22 @@ References
     DOI: 10.1063/1.3526044
 """
 
+# Developed packages (import config BEFORE jax)
+from gauNEGF.density import getFermiContact
+from gauNEGF.config import (ETA, TEMPERATURE, SURFACE_GREEN_CONVERGENCE,
+                            FERMI_CALCULATION_TOL)
+from gauNEGF.utils import fractional_matrix_power
+
 # Python packages
 import jax
-import jax.numpy as np
-import jax.numpy.linalg as LA 
+import jax.numpy as jnp
+import jax.numpy.linalg as LA
 from jax import jit
 import jax.lax as lax
 
-# Developed packages
-from gauNEGF.density import getFermiContact
-from gauNEGF.config import (ETA, TEMPERATURE, SURFACE_GREEN_CONVERGENCE,
-                            FERMI_CALCULATION_TOL, ENERGY_MIN)
-from gauNEGF.utils import fractional_matrix_power
-
 #Constants
-kB = 8.617e-5           # eV/Kelvin
 dim = 9                 # size of single atom matrix: 1s + 3p + 5d
 har_to_eV = 27.211386   # eV/Hartree
-Eminf = ENERGY_MIN      # Setting lower bound from config
 bohr_to_ang = 0.529177  # Bohr radius to Angstrom
 
 # Bethe lattice surface Green's function for a device with contacts
@@ -118,7 +116,7 @@ class surfGB:
         self.spin = spin
         orbMap = bar.ibfatm[bar.ibfatm>0] 
         orbTyp = bar.ibftyp[bar.ibfatm>0]
-        coords =np.array([bar.c[i*3:(i+1)*3] for i in range(len(bar.c)//3)])*bohr_to_ang
+        coords =jnp.array([bar.c[i*3:(i+1)*3] for i in range(len(bar.c)//3)])*bohr_to_ang
         self.N = len(orbMap)
 
         # Collect contact information
@@ -126,23 +124,23 @@ class surfGB:
             indsList = []
             cList = []
             for atom in contact:
-                inds = np.where(np.isin(orbMap, atom))[0]
+                inds = jnp.where(jnp.isin(orbMap, atom))[0]
                 cList.append(coords[atom-1])
                 assert len(inds) == 9, f'Error: Atom {atom} has {len(inds)} basis functions, expecting 9'
-                inds = inds[np.argsort(abs(orbTyp[inds])//1000)]
+                inds = inds[jnp.argsort(abs(orbTyp[inds])//1000)]
                 indsList.append(inds)
             self.indsLists.append(indsList)
             # Calculate plane direction using SVD
-            cList = np.array(cList)  # Convert list to JAX array
-            centeredCoords = cList-np.mean(cList, axis=0)
+            cList = jnp.array(cList)  # Convert list to JAX array
+            centeredCoords = cList-jnp.mean(cList, axis=0)
             _, _, Vt = LA.svd(centeredCoords)
-            contDir = np.mean(cList, axis=0)-np.mean(coords, axis=0)
+            contDir = jnp.mean(cList, axis=0)-jnp.mean(coords, axis=0)
             contVec = Vt[-1]
-            if np.dot(contDir, contVec)<0:
+            if jnp.dot(contDir, contVec)<0:
                 contVec *= -1 
             self.cVecs.append(contVec)
             # Calculate one lattice direction for lining up atoms
-            vInd = np.argmin(np.array([LA.norm(v - cList[0]) for v in cList[1:]]))+1
+            vInd = jnp.argmin(jnp.array([LA.norm(v - cList[0]) for v in cList[1:]]))+1
             latVec = cList[vInd]-cList[0]
             latDist = LA.norm(latVec)
             self.latVecs.append(latVec/latDist)
@@ -159,15 +157,15 @@ class surfGB:
                 for c2 in coords:
                     l = LA.norm(c2-c)
                     # if within 0.2*nearest neighbor dist and not the same atom
-                    if l > 0.8 * latDist and l < 1.2 * latDist and not np.allclose(c2, c):
+                    if l > 0.8 * latDist and l < 1.2 * latDist and not jnp.allclose(c2, c):
                         nAtVecs.append((c2-c)/l) #Unit vector for that direction
                 
                 # Align out of plane vectors (two options)
                 nVecs = nVecs1.copy()
                 outOfPlane = [3,4,5,9,10,11]
                 for vec in nAtVecs:
-                    valList = np.array([np.dot(vec, direction) for direction in nVecs2])
-                    dirInd = np.argmax(valList)
+                    valList = jnp.array([jnp.dot(vec, direction) for direction in nVecs2])
+                    dirInd = jnp.argmax(valList)
                     if dirInd in outOfPlane and valList[dirInd]>0.9:
                         nVecs = nVecs2.copy()
                         break
@@ -175,8 +173,8 @@ class surfGB:
                 # Now that orientation is fixed, track all neighbors
                 nInds = []
                 for vec in nAtVecs:
-                    valList = np.array([np.dot(vec, direction) for direction in nVecs])
-                    dirInd = np.argmax(valList)
+                    valList = jnp.array([jnp.dot(vec, direction) for direction in nVecs])
+                    dirInd = jnp.argmax(valList)
                     if valList[dirInd]>0.9:
                         nInds.append(dirInd)
                     else:
@@ -197,17 +195,22 @@ class surfGB:
             Slist = []
             Vlist = []
             for d in dirList:
-                Slist.append(self.constructMat(self.Sdict, d))
-                Vlist.append(self.constructMat(self.Vdict, d))
+                Slist.append(self.constructMat(self.Sdict, d, self.SOC))
+                Vlist.append(self.constructMat(self.Vdict, d, self.SOC))
             self.Slists.append(Slist)
             self.Vlists.append(Vlist)
+        self.num_contacts = len(self.indsLists)
         # Use surfGBAt() object to store the atomic Bethe lattice green's function for each contact
-        self.gList = [surfGBAt(self.H0.copy(), Slist, Vlist, eta, T) for Slist, Vlist in zip(self.Slists, self.Vlists)]
+        self.gList = [surfGBAt(self.H0.copy(), Slist, Vlist, eta, T, self.SOC) for Slist, Vlist in zip(self.Slists, self.Vlists)]
        
-        # Calculate fermi level 
-        fermi = self.gList[0].calcFermi(self.ne/2)
+        # Calculate fermi level
+        # With SOC, 18x18 basis already includes both spins -> use full ne
+        # Without SOC, spin-restricted -> ne/2 per spin channel
+        ne_fermi = self.ne if self.SOC else self.ne/2
+        fermi = self.gList[0].calcFermi(ne_fermi)
         for g in self.gList:
             g.fermi = fermi
+            g.fermi0 = fermi
 
         # Store variables
         self.cList = cList #first contact coords, used for testing
@@ -215,10 +218,10 @@ class surfGB:
         self.S = S
         self.eta = eta
 
-        # JIT compile sigma method with i as static argument (like in surfG1D.py)
-        # This compiles separate versions for each contact (i=0, i=1, etc.)
-        # The expensive iterative calculation gets fully optimized
-        self.sigma = jit(self.sigma, static_argnums=(1,2))  # i is argument 1 (after self)
+        # Note: JIT compilation is on surfGBAt.sigmaSurf/sigmaK (the expensive Dyson
+        # iteration).  surfGB.sigma is NOT JIT'd so it can access dFermi and shift
+        # E before calling the atomic methods -- keeping dFermi outside the JIT
+        # boundary avoids stale-closure bugs and unnecessary recompilation.
 
     def genNeighbors(self, plane_normal, first_neighbor):
         """
@@ -242,52 +245,52 @@ class surfGB:
         """
         
         # Project first_neighbor onto plane perpendicular to plane_normal
-        proj = first_neighbor - np.dot(first_neighbor, plane_normal) * plane_normal
+        proj = first_neighbor - jnp.dot(first_neighbor, plane_normal) * plane_normal
         first_neighbor = proj / LA.norm(proj)
         
         # Generate in-plane vectors using 60-degree rotations
         in_plane_vectors = []
-        rotation_angle = np.pi / 3  # 60 degrees
+        rotation_angle = jnp.pi / 3  # 60 degrees
         
         for i in range(3):
             angle = i * rotation_angle
             # Rodrigues rotation formula
-            cos_theta = np.cos(angle)
-            sin_theta = np.sin(angle)
+            cos_theta = jnp.cos(angle)
+            sin_theta = jnp.sin(angle)
             
-            K = np.array([[0, -plane_normal[2], plane_normal[1]],
+            K = jnp.array([[0, -plane_normal[2], plane_normal[1]],
                          [plane_normal[2], 0, -plane_normal[0]],
                          [-plane_normal[1], plane_normal[0], 0]])
             
-            R = np.eye(3) + sin_theta * K + (1 - cos_theta) * np.matmul(K, K)
-            rotated_vector = np.dot(R, first_neighbor)
+            R = jnp.eye(3) + sin_theta * K + (1 - cos_theta) * jnp.matmul(K, K)
+            rotated_vector = jnp.dot(R, first_neighbor)
             in_plane_vectors.append(rotated_vector / LA.norm(rotated_vector))
         
         # Generate out-of-plane vectors
-        out_of_plane_angle = np.arccos(1/np.sqrt(3)) # ~54.74
+        out_of_plane_angle = jnp.arccos(1/jnp.sqrt(3)) # ~54.74
         
         out_of_plane_vectors = []
         # Add 30deg = pi/6 rotation to base vector before going out of plane
-        rot_angle = np.pi/6
-        K = np.array([[0, -plane_normal[2], plane_normal[1]],
+        rot_angle = jnp.pi/6
+        K = jnp.array([[0, -plane_normal[2], plane_normal[1]],
                       [plane_normal[2], 0, -plane_normal[0]],
                       [-plane_normal[1], plane_normal[0], 0]])
-        R = np.eye(3) + np.sin(rot_angle) * K + (1 - np.cos(rot_angle)) * np.matmul(K, K)
-        rotated_first = np.dot(R, first_neighbor)
-        out_of_plane_base = np.cos(out_of_plane_angle) * rotated_first + \
-                      np.sin(out_of_plane_angle) * plane_normal
+        R = jnp.eye(3) + jnp.sin(rot_angle) * K + (1 - jnp.cos(rot_angle)) * jnp.matmul(K, K)
+        rotated_first = jnp.dot(R, first_neighbor)
+        out_of_plane_base = jnp.cos(out_of_plane_angle) * rotated_first + \
+                      jnp.sin(out_of_plane_angle) * plane_normal
         
         for i in range(3):
-            angle = i * 2 * np.pi / 3  # 120 degree rotations
-            cos_theta = np.cos(angle)
-            sin_theta = np.sin(angle)
+            angle = i * 2 * jnp.pi / 3  # 120 degree rotations
+            cos_theta = jnp.cos(angle)
+            sin_theta = jnp.sin(angle)
 
-            K = np.array([[0, -plane_normal[2], plane_normal[1]],
+            K = jnp.array([[0, -plane_normal[2], plane_normal[1]],
                          [plane_normal[2], 0, -plane_normal[0]],
                          [-plane_normal[1], plane_normal[0], 0]])
 
-            R = np.eye(3) + sin_theta * K + (1 - cos_theta) * np.matmul(K, K)
-            rotated_vector = np.dot(R, out_of_plane_base)
+            R = jnp.eye(3) + sin_theta * K + (1 - cos_theta) * jnp.matmul(K, K)
+            rotated_vector = jnp.dot(R, out_of_plane_base)
             out_of_plane_vectors.append(rotated_vector)
         
         # Add corresponding opposite vectors at the (k+6)%12 location
@@ -338,35 +341,49 @@ class surfGB:
         
         # Check to make sure parameters are all specified
         # Note: set up only for minimal basis with single s, p, and d orbital
-        expected_keys = ['ne', 'es', 'ep', 'edd', 'edt', 'sss', 'sps', 'pps', 'ppp',
+        expected_keys = {'ne', 'es', 'ep', 'edd', 'edt', 'sss', 'sps', 'pps', 'ppp',
                         'sds', 'pds', 'pdp', 'dds', 'ddp', 'ddd', 'Ssss', 'Ssps',
-                        'Spps', 'Sppp', 'Ssds', 'Spds', 'Spdp', 'Sdds', 'Sddp', 'Sddd']
-        assert len(params.keys()) == len(expected_keys) and set(params.keys()) == set(expected_keys), \
-             f"Error reading file: Found Bethe parameters: {list(params.keys())}, expected: {expected_keys}"
-        
-        # sort parameters and convert Hartrees to eV 
+                        'Spps', 'Sppp', 'Ssds', 'Spds', 'Spdp', 'Sdds', 'Sddp', 'Sddd'}
+        optional_keys = {'soc_p', 'soc_d'}
+        found_keys = set(params.keys())
+        assert expected_keys.issubset(found_keys) and found_keys.issubset(expected_keys | optional_keys), \
+             f"Error reading file: Found Bethe parameters: {list(params.keys())}, expected: {sorted(expected_keys)}"
+
+        # sort parameters and convert Hartrees to eV
         self.ne = params['ne']
         self.Edict = {k[1:]:params[k]*har_to_eV for k in params if k.startswith('e')}
         self.Sdict = {k[1:]:params[k] for k in params if k.startswith('S')}
-        self.Vdict = {k:params[k]*har_to_eV for k in params if not k.startswith('e') and not k.startswith('S')}
+        self.Vdict = {k:params[k]*har_to_eV for k in params
+                      if not k.startswith('e') and not k.startswith('S')
+                      and not k.startswith('soc') and k != 'ne'}
         # Setup onsite H0 matrix before Fermi level shifting
         hdiag = [self.Edict['s']]+ [self.Edict['p']]*3 + [self.Edict['dd']]+ \
                 [self.Edict['dt']]*2 + [self.Edict['dd'], self.Edict['dt']]
-        self.H0 = np.diag(np.array(hdiag))
 
-    def constructMat(self, Mdict, dirCosines):
+        H0 = jnp.diag(jnp.array(hdiag))
+        if 'soc_p' in params and 'soc_d' in params and self.spin != 'r':
+            self.SOC = True
+            lambdas = [0.0, params['soc_p'] * har_to_eV, params['soc_d'] * har_to_eV]
+            from gauNEGF.spinTools import constructSOCterm
+            Hsoc = constructSOCterm(lambdas)
+            self.H0 = jnp.kron(H0, jnp.eye(2)) + jnp.array(Hsoc)
+        else:
+            self.SOC = False
+            self.H0 = H0
+
+    def constructMat(self, Mdict, dirCosines, SOC=False):
         """
         Construct hopping/overlap matrix using Slater-Koster formalism.
 
         Builds a 9x9 matrix for s, p, and d orbital interactions based on the
         Slater-Koster two-center approximation. The matrix is first constructed
         assuming a [0,0,1] bond direction, then rotated to the given direction
-        using direction cosines.
+        using direction cosines. When SOC=True, expands to 18x18 via kron(M, I2).
 
         Parameters
         ----------
         Mdict : dict
-            Dictionary of Slater-Koster parameters (ssσ, spσ, ppσ, etc.)
+            Dictionary of Slater-Koster parameters (sss, sps, pps, etc.)
         dirCosines : ndarray
             Array [l,m,n] of direction cosines for the bond
 
@@ -384,7 +401,7 @@ class surfGB:
         - [4:9,4:9]: d-d block
         """
 
-        M = np.zeros((dim, dim))
+        M = jnp.zeros((dim, dim))
         
         #Original matrix before rotation - assuming [0,0,1] bond direction
         # s-s coefficient
@@ -420,61 +437,64 @@ class surfGB:
         M = M.at[8,8].set(Mdict['ddd']) #dxy - dxy 
         
         # Initialize 9x9 transformation matrix and polar directions
-        tr = np.zeros((9, 9))
+        tr = jnp.zeros((9, 9))
         x, y, z = dirCosines
-        theta = np.arccos(z)  # polar angle from z-axis
-        phi = np.arctan2(y, x)  # azimuthal angle in x-y plane
+        theta = jnp.arccos(z)  # polar angle from z-axis
+        phi = jnp.arctan2(y, x)  # azimuthal angle in x-y plane
         
         # s orbital (1x1) at position [0,0] - always 1 since spherically symmetric
         tr = tr.at[0,0].set(1.0)
         
         # p orbitals (3x3) at positions [1:4,1:4]
         # [px,py,pz] block - describes how p orbitals transform under rotation
-        tr = tr.at[1:4,1:4].set(np.array([
-            [np.cos(theta) * np.cos(phi), -np.sin(phi)  , np.sin(theta)*np.cos(phi)],
-            [np.cos(theta) * np.sin(phi),  np.cos(phi)  , np.sin(theta)*np.sin(phi)], 
-            [-np.sin(theta)             ,  0            , np.cos(theta)]
+        tr = tr.at[1:4,1:4].set(jnp.array([
+            [jnp.cos(theta) * jnp.cos(phi), -jnp.sin(phi)  , jnp.sin(theta)*jnp.cos(phi)],
+            [jnp.cos(theta) * jnp.sin(phi),  jnp.cos(phi)  , jnp.sin(theta)*jnp.sin(phi)], 
+            [-jnp.sin(theta)             ,  0            , jnp.cos(theta)]
         ]))
         
         # d orbitals (5x5) at positions [4:9,4:9]
         # [d3z2-r2, dxz, dyz, dx2-y2, dxy] block - transforms the five d orbitals
-        d_block = np.zeros((5,5))
+        d_block = jnp.zeros((5,5))
         
         # Copying formula from ANT.Gaussian directly
         d_block = d_block.at[0,0].set((3 * z**2 - 1) / 2)
-        d_block = d_block.at[0,1].set(-np.sqrt(3) * np.sin(2*theta) / 2)
-        d_block = d_block.at[0,3].set(np.sqrt(3) * np.sin(theta)**2 / 2)
+        d_block = d_block.at[0,1].set(-jnp.sqrt(3) * jnp.sin(2*theta) / 2)
+        d_block = d_block.at[0,3].set(jnp.sqrt(3) * jnp.sin(theta)**2 / 2)
         
-        d_10 = np.sqrt(3) * np.sin(2*theta) * np.cos(phi) / 2
+        d_10 = jnp.sqrt(3) * jnp.sin(2*theta) * jnp.cos(phi) / 2
         d_block = d_block.at[1,0].set(d_10)
-        d_block = d_block.at[1,1].set(np.cos(2*theta) * np.cos(phi))
-        d_block = d_block.at[1,2].set(-np.cos(theta) * np.sin(phi))
-        d_block = d_block.at[1,3].set(-d_10 / np.sqrt(3))
-        d_block = d_block.at[1,4].set(np.sin(theta) * np.sin(phi))
+        d_block = d_block.at[1,1].set(jnp.cos(2*theta) * jnp.cos(phi))
+        d_block = d_block.at[1,2].set(-jnp.cos(theta) * jnp.sin(phi))
+        d_block = d_block.at[1,3].set(-d_10 / jnp.sqrt(3))
+        d_block = d_block.at[1,4].set(jnp.sin(theta) * jnp.sin(phi))
         
-        d_20 = np.sqrt(3) * np.sin(2*theta) * np.sin(phi) / 2
+        d_20 = jnp.sqrt(3) * jnp.sin(2*theta) * jnp.sin(phi) / 2
         d_block = d_block.at[2,0].set(d_20)
-        d_block = d_block.at[2,1].set(np.cos(2*theta) * np.sin(phi))
-        d_block = d_block.at[2,2].set(np.cos(theta) * np.cos(phi))
-        d_block = d_block.at[2,3].set(-d_20 / np.sqrt(3))
-        d_block = d_block.at[2,4].set(-np.sin(theta) * np.cos(phi))
+        d_block = d_block.at[2,1].set(jnp.cos(2*theta) * jnp.sin(phi))
+        d_block = d_block.at[2,2].set(jnp.cos(theta) * jnp.cos(phi))
+        d_block = d_block.at[2,3].set(-d_20 / jnp.sqrt(3))
+        d_block = d_block.at[2,4].set(-jnp.sin(theta) * jnp.cos(phi))
         
-        d_block = d_block.at[3,0].set(np.sqrt(3) * np.sin(theta)**2 * np.cos(2*phi) / 2)
-        d_block = d_block.at[3,1].set(np.sin(2*theta) * np.cos(2*phi) / 2)
-        d_block = d_block.at[3,2].set(-np.sin(theta) * np.sin(2*phi))
-        d_block = d_block.at[3,3].set((1 + np.cos(theta)**2) * np.cos(2*phi) / 2)
-        d_block = d_block.at[3,4].set(-np.cos(theta) * np.sin(2*phi))
+        d_block = d_block.at[3,0].set(jnp.sqrt(3) * jnp.sin(theta)**2 * jnp.cos(2*phi) / 2)
+        d_block = d_block.at[3,1].set(jnp.sin(2*theta) * jnp.cos(2*phi) / 2)
+        d_block = d_block.at[3,2].set(-jnp.sin(theta) * jnp.sin(2*phi))
+        d_block = d_block.at[3,3].set((1 + jnp.cos(theta)**2) * jnp.cos(2*phi) / 2)
+        d_block = d_block.at[3,4].set(-jnp.cos(theta) * jnp.sin(2*phi))
         
-        d_block = d_block.at[4,0].set(np.sqrt(3) * np.sin(theta)**2 * np.sin(2*phi) / 2)
-        d_block = d_block.at[4,1].set(np.sin(2*theta) * np.sin(2*phi) / 2)
-        d_block = d_block.at[4,2].set(np.sin(theta) * np.cos(2*phi))
-        d_block = d_block.at[4,3].set((1 + np.cos(theta)**2) * np.sin(2*phi) / 2)
-        d_block = d_block.at[4,4].set(np.cos(theta) * np.cos(2*phi))
+        d_block = d_block.at[4,0].set(jnp.sqrt(3) * jnp.sin(theta)**2 * jnp.sin(2*phi) / 2)
+        d_block = d_block.at[4,1].set(jnp.sin(2*theta) * jnp.sin(2*phi) / 2)
+        d_block = d_block.at[4,2].set(jnp.sin(theta) * jnp.cos(2*phi))
+        d_block = d_block.at[4,3].set((1 + jnp.cos(theta)**2) * jnp.sin(2*phi) / 2)
+        d_block = d_block.at[4,4].set(jnp.cos(theta) * jnp.cos(2*phi))
         
         tr = tr.at[4:9,4:9].set(d_block)
-        
-        # Apply transformation 
-        return tr @ M @ tr.T
+
+        # Apply transformation
+        M_rot = tr @ M @ tr.T
+        if SOC:
+            return jnp.kron(M_rot, jnp.eye(2))
+        return M_rot
     
     def sigma(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
         """
@@ -493,7 +513,7 @@ class surfGB:
         i : int
             Index of the contact to calculate self-energy for
         conv : float, optional
-            Convergence criterion for self-energy calculation (default: 1e-5)
+            Convergence criterion for self-energy calculation (default: SURFACE_GREEN_CONVERGENCE)
 
         Returns
         -------
@@ -509,46 +529,58 @@ class surfGB:
             The Journal of Chemical Physics, 134(4), 044118.
             DOI: 10.1063/1.3526044
         """
-        sig = np.zeros((self.N, self.N), dtype=complex)
-        sigSurf = self.gList[i].sigma(E, conv)
+        # Shift E to reference frame of immutable H0/Vlist0 (keeps dFermi
+        # outside the JIT boundary of surfGBAt.sigma)
+        E_shifted = E - self.gList[i].dFermi
+        sigSurf = self.gList[i].sigmaSurf(E_shifted, conv)
 
         # Get contact-specific data for this static contact index
         nIndLists_i = self.nIndLists[i]
         indsLists_i = self.indsLists[i]
 
-        # Apply self energies in first 9 directions that aren't attached to atom
-        for nInds, Finds in zip(nIndLists_i, indsLists_i):
-            # Sum contributions from all 9 directions, then subtract connected ones
-            sigAtom = np.sum(sigSurf[:9], axis=0)
-            for neighbor_idx in nInds:
-                sigAtom = sigAtom - sigSurf[neighbor_idx]# Compute indices not connected to device (JAX-compatible)
+        if self.SOC:
+            # SOC matrices are 18x18 (spin already included, interleaved ordering)
+            sig = jnp.zeros((2*self.N, 2*self.N), dtype=complex)
+            for nInds, Finds in zip(nIndLists_i, indsLists_i):
+                sigInds = list(set(range(9)) - {int(x) for x in nInds})
+                sigAtom = sum(sigSurf[j] for j in sigInds)
+                # Expand orbital indices to spin-orbital: i -> [2*i, 2*i+1]
+                socFinds = jnp.array([idx for i in Finds for idx in (2*i, 2*i+1)])
+                sig = sig.at[jnp.ix_(socFinds, socFinds)].set(sigAtom)
 
-            # Update sigma matrix
-            sig = sig.at[np.ix_(Finds, Finds)].set(sigAtom)
+            # De-orthonormalization with expanded Xi
+            sig = lax.cond(self.Sdict['sss'] == 0,
+                          lambda s: jnp.kron(self.Xi, jnp.eye(2)) @ s @ jnp.kron(self.Xi, jnp.eye(2)),
+                          lambda s: s,
+                          sig)
+            # No kron needed -- spin is already in SOC matrices
+        else:
+            sig = jnp.zeros((self.N, self.N), dtype=complex)
+            for nInds, Finds in zip(nIndLists_i, indsLists_i):
+                sigInds = list(set(range(9)) - {int(x) for x in nInds})
+                sigAtom = sum(sigSurf[j] for j in sigInds)
+                sig = sig.at[jnp.ix_(Finds, Finds)].set(sigAtom)
 
-        # Apply de-orthonormalization technique from ANT.Gaussian if orthonormal
-        sig = lax.cond(self.Sdict['sss'] == 0,
-                      lambda s: self.Xi @ s @ self.Xi,
-                      lambda s: s,
-                      sig)
+            # Apply de-orthonormalization technique from ANT.Gaussian if orthonormal
+            sig = lax.cond(self.Sdict['sss'] == 0,
+                          lambda s: self.Xi @ s @ self.Xi,
+                          lambda s: s,
+                          sig)
 
-        # Handle spin - use if/else since spin is static
-        if self.spin == 'u' or self.spin == 'ro':
-            sig = np.kron(np.eye(2), sig)
-        elif self.spin == 'g':
-            sig = np.kron(sig, np.eye(2))
-        # else: spin == 'r', keep sig as-is
+            # Handle spin - use if/else since spin is static
+            if self.spin == 'u' or self.spin == 'ro':
+                sig = jnp.kron(jnp.eye(2), sig)
+            elif self.spin == 'g':
+                sig = jnp.kron(sig, jnp.eye(2))
+            # else: spin == 'r', keep sig as-is
 
-        return sig 
+        return sig
     
     def sigmaTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
         """
-        Calculate total self-energy matrix for the extended system.
+        Calculate total self-energy matrix from all contacts.
 
-        Computes self-energies for all sites in the extended system (12 neighbors + 1 center).
-        The total self-energy is constructed following the Bethe lattice model described in
-        Jacob & Palacios [1], which provides an efficient representation of bulk metallic
-        electrodes while maintaining proper orbital symmetries.
+        Sums sigma(E, i) over all contacts and returns the result in the full device basis.
 
         Parameters
         ----------
@@ -560,19 +592,65 @@ class surfGB:
         Returns
         -------
         ndarray
-            Total self-energy matrix for the extended system
-
-        References
-        ----------
-        [1] Jacob, D., & Palacios, J. J. (2011). Critical comparison of electrode models
-            in density functional theory based quantum transport calculations.
-            The Journal of Chemical Physics, 134(4), 044118.
-            DOI: 10.1063/1.3526044
+            Total self-energy matrix in the full device basis
         """
-        # Use JAX operations for better performance
         num_contacts = len(self.indsLists)
         sigs = [self.sigma(E, i, conv) for i in range(num_contacts)]
         return sum(sigs)
+
+    def crossTermQ(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
+        """Cross-term Q_sym for contact i in full device basis.
+
+        Mirrors surfGB.sigma: iterates atoms in contact i, calls
+        gList[i].crossTermQSurf with per-atom active directions, assembles result,
+        then applies de-orthonormalization (same as sigma).
+        """
+        nIndLists_i = self.nIndLists[i]
+        indsLists_i = self.indsLists[i]
+
+        E_shifted = E - self.gList[i].dFermi
+
+        if self.SOC:
+            # SOC matrices are 18x18 (spin already included, interleaved ordering)
+            sig = jnp.zeros((2*self.N, 2*self.N), dtype=complex)
+            for nInds, Finds in zip(nIndLists_i, indsLists_i):
+                sigInds = list(set(range(9)) - {int(x) for x in nInds})
+                Q_atom = self.gList[i].crossTermQSurf(E_shifted, sigInds=sigInds, conv=conv)
+                # Expand orbital indices to spin-orbital: k -> [2*k, 2*k+1]
+                socFinds = jnp.array([idx for k in Finds for idx in (2*k, 2*k+1)])
+                sig = sig.at[jnp.ix_(socFinds, socFinds)].set(Q_atom)
+
+            # De-orthonormalization with expanded Xi (same condition as sigma)
+            sig = lax.cond(self.Sdict['sss'] == 0,
+                           lambda s: jnp.kron(self.Xi, jnp.eye(2)) @ s @ jnp.kron(self.Xi, jnp.eye(2)),
+                           lambda s: s,
+                           sig)
+            # No trailing spin kron -- spin already in SOC matrices
+        else:
+            sig = jnp.zeros((self.N, self.N), dtype=complex)
+            for nInds, Finds in zip(nIndLists_i, indsLists_i):
+                sigInds = list(set(range(9)) - {int(x) for x in nInds})
+                Q_atom = self.gList[i].crossTermQSurf(E_shifted, sigInds=sigInds, conv=conv)
+                sig = sig.at[jnp.ix_(Finds, Finds)].set(Q_atom)
+
+            # Apply de-orthonormalization if orthonormal basis (same as sigma)
+            sig = lax.cond(self.Sdict['sss'] == 0,
+                           lambda s: self.Xi @ s @ self.Xi,
+                           lambda s: s,
+                           sig)
+
+            if self.spin == 'u' or self.spin == 'ro':
+                sig = jnp.kron(jnp.eye(2), sig)
+            elif self.spin == 'g':
+                sig = jnp.kron(sig, jnp.eye(2))
+
+        return sig
+
+    def crossTermQTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
+        """Total cross-term Q_sym from all contacts."""
+        num_contacts = len(self.indsLists)
+        qs = [self.crossTermQ(E, i, conv) for i in range(num_contacts)]
+        return sum(qs)
 
     def getSigma(self, Elist=[None, None], conv=SURFACE_GREEN_CONVERGENCE):
         """
@@ -581,10 +659,10 @@ class surfGB:
         Parameters
         ----------
         Elist : tuple, optional
-            A list of contact energies for selecting sigma, 
-            (default: use contact ermi energy)
+            A list of contact energies for selecting sigma,
+            (default: use contact Fermi energy)
         conv: float, optional
-            Convergence criterial for the self-energy matrix
+            Convergence criterion for the self-energy matrix
 
         Returns
         -------
@@ -612,14 +690,6 @@ class surfGB:
         Ef : float
             New Fermi energy in eV
         """
-        fermiPrev = self.gList[i].fermi +0.0
-        #if i==-1:
-        #    print(f'Changing right contact fermi energy: {fermiPrev} --> {Ef}')
-        #elif i==0:
-        #    print(f'Changing left contact fermi energy: {fermiPrev} --> {Ef}')
-        #else:
-        #    print(f'Changing contact {i+1} fermi energy: {fermiPrev} --> {Ef}')
-        # Onsite energies
         self.gList[i].updateH(Ef)
     
     def setF(self, F, muL, muR):
@@ -663,15 +733,15 @@ class surfGB:
         M = self.constructMat(self.Vdict, [1, 0, 0])
     
         # dxy should be zero along x-axis
-        np.testing.assert_almost_equal(M[0,8], 0.0,
+        jnp.testing.assert_almost_equal(M[0,8], 0.0,
             err_msg="dxy not zero along x-axis")
         
         # dx2-y2 should be sqrt(3)/2 * sds along x-axis
-        np.testing.assert_almost_equal(M[0,7], np.sqrt(3)/2 * Vdict['sds'],
+        jnp.testing.assert_almost_equal(M[0,7], jnp.sqrt(3)/2 * Vdict['sds'],
             err_msg="dx2-y2 incorrect along x-axis")
     
         # dz2 should be -1/2 along x-axis
-        np.testing.assert_almost_equal(M[0,4], -0.5 * Vdict['sds'],
+        jnp.testing.assert_almost_equal(M[0,4], -0.5 * Vdict['sds'],
             err_msg="dz2 incorrect along x-axis")
     
         print("d orbital angular function tests passed!")
@@ -685,14 +755,14 @@ class surfGB:
         """
     
         # Test inversion symmetry
-        dir1 = [1/np.sqrt(2), 1/np.sqrt(2), 0]
-        dir2 = [-1/np.sqrt(2), -1/np.sqrt(2), 0]
+        dir1 = [1/jnp.sqrt(2), 1/jnp.sqrt(2), 0]
+        dir2 = [-1/jnp.sqrt(2), -1/jnp.sqrt(2), 0]
     
         M1 = self.constructMat(self.Vdict, dir1)
         M2 = self.constructMat(self.Vdict, dir2)
     
         # d-d block should be identical under inversion
-        np.testing.assert_array_almost_equal(
+        jnp.testing.assert_array_almost_equal(
             M1[4:,4:], M2[4:,4:],
             err_msg="d-d block not symmetric under inversion")
     
@@ -713,14 +783,14 @@ class surfGB:
         M = self.constructMat(Vdict, [1, 0, 0])
     
         # px-dxy should be zero along x-axis
-        np.testing.assert_almost_equal(
+        jnp.testing.assert_almost_equal(
             M[1,8], 0.0,
             err_msg="px-dxy interaction incorrect along x-axis")
     
         # Test pz-dz2 interaction along z-axis
         M = self.constructMat(Vdict, [0, 0, 1])
         expected = Vdict['pds']  # Should be pure sigma
-        np.testing.assert_almost_equal(
+        jnp.testing.assert_almost_equal(
             M[3,4], expected,
             err_msg="pz-dz2 interaction incorrect along z-axis")
     
@@ -742,7 +812,7 @@ class surfGB:
     
         # Should be pure delta interaction
         expected = Vdict['ddd']
-        np.testing.assert_almost_equal(
+        jnp.testing.assert_almost_equal(
             M[6,6], expected,
             err_msg="dyz-dyz interaction incorrect along x-axis")
     
@@ -750,7 +820,7 @@ class surfGB:
         M = self.constructMat(Vdict, [0, 0, 1])
         # Should be pure sigma interaction
         expected = Vdict['dds']
-        np.testing.assert_almost_equal(
+        jnp.testing.assert_almost_equal(
             M[4,4], expected,
             err_msg="dz2-dz2 interaction incorrect along z-axis")
     
@@ -777,15 +847,15 @@ class surfGB:
             ([0, 1, 0], "y-axis"),
             
             # 45-degree rotations
-            ([1/np.sqrt(2), 0, 1/np.sqrt(2)], "45° in xz-plane"),
-            ([0, 1/np.sqrt(2), 1/np.sqrt(2)], "45° in yz-plane"),
-            ([1/np.sqrt(2), 1/np.sqrt(2), 0], "45° in xy-plane"),
+            ([1/jnp.sqrt(2), 0, 1/jnp.sqrt(2)], "45° in xz-plane"),
+            ([0, 1/jnp.sqrt(2), 1/jnp.sqrt(2)], "45° in yz-plane"),
+            ([1/jnp.sqrt(2), 1/jnp.sqrt(2), 0], "45° in xy-plane"),
         ]
         
         print("\nTesting hopping matrix physics...")
         
         for direction, name in test_cases:
-            direction = np.array(direction)
+            direction = jnp.array(direction)
             x, y, z = direction
             
             print(f"\nChecking {name} direction: [{x:.3f}, {y:.3f}, {z:.3f}]")
@@ -797,7 +867,7 @@ class surfGB:
                     f"s-p hopping not antisymmetric for p{i}"
                     
             # Check total s-p hopping magnitude is preserved
-            s_p_total = np.sqrt(V[0,1]**2 + V[0,2]**2 + V[0,3]**2)
+            s_p_total = jnp.sqrt(V[0,1]**2 + V[0,2]**2 + V[0,3]**2)
             assert abs(s_p_total - s_p_mag) < eps, \
                 f"s-p hopping magnitude not preserved: {s_p_total:.6f} != {s_p_mag:.6f}"
                 
@@ -807,7 +877,7 @@ class surfGB:
             print(f"s-pz: {V[0,3]:.3f}, pz-s: {V[3,0]:.3f}")
             print(f"Total s-p magnitude: {s_p_total:.3f}")
     
-        print("\nAll hopping physics tests passed!")    # Update run_all_tests to include new test
+        print("\nAll hopping physics tests passed!")
 
     def runAllTests(self):
         """
@@ -857,10 +927,6 @@ class surfGBAt:
     ----------
     NN : int
         Number of nearest neighbors (fixed to 12 for FCC)
-    sigmaKprev : ndarray or None
-        Previous bulk self-energy for convergence
-    Eprev : float
-        Previous energy point for convergence
     fermi : float
         Current Fermi energy
     F : ndarray
@@ -868,7 +934,7 @@ class surfGBAt:
     S : ndarray
         Extended overlap matrix including neighbors
     """
-    def __init__(self, H, Slist, Vlist, eta, T=TEMPERATURE):
+    def __init__(self, H, Slist, Vlist, eta, T=TEMPERATURE, SOC=False):
         """
         Initialize surfGBAt with Hamiltonian and neighbor matrices.
 
@@ -884,75 +950,63 @@ class surfGBAt:
             Broadening parameter in eV
         T : float, optional
             Temperature in Kelvin (default: 0)
-
+        SOC : bool, optional
+            Whether to include spin-orbit coupling (default: False)
         Raises
         ------
         AssertionError
             If matrix dimensions are incorrect or number of neighbors != 12
         """
-        assert np.shape(H) == (dim,dim), f"Error with H dim, should be {dim}x{dim}"
+        self.dim = dim*2 if SOC else dim
+        assert jnp.shape(H) == (self.dim,self.dim), f"Error with H dim, should be {self.dim}x{self.dim}"
         for S,V in zip(Slist, Vlist):
-            assert np.shape(S) == (dim,dim), f"Error with S dim, should be {dim}x{dim}"
-            assert np.shape(V) == (dim,dim), f"Error with F dim, should be {dim}x{dim}"
+            assert jnp.shape(S) == (self.dim,self.dim), f"Error with S dim, should be {self.dim}x{self.dim}"
+            assert jnp.shape(V) == (self.dim,self.dim), f"Error with F dim, should be {self.dim}x{self.dim}"
         self.H = H
         self.Slist = Slist
         self.Vlist = Vlist
+        self.spin = 'r'         # spin-dependence not implemented yet
         self.NN = len(Slist)
         assert self.NN == 12, "Error: surfGBAt only implemented for FCC using 12 NN"
-        #self.Slist = [np.zeros((dim,dim)) for n in range(self.NN)] #To match ANT.Gaussian default
         self.eta = eta
         self.T = T
-        self.sigmaKprev = None
-        self.Eprev = Eminf
+        self.fermi = None
+        self.H0 = jnp.array(H)          # immutable reference (never mutated)
+        self.Vlist0 = jnp.array(Vlist)  # immutable reference (never mutated)
+        self.fermi0 = None               # reference Fermi level
+        self.dFermi = 0.0               # shift from reference
+        self.num_contacts = 1
 
         self.updateH()
 
         # JIT compile methods with self as static argument
         self.sigmaK = jit(self.sigmaK, static_argnums=(1,2))
-        self.sigma = jit(self.sigma, static_argnums=(1,2))
+        self.sigmaSurf = jit(self.sigmaSurf, static_argnums=(1,2))
 
     def updateH(self, fermi=None):
         """
-        Update Hamiltonian and extended matrices.
+        Update Hamiltonian and Fock matrix.
 
-        Updates onsite and hopping matrices, as well as extended lattice matrices.
-        The extended matrices H0x and S0x include 13 sites total (12 neighbor sites
-        followed by 1 onsite term). These are stored as F and S for compatibility
-        with density.py functions.
+        Sets F = H (9x9) and S = I for protocol compatibility with density.py.
 
         Parameters
         ----------
         fermi : float, optional
             New Fermi energy setpoint in eV (default: None)
-
-        Notes
-        -----
-        When fermi is provided and different from current value:
-        - Shifts onsite energies by the Fermi level difference
-        - Updates hopping matrices with overlap contributions
-        - Rebuilds extended matrices for the full system
         """
-        if fermi is not None and self.fermi is not None and fermi != self.fermi:
-            # Shift fermi energy
-            fermiPrev = self.fermi
-            dFermi =  fermi - fermiPrev
-            # Onsite energies
-            self.H = self.H + dFermi*np.eye(dim)
-            # And hopping overlaps
-            for j,S in enumerate(self.Slist):
-                self.Vlist[j] = self.Vlist[j] + dFermi*S
-            #print(np.diag(self.H))
+        if fermi is not None and fermi != self.fermi:
             self.fermi = fermi
+            self.dFermi = fermi if self.fermi0 is None else fermi - self.fermi0
+            if self.fermi0 is None:
+                self.fermi0 = fermi
 
-        H0x = np.kron(np.eye(self.NN+1), self.H)
-        S0x = np.eye(dim*(self.NN+1))
-        for i in range(self.NN):
-            S0x = S0x.at[-dim:, i*dim:(i+1)*dim].set(self.Slist[i])
-            S0x = S0x.at[i*dim:(i+1)*dim, -dim:].set(self.Slist[i].T)
-            H0x = H0x.at[-dim:, i*dim:(i+1)*dim].set(self.Vlist[i])
-            H0x = H0x.at[i*dim:(i+1)*dim, -dim:].set(self.Vlist[i].conj().T)
-        self.F = H0x
-        self.S = S0x
+        # Build H and Vlist from H0/Vlist0 plus current dFermi (for non-JIT callers)
+        self.H = self.H0 + self.dFermi * jnp.eye(self.dim)
+        self.Vlist = jnp.array([self.Vlist0[j] + self.dFermi * self.Slist[j]
+                                 for j in range(self.NN)])
+
+        self.F = self.H    # 9x9
+        self.S = jnp.eye(self.dim)
 
     # Calculate sigmaK for the bulk
     def sigmaK(self, E, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5):
@@ -987,49 +1041,43 @@ class surfGBAt:
         Uses previous solution as initial guess when energy point is close to
         previous calculation to improve convergence.
         """
-        #Initialize sigmaK and A matrices for Dyson equation
-        #if self.sigmaKprev is not None and self.Eprev != Eminf and abs(self.Eprev - E) <1:
-        #    sigmaK = self.sigmaKprev.copy()
-        #else:
-        sigmaK = np.array([np.eye(dim)*-1j for k in range(self.NN)], dtype=complex)
-        A = (E - self.eta*1j)*np.eye(dim) - self.H
-        
+        sigmaK = jnp.array([jnp.eye(self.dim)*-1j for k in range(self.NN)], dtype=complex)
+        # E is pre-shifted by the caller (wrapper subtracts dFermi before entering
+        # the JIT boundary).  Using E directly keeps H0/Vlist0 as immutable
+        # constants in the compiled code, eliminating JIT recompilation during SCF.
+        E_eff = E + self.eta*1j
+        A = E_eff*jnp.eye(self.dim) - self.H0
+
         #Self-consistency loop using jax.lax.while_loop
         maxIter = 1000
-        
+
         def cond_fun(state):
             count, diff, sigmaK, sigmaK_ = state
             return (diff > conv) & (count < maxIter)
-        
+
         def body_fun(state):
             count, diff, sigmaK, sigmaK_ = state
             sigmaK_ = sigmaK.copy()
-            sigTot = np.sum(sigmaK, axis=0)
-           
+            sigTot = jnp.sum(sigmaK, axis=0)
+
             for k in range(self.NN):
                 pair_k = (k + 6)%12 # Opposite direction vector
                 gK = LA.inv(A - sigTot + sigmaK[pair_k]) # subtracted from sigTot
-                B = (E - self.eta*1j)*self.Slist[k] - self.Vlist[k]
-                sigmaK = sigmaK.at[k].set(mix*(B@gK@B.conj().T) + (1-mix)*sigmaK_[k])
+                B = E_eff*self.Slist[k] - self.Vlist0[k]
+                B_bar = E_eff*self.Slist[k].conj().T - self.Vlist0[k].conj().T
+                sigmaK = sigmaK.at[k].set(mix*(B@gK@B_bar) + (1-mix)*sigmaK_[k])
             
             # Convergence Check
-            diff = np.max(np.abs(sigmaK - sigmaK_))/np.max(np.abs(sigmaK_))
+            diff = jnp.max(jnp.abs(sigmaK - sigmaK_))/jnp.max(jnp.abs(sigmaK_))
             count += 1
             return (count, diff, sigmaK, sigmaK_)
         
         # Initial state: (count, diff, sigmaK, sigmaK_)
-        init_state = (0, np.inf, sigmaK, sigmaK.copy())
+        init_state = (0, jnp.inf, sigmaK, sigmaK.copy())
         count, diff, sigmaK, sigmaK_ = lax.while_loop(cond_fun, body_fun, init_state)
-        
-        # Warning check (outside JIT if needed)
-        #print(f'Warning: sigmaK() exceeded {maxIter} iterations! E: {E}, Conv: {diff}')
-        
-        self.sigmaKprev = sigmaK
-        self.Eprev= E
-
         return sigmaK
 
-    def sigma(self, E, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5): 
+    def sigmaSurf(self, E, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5):
         """
         Calculate surface self-energies for an FCC lattice.
 
@@ -1072,41 +1120,95 @@ class surfGBAt:
             DOI: 10.1063/1.3526044
         """
         sigSurf = self.sigmaK(E, conv, mix)[:9]
-        
+
         #Self-consistency loop using jax.lax.while_loop
         maxIter = 1000
-        A = (E - self.eta*1j)*np.eye(dim) - self.H
+        E_eff = E + self.eta*1j
+        A = E_eff*jnp.eye(self.dim) - self.H0
         planeVec = [0,1,2,6,7,8] # Location of vectors in plane
-        
+
         def cond_fun(state):
             count, diff, sigSurf, sigSurf_ = state
             return (diff > conv) & (count < maxIter)
-        
+
         def body_fun(state):
             count, diff, sigSurf, sigSurf_ = state
             sigSurf_ = sigSurf.copy()
-            sigTot = np.sum(sigSurf, axis=0)
+            sigTot = jnp.sum(sigSurf, axis=0)
             g = LA.inv(A - sigTot) # subtracted from sigTot
             for k in planeVec:
                 pair_k = (k + 6)%12 # Opposite direction vector
-                B = (E - self.eta*1j)*self.Slist[k] - self.Vlist[k]
-                sigSurf = sigSurf.at[k].set(mix*(B@g@B.conj().T) + (1-mix)*sigSurf_[k])
+                B = E_eff*self.Slist[k] - self.Vlist0[k]
+                B_bar = E_eff*self.Slist[k].conj().T - self.Vlist0[k].conj().T
+                sigSurf = sigSurf.at[k].set(mix*(B@g@B_bar) + (1-mix)*sigSurf_[k])
             
             # Convergence Check
-            diff = np.max(np.abs(sigSurf - sigSurf_))/np.max(np.abs(sigSurf_))
+            diff = jnp.max(jnp.abs(sigSurf - sigSurf_))/jnp.max(jnp.abs(sigSurf_))
             count += 1
             return (count, diff, sigSurf, sigSurf_)
         
-        # Initial state: (count, diff, sigSurf, sigSurf_)
-        init_state = (0, np.inf, sigSurf, sigSurf.copy()) # set diff to 0 to bypass second loop
+        init_state = (0, jnp.inf, sigSurf, sigSurf.copy())
         count, diff, sigSurf, sigSurf_ = lax.while_loop(cond_fun, body_fun, init_state)
-        
-        # Warning check (outside JIT if needed)
-        #if diff > conv:
-        #    print(f'Warning: sigma() exceeded {maxIter} iterations! E: {E}, Conv: {diff}')
-        
         return sigSurf
-    
+
+    def crossTermQSurf(self, E, sigInds=None, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5):
+        """Symmetrized cross-term Q_sym = sum_k (B_k g_k S_k + S_k g_k B_k^bar) / 2.
+
+        sigInds: list of surface direction indices to include (default: all 9).
+        Uses the neighbor Green's function g_k = inv(A - sigTot + sigSurf[pair_k])
+        for each direction k, not the center atom's own Green's function.
+        For out-of-plane UP directions (3,4,5) whose pairs (9,10,11) are not
+        surface directions, g_k = inv(A - sigTot) since the pair self-energy
+        is already absent from sigTot.
+        """
+        if sigInds is None:
+            sigInds = list(range(9))
+
+        # Get converged surface self-energies (9 self-energies for surface)
+        # E is pre-shifted by the caller
+        sigSurf = self.sigmaSurf(E, conv, mix)  # shape (9, dim, dim)
+        E_eff = E + self.eta * 1j
+        A = E_eff * jnp.eye(self.dim) - self.H0
+        sigTot = jnp.sum(sigSurf, axis=0)
+
+        Q = jnp.zeros((self.dim, self.dim), dtype=complex)
+        for k in sigInds:
+            pair_k = (k + 6) % 12
+            if pair_k < 9:
+                g_k = LA.inv(A - sigTot + sigSurf[pair_k])
+            else:
+                g_k = LA.inv(A - sigTot)
+            B_k = E_eff * self.Slist[k] - self.Vlist0[k]
+            B_k_bar = E_eff * self.Slist[k].conj().T - self.Vlist0[k].conj().T
+            Q_fwd = B_k @ g_k @ self.Slist[k].conj().T
+            Q_rev = self.Slist[k] @ g_k @ B_k_bar
+            Q = Q + (Q_fwd + Q_rev) / 2
+        return Q
+
+    def crossTermQBulk(self, E, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5):
+        """Bulk cross-term Q_sym over all 12 directions.
+
+        Uses g_k = inv(A - sigTot + sigK[pair_k]) for each direction k,
+        i.e. the neighbor's Green's function excluding the coupling back
+        to the center atom.
+        """
+        # E is pre-shifted by the caller
+        sigK = self.sigmaK(E, conv, mix)  # 12 bulk self-energies
+        E_eff = E + self.eta * 1j
+        A = E_eff * jnp.eye(self.dim) - self.H0
+        sigTot = jnp.sum(sigK, axis=0)
+
+        Q = jnp.zeros((self.dim, self.dim), dtype=complex)
+        for k in range(12):
+            pair_k = (k + 6) % 12
+            g_k = LA.inv(A - sigTot + sigK[pair_k])
+            B_k = E_eff * self.Slist[k] - self.Vlist0[k]
+            B_k_bar = E_eff * self.Slist[k].conj().T - self.Vlist0[k].conj().T
+            Q_fwd = B_k @ g_k @ self.Slist[k].conj().T
+            Q_rev = self.Slist[k] @ g_k @ B_k_bar
+            Q = Q + (Q_fwd + Q_rev) / 2
+        return Q
+
     # Empty function for compatibility with density.py methods
     def setF(self, F, mu1, mu2):
         """
@@ -1125,21 +1227,25 @@ class surfGBAt:
         """
         pass # Bethe lattice bulk properties are intrinsic (dependent on TB parameters)
     
-    # Wrapper function for compatibility with density.py methods
     def sigmaTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
-        sig = np.zeros(((self.NN + 1)*dim, (self.NN+1)*dim), dtype=complex)
-        sigK = self.sigmaK(E, conv)
-        sigTot = np.sum(sigK, axis=0)
-        for k in range(self.NN):
-            pair_k = (k + 6)%12 # Opposite direction vector
-            sig = sig.at[k*dim:(k+1)*dim,k*dim:(k+1)*dim].set(sigTot - sigK[pair_k])
-        return sig
+        return jnp.sum(self.sigmaK(E - self.dFermi, conv), axis=0)
 
-    # Get the bulk DOS of the Bethe lattice
-    @jit
+    def sigma(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
+        """Self-energy for contact i (only i=0, single bulk contact)."""
+        return self.sigmaTot(E, conv)
+
+    def crossTermQ(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
+        """Cross-term Q_sym for contact i (delegates to crossTermQBulk)."""
+        return self.crossTermQBulk(E - self.dFermi, conv)
+
+    def crossTermQTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
+        """Total cross-term Q_sym (single contact = crossTermQ)."""
+        return self.crossTermQ(E, 0, conv)
+
+    # Get the surface DOS of the Bethe lattice
     def DOS(self, E):
         """
-        Calculate bulk density of states of the Bethe lattice.
+        Calculate surface density of states of the Bethe lattice.
 
         Parameters
         ----------
@@ -1151,12 +1257,13 @@ class surfGBAt:
         float
             Density of states at energy E
         """
-        Gr = LA.inv((E-1j*self.eta)*np.eye(dim)- self.H - np.sum(self.sigma(E), axis=0))
-        return -np.trace(Gr).imag/np.pi
+        E_shifted = E - self.dFermi
+        Gr = LA.inv((E_shifted + 1j*self.eta)*jnp.eye(self.dim) - self.H0 - jnp.sum(self.sigmaSurf(E_shifted), axis=0))
+        return -jnp.trace(Gr).imag/jnp.pi
 
     
     # Calculate fermi energy using bisection (to specified tolerance)
-    def calcFermi(self, ne, fGuess=5, tol=FERMI_CALCULATION_TOL):
+    def calcFermi(self, ne, tol=FERMI_CALCULATION_TOL):
         """
         Calculate Fermi energy using bisection method.
 
@@ -1167,8 +1274,6 @@ class surfGBAt:
         ----------
         ne : float
             Target number of electrons
-        fGuess : float, optional
-            Initial guess for Fermi energy in eV (default: 5)
         tol : float, optional
             Convergence tolerance (default: 1e-5)
 
@@ -1176,13 +1281,11 @@ class surfGBAt:
         -------
         float
             Calculated Fermi energy in eV
-
-        Notes
-        -----
-        Previous implementation used ANT.Gaussian approach with complex contour
-        integration. Current version uses simpler bisection method from density.py.
         """
-        self.fermi = getFermiContact(self, ne, tol, ENERGY_MIN, 1000, T=self.T, nOrbs=dim)
+        print('Calculating Bulk Bethe Lattice Fermi level...')
+        self.fermi = getFermiContact(self, ne, conv=tol, maxcycles=1000, T=self.T)
+        if self.fermi0 is None:
+            self.fermi0 = self.fermi
         return self.fermi
 
 

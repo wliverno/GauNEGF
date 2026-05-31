@@ -73,7 +73,6 @@ def formSigma(inds, V, nsto, S=0):
 
     return sigma
 
-# Build density matrix based on spin type
 def getDen(bar, spin):
     """
     Build density matrix from Gaussian checkpoint file.
@@ -105,8 +104,6 @@ def getDen(bar, spin):
     ValueError
         If spin treatment is not recognized
     """
-    # Set up Fock matrix and atom indexing
-    # Note: positive indices are alpha/paired orbitals, negative are beta orbitals
     if spin == "r" or spin == "g":
         P = np.array(bar.matlist[AlphaSCFDen].expand())
     elif spin == "ro" or spin == "u":
@@ -117,7 +114,6 @@ def getDen(bar, spin):
         raise ValueError("Spin treatment not recognized!")
     return P
 
-# Build Fock matrix based on spin type, return orbital indices (alpha and beta are +/-)
 def getFock(bar, spin):
     """
     Build Fock matrix from Gaussian checkpoint file.
@@ -149,8 +145,6 @@ def getFock(bar, spin):
     ValueError
         If spin treatment is not recognized
     """
-    # Set up Fock matrix and atom indexing
-    # Note: positive indices are alpha/paired orbitals, negative are beta orbitals
     if spin == "r":
         locs = bar.ibfatm
         Fock = np.array(bar.matlist[AlphaFock].expand())
@@ -167,7 +161,6 @@ def getFock(bar, spin):
     locs = np.array(locs)
     return Fock,locs
 
-# Return energies for each electron in eV
 def getEnergies(bar, spin):
     """
     Get orbital energies from Gaussian checkpoint file.
@@ -188,11 +181,10 @@ def getEnergies(bar, spin):
     Returns
     -------
     ndarray
-        Array of orbital energies in eV, sorted in ascending order.
-        Format depends on spin treatment:
-        - Restricted: Alternating alpha/beta pairs
-        - Unrestricted: Alternating alpha/beta pairs
-        - Generalized: Single set of energies
+        All orbital energies in eV, sorted in ascending order. For
+        restricted/unrestricted spin, alpha and beta levels are interleaved
+        before the final sort, so each energy level appears twice; for
+        generalized spin, each level appears once.
 
     Raises
     ------
@@ -212,7 +204,6 @@ def getEnergies(bar, spin):
         raise ValueError("Spin treatment not recognized!")
     return np.sort(levels)*har_to_eV
 
-# Store density matrix to use in Gaussian
 def storeDen(bar, P, spin):
     """
     Store density matrix in Gaussian checkpoint format.

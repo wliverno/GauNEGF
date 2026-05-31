@@ -19,7 +19,8 @@ To get started with gauNEGF:
 
 2. Check out the :doc:`examples/index` for practical tutorials
 3. Read the :doc:`theory/index` for theoretical background
-4. Browse the :doc:`api/index` for detailed function documentation
+4. Follow the :doc:`guides/index` for task-oriented setup of contacts, SCF tuning, and workflows
+5. Browse the :doc:`api/index` for detailed function documentation
 
 Documentation Contents
 ====================
@@ -30,12 +31,19 @@ Documentation Contents
 
    installation
    quickstart
+   supported_configurations
 
 .. toctree::
    :maxdepth: 2
    :caption: Theory Guide
 
    theory/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Guides
+
+   guides/index
 
 .. toctree::
    :maxdepth: 2
@@ -48,12 +56,6 @@ Documentation Contents
    :caption: API Reference
 
    api/index
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Development
-
-   contributing
 
 Contributing
 ===========

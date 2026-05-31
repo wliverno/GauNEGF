@@ -1,0 +1,108 @@
+{
+  "group": "C-recheck",
+  "files_audited": [
+    "docs/source/examples/ethane.rst",
+    "docs/source/examples/silicon_nanowire.rst",
+    "docs/source/examples/advanced_examples.rst",
+    "docs/source/examples/index.rst",
+    "docs/source/api/index.rst"
+  ],
+  "findings": [
+    {
+      "file_path": "docs/source/examples/silicon_nanowire.rst",
+      "line_range": "34-77",
+      "code_block_num": 1,
+      "current_snippet": "calculate_transmission(F, S, SigmaCalculator(g), Elist+fermi)",
+      "issue": "SigmaCalculator(g) - g is a surfG object, but SigmaCalculator expects (sig1, sig2=None, energy_dependent=None). This appears to be unpacking a return value that is not actually returned by surfG.",
+      "proposed_fix": "",
+      "confidence": "code_bug",
+      "code_bug": true
+    },
+    {
+      "file_path": "docs/source/examples/silicon_nanowire.rst",
+      "line_range": "34-77",
+      "code_block_num": 1,
+      "current_snippet": "calculate_transmission(H, np.eye(len(H)), SigmaCalculator(g), Elist+fermi)",
+      "issue": "SigmaCalculator(g) - same issue as above",
+      "proposed_fix": "",
+      "confidence": "code_bug",
+      "code_bug": true
+    },
+    {
+      "file_path": "docs/source/examples/silicon_nanowire.rst",
+      "line_range": "98-122",
+      "code_block_num": 2,
+      "current_snippet": "calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist+negf.fermi)",
+      "issue": "SigmaCalculator(negf.g) - g is a surfG object, not (sig1, sig2)",
+      "proposed_fix": "",
+      "confidence": "code_bug",
+      "code_bug": true
+    },
+    {
+      "file_path": "docs/source/examples/advanced_examples.rst",
+      "line_range": "49-69",
+      "code_block_num": 2,
+      "current_snippet": "negf.setSigma([1], [2], -0.05j, T=300)",
+      "issue": "NEGF.setSigma does not have T parameter; T is only in NEGFE.setSigma. This requires NEGFE.",
+      "proposed_fix": "",
+      "confidence": "judgment",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/examples/advanced_examples.rst",
+      "line_range": "49-69",
+      "code_block_num": 2,
+      "current_snippet": "negf.setContactBethe(contactList=[[1,2,3], [4,5,6]], latFile='Au', T=300)",
+      "issue": "setContactBethe is only available on NEGFE, not NEGF",
+      "proposed_fix": "",
+      "confidence": "judgment",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/examples/advanced_examples.rst",
+      "line_range": "76-91",
+      "code_block_num": 3,
+      "current_snippet": "negf.setContactBethe(contactList=[[1,2,3], [6,7,8]], latFile='Au', eta=1e-6)",
+      "issue": "setContactBethe is only on NEGFE, not NEGF",
+      "proposed_fix": "",
+      "confidence": "judgment",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/examples/advanced_examples.rst",
+      "line_range": "76-91",
+      "code_block_num": 3,
+      "current_snippet": "negf.setContact1D(contactList= [[1],[6]], tauList = [[2], [5]], neList = [4,  4], eta = 1e-6)",
+      "issue": "setContact1D is only on NEGFE, not NEGF",
+      "proposed_fix": "",
+      "confidence": "judgment",
+      "code_bug": false
+    },
+    {
+      "file_path": "docs/source/examples/advanced_examples.rst",
+      "line_range": "98-124",
+      "code_block_num": 4,
+      "current_snippet": "calculate_dos(negf.F, negf.S, SigmaCalculator(g), E)",
+      "issue": "SigmaCalculator(g) - g is a surfG object, but SigmaCalculator expects (sig1, sig2, ...). This is unpacking an object that may not provide sig1, sig2.",
+      "proposed_fix": "",
+      "confidence": "code_bug",
+      "code_bug": true
+    },
+    {
+      "file_path": "docs/source/examples/advanced_examples.rst",
+      "line_range": "98-124",
+      "code_block_num": 4,
+      "current_snippet": "calculate_transmission(negf.F, negf.S, SigmaCalculator(negf.g), E)",
+      "issue": "SigmaCalculator(negf.g) - same issue as calculate_dos",
+      "proposed_fix": "",
+      "confidence": "code_bug",
+      "code_bug": true
+    }
+  ],
+  "summary": {
+    "total_findings": 9,
+    "mechanical_count": 0,
+    "judgment_count": 4,
+    "code_bug_count": 5
+  }
+}
