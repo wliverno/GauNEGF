@@ -87,7 +87,7 @@ negf = scf.NEGF("molecule", basis="lanl2dz", func="b3pw91")
 
 # Set contacts - left contact on atom 1, right contact on atom 2
 # Default contacts: energy independent, Gamma=0.2eV
-negf.setContacts([1], [2])
+negf.setContacts(lContact=[1], rContact=[2])
 
 # Set voltage bias
 negf.setVoltage(0.1)  # 0.1V bias
@@ -97,7 +97,8 @@ negf.SCF(1e-3) # convergence @ 1e-3
 
 # Calculate current
 harToEV = 27.211386 # Fock matrix uses Hartree units, all others use eV
-I = transport.current(negf.F*harToEV, negf.S, negf.sig1, negf.sig2, negf.fermi, negf.qV)
+sig1, sig2 = negf.getSigma()
+I = transport.current(negf.F*harToEV, negf.S, sig1, sig2, negf.fermi, negf.qV)
 ```
 
 ## Documentation

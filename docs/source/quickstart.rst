@@ -55,7 +55,7 @@ Run a basic NEGF-DFT calculation:
     )
     
     # Attach contacts to carbon atoms
-    negf.setSigma([1], [2], -0.05j)
+    negf.setSigma(lContact=[1], rContact=[2], sig=-0.05j)
     
     # Set Voltage to zero
     negf.setVoltage(0.0)
@@ -124,5 +124,12 @@ Next Steps
 3. Explore spin-dependent transport using open shell systems (e.g. `spin='u'`)
 4. Add solver parameters such as solvation models (e.g. `scrf=solvent=water`)
 
+For task-oriented usage:
+
+* :doc:`guides/contact_choice` -- pick the right contact model for your system
+* :doc:`guides/config_tuning` -- when to change SCF damping, ETA, and fermiMethod
+* :doc:`guides/workflow_recipes` -- IV sweeps, warm-starts, and checkpointing
+
 For more detailed examples, see the :doc:`examples/index` section.
-For theoretical background, see the :doc:`theory/index` section. 
+For theoretical background, see the :doc:`theory/index` section.
+

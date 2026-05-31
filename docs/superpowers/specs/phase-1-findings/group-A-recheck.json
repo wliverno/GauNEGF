@@ -1,0 +1,15 @@
+{
+  "group": "A-recheck",
+  "files_audited": [
+    "README.md",
+    "examples/SiNEGF.py",
+    "examples/IntegralDemo.ipynb"
+  ],
+  "findings": [],
+  "summary": {
+    "total_findings": 0,
+    "mechanical_count": 0,
+    "judgment_count": 0,
+    "code_bug_count": 0
+  }
+}

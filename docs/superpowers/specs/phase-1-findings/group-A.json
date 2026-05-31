@@ -1,0 +1,106 @@
+{
+  "group": "A",
+  "files_audited": [
+    "README.md",
+    "examples/SiNEGF.py",
+    "examples/IntegralDemo.ipynb"
+  ],
+  "findings": [
+    {
+      "file_path": "README.md",
+      "line_range": [88, 90],
+      "current_snippet": "# Set contacts - left contact on atom 1, right contact on atom 2\n# Default contacts: energy independent, Gamma=0.2eV\nnegf.setContacts([1], [2])",
+      "issue": "setContacts() expects named parameters lContact and rContact, not positional args; signature is (self, lContact=None, rContact=None)",
+      "proposed_fix": "# Set contacts - left contact on atom 1, right contact on atom 2\n# Default contacts: energy independent, Gamma=0.2eV\nnegf.setContacts(lContact=[1], rContact=[2])",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "README.md",
+      "line_range": [96, 101],
+      "current_snippet": "negf.SCF(1e-3) # convergence @ 1e-3\n\n# Calculate current\nharToEV = 27.211386 # Fock matrix uses Hartree units, all others use eV\nI = transport.current(negf.F*harToEV, negf.S, negf.sig1, negf.sig2, negf.fermi, negf.qV)",
+      "issue": "Code references negf.sig1 and negf.sig2 attributes but NEGF class (gauNEGF.scf) does not define these; also setContacts() must be called before accessing sig1/sig2, and these attributes are not documented in the truth table for NEGF class",
+      "proposed_fix": "negf.SCF(1e-3) # convergence @ 1e-3\n\n# Calculate current\nharToEV = 27.211386 # Fock matrix uses Hartree units, all others use eV\nI = transport.current(negf.F*harToEV, negf.S, negf.sig1, negf.sig2, negf.fermi, negf.qV)",
+      "confidence": "judgment",
+      "code_bug": true
+    },
+    {
+      "file_path": "examples/SiNEGF.py",
+      "line_range": [23, 24],
+      "current_snippet": "bar = qcb.BinAr(debug=False,lenint=8,inputfile=\"SiNanowire12.gjf\")\nbar.update(model='b3lyp', basis='lanl2dz', toutput='out.log',dofock=\"scf\")",
+      "issue": "qcb symbol is not imported; appears to be from gauopen package (Gaussian Python interface) but is used without import",
+      "proposed_fix": "import gauopen as qcb\nbar = qcb.BinAr(debug=False,lenint=8,inputfile=\"SiNanowire12.gjf\")\nbar.update(model='b3lyp', basis='lanl2dz', toutput='out.log',dofock=\"scf\")",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "examples/SiNEGF.py",
+      "line_range": [44, 47],
+      "current_snippet": "# Transport calculations for non-orthogonal case\nprint('Coherent transport for non-orth case')\ng = surfG(F, S, [contactInds, onsiteInds], eta=1e-4) #Added broadening to speed up convergence\nfermi = getFermiContact(g, ne)\nElist = np.linspace(-5, 5, 1000)\nT = calculate_transmission(F, S, SigmaCalculator(g), Elist+fermi)",
+      "issue": "SigmaCalculator expects (sig1, sig2=None, energy_dependent=None) per truth table, but is being called with a surfG object as first argument",
+      "proposed_fix": "# Transport calculations for non-orthogonal case\nprint('Coherent transport for non-orth case')\ng = surfG(F, S, [contactInds, onsiteInds], eta=1e-4) #Added broadening to speed up convergence\nfermi = getFermiContact(g, ne)\nElist = np.linspace(-5, 5, 1000)\nsigma_calc = SigmaCalculator(g)  # or provide sig1 and sig2 matrices\nT = calculate_transmission(F, S, sigma_calc, Elist+fermi)",
+      "confidence": "judgment",
+      "code_bug": true
+    },
+    {
+      "file_path": "examples/SiNEGF.py",
+      "line_range": [62, 62],
+      "current_snippet": "inds = negf.setContact1D([[1],[2]], eta=1e-4) #Again, some broadening to speed up convergence",
+      "issue": "Method is setContact1D on NEGFE class per truth table signature (self, contactList, tauList=None, stauList=None, alphas=None, aOverlaps=None, betas=None, bOverlaps=None, neList=None, muList=None, eta=ETA, T=TEMPERATURE, symmetrize_contacts=None), which does accept eta parameter; however the return value assignment is inconsistent with documentation elsewhere that shows contactList as positional arg",
+      "proposed_fix": "inds = negf.setContact1D([[1],[2]], eta=1e-4) #Again, some broadening to speed up convergence",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "examples/SiNEGF.py",
+      "line_range": [68, 68],
+      "current_snippet": "Torth = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist+negf.fermi)",
+      "issue": "NEGFE class does not define a .g attribute per truth table; only surfG and related classes define surface Green's function calculations; if energy-dependent Green's function is needed, should use different approach",
+      "proposed_fix": "# negf.g attribute does not exist on NEGFE; must define sigma calculator with appropriate matrices",
+      "confidence": "judgment",
+      "code_bug": true
+    },
+    {
+      "file_path": "examples/SiNEGF.py",
+      "line_range": [76, 76],
+      "current_snippet": "Torth = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist+negf.fermi)",
+      "issue": "Same as line 68: NEGFE class does not define a .g attribute per truth table",
+      "proposed_fix": "# negf.g attribute does not exist on NEGFE; must define sigma calculator with appropriate matrices",
+      "confidence": "judgment",
+      "code_bug": true
+    },
+    {
+      "file_path": "examples/IntegralDemo.ipynb",
+      "line_range": [2, 2],
+      "current_snippet": "negf.setSigma([1], [2], -0.05j)",
+      "issue": "NEGF.setSigma signature (per truth table) is (self, lContact=None, rContact=None, sig=-0.1j, sig2=None); code passes positional args [1], [2], -0.05j which maps to lContact=[1], rContact=[2], sig=-0.05j - parameter order is correct but documentation shows named parameters are preferred for clarity",
+      "proposed_fix": "negf.setSigma(lContact=[1], rContact=[2], sig=-0.05j)",
+      "confidence": "mechanical",
+      "code_bug": false
+    },
+    {
+      "file_path": "examples/IntegralDemo.ipynb",
+      "line_range": [19, 19],
+      "current_snippet": "DOS1, _ = calculate_dos(negf.F, negf.S, SigmaCalculator(negf.sigma1, negf.sigma2), Elist+negf.fermi)\nDOS2, _ = calculate_dos(negf2.F, negf2.S, SigmaCalculator(negf2.g), Elist+negf2.fermi)",
+      "issue": "NEGF class does not define sigma1 and sigma2 attributes per truth table; also negf2.g does not exist on NEGFE class per truth table",
+      "proposed_fix": "# NEGF does not expose sigma1, sigma2 attributes; NEGFE does not expose .g attribute",
+      "confidence": "judgment",
+      "code_bug": true
+    },
+    {
+      "file_path": "examples/IntegralDemo.ipynb",
+      "line_range": [18, 18],
+      "current_snippet": "DOS1, _ = calculate_dos(negf.F, negf.S, SigmaCalculator(negf.sigma1, negf.sigma2), Elist+negf.fermi)",
+      "issue": "Alternative to previous finding: even if sigma1, sigma2 were accessible, the syntax suggests unpacking two return values from calculate_dos, but truth table shows calculate_dos signature is (F, S, sigma_calculator, energy_list, spin=None, checkpoint_file=None, checkpoint_interval=10) which returns transmission array, not a tuple unpackable as (dos, something_else)",
+      "proposed_fix": "dos1 = calculate_dos(negf.F, negf.S, sigma_calc, Elist+negf.fermi)",
+      "confidence": "judgment",
+      "code_bug": true
+    }
+  ],
+  "summary": {
+    "total_findings": 9,
+    "mechanical_count": 3,
+    "judgment_count": 6,
+    "code_bug_count": 5
+  }
+}

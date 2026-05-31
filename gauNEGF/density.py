@@ -27,8 +27,9 @@ from jax import jit
 jax.config.update("jax_enable_x64", True)
 
 # Configuration
-from gauNEGF.config import (TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, 
-                            FERMI_SEARCH_CYCLES, N_KT, ENERGY_MIN, MAX_CYCLES, MAX_GRID_POINTS)
+from gauNEGF.config import (TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, FERMI_DEBUG,
+                            FERMI_SEARCH_CYCLES, N_KT, ENERGY_MIN, MAX_CYCLES, MAX_GRID_POINTS, ETA,
+                            EMIN_BUFFER)
 from scipy.special import roots_legendre
 from scipy.special import roots_chebyu
 import matplotlib.pyplot as plt
@@ -39,22 +40,20 @@ from multiprocessing import Pool
 import os
 
 # Developed Packages:
-from gauNEGF.fermiSearch import DOSFermiSearch
-from gauNEGF.surfG1D import surfG
-from gauNEGF.integrate import GrInt, GrLessInt
+from gauNEGF.integrate import GrInt, GrLessInt, GrIntCross
 
 # JIT-compiled functions
-from gauNEGF.utils import inv, eig, eigh
+from gauNEGF.utils import inv, eig, eigh, fractional_matrix_power
 
 @jit
-def _compute_dos_at_energy(E, F, S, sigma_total):
+def _compute_dos_at_energy(E, F, S, sigma_total, Qtot, eta=ETA):
     """JIT-compiled kernel for DOS calculation at single energy."""
-    mat = E * S - F - sigma_total
+    mat = (E + 1j*eta)*S - F - sigma_total
     Gr = inv(mat)
-    return -jnp.imag(jnp.trace(Gr)) / jnp.pi
+    Q = jnp.zeros_like(S) if Qtot is None else Qtot
+    mat_sum = Gr@S - Gr@Q
+    return -jnp.imag(jnp.trace(mat_sum)) / jnp.pi
 
-# Debugging for fermi search functions
-FERMI_DEBUG=False
 
 # CONSTANTS:
 har_to_eV = 27.211386   # eV/Hartree
@@ -231,6 +230,8 @@ def integratePointsAdaptiveANT(computePoint, tol=ADAPTIVE_INTEGRATION_TOL, maxN=
     prev_x = None
     prev_sumW = None
     P = None
+    accum = None
+    is_tuple = None
     N = 2
     maxDP = 1e10
     while N<=maxN:
@@ -238,7 +239,12 @@ def integratePointsAdaptiveANT(computePoint, tol=ADAPTIVE_INTEGRATION_TOL, maxN=
 
         if prev_x is None:
             # first level: no reuse
-            P = computePoint(x[0:2], w[0:2])
+            result = computePoint(x[0:2], w[0:2])
+            is_tuple = isinstance(result, tuple)
+            if is_tuple:
+                P, accum = result
+            else:
+                P = result
         else:
             # mark old nodes robustly by value
             old_mask = np.isin(np.round(x, 14), np.round(prev_x, 14))
@@ -250,26 +256,39 @@ def integratePointsAdaptiveANT(computePoint, tol=ADAPTIVE_INTEGRATION_TOL, maxN=
 
             # scale previous integral + add only new-node contributions
             new_mask = ~old_mask
-            new_P = P*ratio
-            new_P += computePoint(x[new_mask], w[new_mask])
-            maxDP = np.max(np.abs(new_P-P))
+            new_result = computePoint(x[new_mask], w[new_mask])
+            if is_tuple:
+                new_mat, new_scl = new_result
+                new_P = P * ratio + new_mat
+                new_accum = accum * ratio + new_scl
+            else:
+                new_P = P*ratio + new_result
+
+            maxDP = jnp.max(jnp.abs(new_P-P))
             if debug:
-                P_debug = computePoint(x, w)
-                maxDP_debug = np.max(np.abs(P_debug-P))
-                maxDiff = np.max(np.abs(P_debug-new_P))
+                full_result = computePoint(x, w)
+                P_debug = full_result[0] if is_tuple else full_result
+                maxDP_debug = jnp.max(jnp.abs(P_debug-P))
+                maxDiff = jnp.max(jnp.abs(P_debug-new_P))
                 print(f"N={N}, nested-weight ratio ~ {ratio:.3f}, maxDP={maxDP:.3e}")
                 print(f"Direct Calculation: N={N}, maxDP={maxDP_debug:.3e}, maxDiff={maxDiff:.3e}")
             P = new_P.copy()
+            if is_tuple:
+                accum = new_accum
             if maxDP<tol:
                 print(f'Adaptive integration converged to {maxDP:.3e} in {N} points.')
+                if is_tuple:
+                    return (new_P, new_accum)
                 return new_P
 
         # update state for next level
         prev_x = x
-        prev_sumW = float(np.sum(w))
+        prev_sumW = float(jnp.sum(w))
         N *= 3
     N/=3
     print(f'Adaptive integration reached full grid ({N} points), final error {maxDP:.3e}')
+    if is_tuple:
+        return (new_P, new_accum)
     return new_P
 
 ## ENERGY INDEPENDENT DENSITY FUNCTIONS
@@ -307,26 +326,133 @@ def density(V, Vc, D, Gam, Emin, mu):
     The result includes contributions from poles below the Fermi energy.
     """
     Nd = len(V)
-    DD = np.array([D for i in range(Nd)]).T
+    DD = jnp.array([D for i in range(Nd)]).T
     
     #Integral of 1/x is log(x), calculating at lower and upper limit
-    logmat = np.array([np.emath.log(1-(mu/D)) for i in range(Nd)]).T
-    logmat2 = np.array([np.emath.log(1-(Emin/D)) for i in range(Nd)]).T
+    logmat = jnp.array([np.emath.log(1-(mu/D)) for i in range(Nd)]).T
+    logmat2 = jnp.array([np.emath.log(1-(Emin/D)) for i in range(Nd)]).T
 
     #Compute integral, add prefactor
     invmat = 1/(2*np.pi*(DD-DD.conj().T))
     pref2 = logmat - logmat.conj().T
     pref3 = logmat2-logmat2.conj().T
 
-    prefactor = np.multiply(invmat,(pref2-pref3))
+    prefactor = jnp.multiply(invmat,(pref2-pref3))
 
     #Convert Gamma into Fbar eigenbasis, element-wise multiplication
     Gammam = Vc.conj().T@Gam@Vc
-    prefactor = np.multiply(prefactor,Gammam)
+    prefactor = jnp.multiply(prefactor,Gammam)
     
     #Convert back to input basis, return
     den = V@ prefactor @ V.conj().T
     return den
+
+def damleCrossTerm(V, D, Vc, Y_eff, Q0, Q1, lo, hi):
+    """Analytic lower-contour cross-term delta_N for the Damle method.
+
+    Reuses the eig (V, D, Vc) of Fbar already computed for the density matrix
+    (no second eigendecomposition). Q(E) ~ Q0 + Q1*E is linearized between two
+    anchors. The unphysical linear-Q 'flat' term b1*(hi-lo) is OMITTED -- only
+    the physical in-window-pole term is kept (see
+    docs/lower_contour_math_and_probes.md sec 5):
+
+        delta_N = -(1/pi) Im sum_i (b0_i + b1_i*D_i)
+                                  * [log(1 - hi/D_i) - log(1 - lo/D_i)]
+
+    with b(E) = Vc^dagger Y_eff Q(E) Y_eff V, b0 = diag(...Q0...),
+    b1 = diag(...Q1...). Poles outside [lo, hi] give a real log-difference
+    (no contribution); in-window poles pick up the i*pi (the physical count).
+
+    Parameters
+    ----------
+    V, D, Vc : ndarray
+        Eigendecomposition of Fbar: Fbar = V diag(D) Vc^dagger, Vc = inv(V^dagger).
+    Y_eff : ndarray
+        S_eff^(-1/2).
+    Q0, Q1 : ndarray (N, N)
+        Linear model of crossTermQTot: Q(E) ~ Q0 + Q1*E.
+    lo, hi : float
+        Lower-contour energy limits in eV (lo = ENERGY_MIN, hi = Emin).
+
+    Returns
+    -------
+    float
+        Cross-term electron-count correction delta_N.
+    """
+    Ml = Vc.conj().T @ Y_eff
+    Mr = Y_eff @ V
+    b0 = jnp.diag(Ml @ jnp.asarray(Q0) @ Mr)
+    b1 = jnp.diag(Ml @ jnp.asarray(Q1) @ Mr)
+    logdiff = jnp.log(1.0 - hi / D) - jnp.log(1.0 - lo / D)
+    contrib = (b0 + b1 * D) * logdiff
+    return float(-(1.0 / jnp.pi) * jnp.imag(jnp.sum(contrib)))
+
+def damleLowerDensity(F_eV, Y_eff, Sigma_0, g, Emin, ENERGY_MIN_=ENERGY_MIN):
+    """Analytic Damle lower-contour density on [ENERGY_MIN_, Emin].
+
+    Builds Fbar = Y_eff (F + Sigma_0 + i*ETA) Y_eff, diagonalizes it ONCE, and
+    returns both the lower-contour density matrix (in the AO basis) and the
+    analytic cross-term delta_N (which reuses the same eig; no second
+    decomposition).
+
+    The density matrix is negated so its sign matches the densityComplex
+    convention. The cross-term uses a linear model of crossTermQTot(E) anchored
+    near the band bottom at (Emin, 2*Emin) and DROPS the unphysical linear-Q
+    flat term (see damleCrossTerm).
+
+    Parameters
+    ----------
+    F_eV : ndarray (N, N)
+        Device Fock matrix in eV.
+    Y_eff : ndarray (N, N)
+        S_eff^(-1/2) (from NEGFE._initAsymptoticSigma).
+    Sigma_0 : ndarray (N, N)
+        Asymptotic constant contact self-energy.
+    g : surfG object
+        Provides crossTermQTot(E) for the cross-term. If it returns None
+        (orthogonal system), delta_N = 0.
+    Emin : float
+        Upper bound of the lower contour in eV (set by calcEmin upstream).
+    ENERGY_MIN_ : float, optional
+        Lower bound in eV (default config.ENERGY_MIN).
+
+    Returns
+    -------
+    tuple (ndarray, float)
+        (P_lower, delta_N).
+    """
+    F_eV = jnp.asarray(F_eV)
+    Y_eff = jnp.asarray(Y_eff)
+    Sigma_0 = jnp.asarray(Sigma_0)
+    N = F_eV.shape[0]
+    Emin = float(Emin)
+    lo = float(ENERGY_MIN_)
+
+    H_eff = F_eV + Sigma_0 + 1j * ETA * jnp.eye(N)
+    Fbar = Y_eff @ H_eff @ Y_eff
+    Gam = (H_eff - H_eff.conj().T) * 1j
+    GamBar = Y_eff @ Gam @ Y_eff
+
+    D, V = jnp.linalg.eig(Fbar)
+    Vc = jnp.linalg.inv(V.conj().T)
+
+    # Density matrix; negate to match densityComplex sign convention.
+    P_orth = density(V, Vc, D, GamBar, lo, Emin)
+    P_lower = -(Y_eff @ jnp.asarray(P_orth) @ Y_eff)
+
+    # Analytic cross-term: linear Q at near-band anchors (Emin, 2*Emin).
+    Qa = g.crossTermQTot(Emin)
+    if Qa is None:
+        delta_N = 0.0
+    else:
+        Ea, Eb = Emin, 2.0 * Emin
+        Qa = jnp.asarray(Qa)
+        Qb = jnp.asarray(g.crossTermQTot(Eb))
+        Q1 = (Qb - Qa) / (Eb - Ea)
+        Q0 = Qa - Q1 * Ea
+        delta_N = damleCrossTerm(V, D, Vc, Y_eff, Q0, Q1, lo, Emin)
+
+    return P_lower, delta_N
 
 def bisectFermi(V, Vc, D, Gam, Nexp, conv=FERMI_CALCULATION_TOL, Eminf=ENERGY_MIN):
     """
@@ -382,6 +508,7 @@ def bisectFermi(V, Vc, D, Gam, Nexp, conv=FERMI_CALCULATION_TOL, Eminf=ENERGY_MI
     return fermi
 
 ## ENERGY DEPENDENT DENSITY FUNCTIONS
+ 
 def densityRealN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True):
     """
     Calculate equilibrium density matrix using real-axis integration on a specified grid.
@@ -411,35 +538,41 @@ def densityRealN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True):
 
     Returns
     -------
-    ndarray
-        Density matrix
+    tuple (ndarray, float)
+        (P, delta_N) where P is the density matrix and delta_N is the
+        Mulliken cross-term correction from device-lead overlap.
     """
     nKT = N_KT
     kT = kB*T
     Emax = mu + nKT*kT
     mid = (Emax-Emin)/2
-    defInt = np.array(np.zeros(np.shape(F)), dtype=complex)
     x,w = roots_legendre(N)
     x = np.real(x)
-    
+
     Elist = mid*(x + 1) + Emin
     weights = mid*w*fermi(Elist, mu, T)
-    
+
     if showText:
         print(f'Integrating {N} points along real axis...')
 
-    defInt = GrInt(F, S, g, Elist, weights)
+    lineInt, cross_scalar = GrIntCross(F, S, g, Elist, weights)
 
     if showText:
         print('Integration done!')
-    
-    return (-1+0j)*np.imag(defInt)/(np.pi)
 
-def densityReal(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, maxN=MAX_CYCLES, debug=False):
+    # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19)
+    P = (1j/(2*jnp.pi)) * (lineInt - lineInt.conj().T)
+    delta_N = float(-(1/jnp.pi) * jnp.imag(cross_scalar))
+    return P, delta_N
+
+def densityReal(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, debug=False):
     """
-    Calculate equilibrium density matrix using adaptive real-axis integration.
+    Calculate equilibrium density matrix using adaptive real-axis ANT integration.
 
-    Wrapper for densityRealN() using the tol and maxN specification to determine grid size
+    Uses integratePointsAdaptiveANT with the same Gauss-Chebyshev scheme as
+    densityComplex, but integrating along the real axis instead of a complex contour.
+    Suitable for zero-DOS regions (below all occupied states) where Im(G^R)=0
+    and the integral converges trivially in a small number of points.
 
     Parameters
     ----------
@@ -456,32 +589,34 @@ def densityReal(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, 
     tol : float, optional
         Convergence tolerance (default: 1e-3)
     T : float, optional
-        Temperature in Kelvin (default: 300)
-    maxN : int, optional
-        Maximum number of integration points (default: 1000)
+        Temperature in Kelvin (default: TEMPERATURE from gauNEGF.config)
     debug : bool, optional
         Whether to print per-iteration diagnostics (default: False)
 
     Returns
     -------
-    ndarray
-        Density matrix
+    tuple (ndarray, float)
+        (P, delta_N) where P is the density matrix and delta_N is the
+        Mulliken cross-term correction from device-lead overlap.
     """
-    P = np.zeros_like(F)
-    N = 1
-    maxDP = 1e9
-    while N<maxN:
-        P_ = P.copy()
+    nKT = N_KT
+    kT = kB * T
+    Emax = mu + nKT * kT
 
-        P = densityRealN(F, S, g, Emin, mu, N, T, showText=False)
-        maxDP = np.max(np.abs(P - P_))
-        if maxDP< tol:
-            print(f'Adaptive integration converged to {maxDP:.3e} in {N} points.')
-            return P
-        N *= 2
+    mid = (Emax - Emin) / 2
 
-    print(f'Warning: adaptive integration not converged after {maxN} points: maxDP={maxDP:.2E}')
-    return P
+    def computePoint(x, w):
+        E = mid * (x + 1) + Emin
+        weights = mid * w * fermi(E, mu, T)
+        mat, scl = GrIntCross(F, S, g, E, weights)
+        # Return density matrix contribution so the adaptive integrator tracks
+        # convergence on P directly (G^R - G^A, not the full complex G^R).
+        return (1j / (2 * jnp.pi)) * (mat - mat.conj().T), scl
+
+    print('Real Axis Integration (ANT):')
+    P, cross_scalar = integratePointsAdaptiveANT(computePoint, tol=tol, debug=debug)
+    delta_N = float(-(1 / jnp.pi) * jnp.imag(cross_scalar))
+    return P, delta_N
    
 
 def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=TEMPERATURE, showText=True):
@@ -657,6 +792,8 @@ def densityGrid(F, S, g, mu1, mu2, ind=None, tol=ADAPTIVE_INTEGRATION_TOL, T=TEM
 
     return den/(2*np.pi)
 
+
+
 def densityComplexN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True, method='ant'):
     """
     Calculate equilibrium density matrix using complex contour integration.
@@ -688,8 +825,9 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True, meth
 
     Returns
     -------
-    ndarray
-        Equilibrium density matrix
+    tuple (ndarray, float)
+        (P, delta_N) where P is the equilibrium density matrix and
+        delta_N is the Mulliken cross-term correction from device-lead overlap.
 
     Notes
     -----
@@ -702,7 +840,7 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True, meth
     Emax = mu-broadening
     center = (Emin+Emax)/2
     r = (Emax-Emin)/2
-    
+
     if method == 'legendre':
         x, w = roots_legendre(N)
     elif method == 'chebyshev':
@@ -724,8 +862,8 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True, meth
     if showText:
         print(f'Complex Integration over {N} points...')
 
-    lineInt = GrInt(F, S, g, Elist, weights)
-    
+    lineInt, cross_scalar = GrIntCross(F, S, g, Elist, weights)
+
     #Add integration points for Fermi Broadening
     if T>0:
         if showText:
@@ -739,13 +877,17 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True, meth
             w_fermi = 2*np.ones(Nbroad)/Nbroad
         Elist = broadening * (x_fermi) + mu
         weights = broadening*w_fermi*fermi(Elist, mu, T)
-        lineInt += GrInt(F, S, g, Elist, weights)
+        broadInt, cross_broad = GrIntCross(F, S, g, Elist, weights)
+        lineInt += broadInt
+        cross_scalar += cross_broad
 
     if showText:
         print('Integration done!')
 
-    #Return -Im(Integral)/pi, Equation 19 in 10.1103/PhysRevB.63.245407
-    return (1+0j)*np.imag(lineInt)/np.pi
+    # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19)
+    P = (-1j/(2*jnp.pi)) * (lineInt - lineInt.conj().T)
+    delta_N = float(-(1/jnp.pi) * jnp.imag(cross_scalar))
+    return P, delta_N
 
 def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, debug=False):
     """
@@ -776,13 +918,15 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
 
     Returns
     -------
-    ndarray
-        Equilibrium density matrix
+    tuple (ndarray, float)
+        (P, delta_N) where P is the equilibrium density matrix and
+        delta_N is the Mulliken cross-term correction from device-lead overlap.
 
     Notes
     -----
-    The 'ant' method uses a modified Gauss-Chebyshev quadrature optimized
-    for transport calculations, matching the ANT.Gaussian implementation.
+    Uses adaptive integration with GrIntCross to co-accumulate both the
+    density matrix and cross-term scalar in a single pass. The cross-term
+    converges at the same adaptive grid as the density matrix.
     """
     #Construct circular contour
     nKT= 10
@@ -792,46 +936,353 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
     r = (Emax-Emin)/2
 
     # For ANT adaptive integration, compute from point-weight pairs
+    # Returns (matrix, scalar) tuple for co-accumulated cross-term
     def computePoint(x, w):
         theta = np.pi/2 * (x + 1)
         z = center + r*np.exp(1j*theta)
         dz = 1j * r * np.exp(1j*theta)
         weights = (np.pi/2)*w*dz*fermi(z, mu, T)
-        return GrInt(F, S, g, z, weights)
-    
+        return GrIntCross(F, S, g, z, weights)
+
     print('Complex Contour Integration:')
-    lineInt = integratePointsAdaptiveANT(computePoint, tol=tol, debug=debug)
-    
+    lineInt, cross_scalar = integratePointsAdaptiveANT(computePoint, tol=tol, debug=debug)
+
     #Add integration points for Fermi Broadening
     if T>0:
         print('Integrating Fermi Broadening:')
         def computePointBroadening(x, w):
             E = broadening * (x) + mu
             weights = broadening*w*fermi(E, mu, T)
-            return GrInt(F, S, g, E, weights)
-    
-        lineInt += integratePointsAdaptiveANT(computePointBroadening, tol=tol, debug=debug)
+            return GrIntCross(F, S, g, E, weights)
 
-    #Return -Im(Integral)/pi, Equation 19 in 10.1103/PhysRevB.63.245407
-    return (1+0j)*np.imag(lineInt)/np.pi
+        broad_lineInt, broad_cross = integratePointsAdaptiveANT(computePointBroadening, tol=tol, debug=debug)
+        lineInt += broad_lineInt
+        cross_scalar += broad_cross
 
+    # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19)
+    P = (-1j/(2*jnp.pi)) * (lineInt - lineInt.conj().T)
+    delta_N = float(-(1/jnp.pi) * jnp.imag(cross_scalar))
+    return P, delta_N
 
 ## INTEGRATION LIMIT FUNCTIONS
 # Calculate Emin using DOS
-def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES):
-    D,_ = eigh(inv(S)@F)
-    Emin = min(D.real.flatten())-5
+def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES, Emin=None, X=None):
+    """
+    Calculate minimum energy bound for numerical integration.
+
+    Finds the lower energy bound for density matrix integration by iteratively
+    lowering Emin until the density of states at that energy falls below the
+    specified tolerance. This ensures the integration bounds capture all occupied
+    states without including energies too far below the band edge.
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix in eV.
+    S : ndarray
+        Overlap matrix.
+    g : surfG object
+        Surface Green's function calculator providing sigmaTot() and
+        crossTermQTot() methods for energy-dependent self-energies.
+    tol : float, optional
+        Convergence tolerance for density of states (default: FERMI_CALCULATION_TOL).
+    maxN : int, optional
+        Maximum number of expansion iterations (default: MAX_CYCLES).
+    Emin : float or None, optional
+        Initial lower bound in eV. If None, initialized from minimum eigenvalue
+        of X @ F @ X (symmetric Lowdin orthogonalization with X = S^(-1/2))
+        minus EMIN_BUFFER (default: None).
+    X : ndarray or None, optional
+        Lowdin orthogonalizer S^(-1/2). If None (default), computed locally
+        via fractional_matrix_power(S, -0.5). Passing the caller's cached X
+        avoids recomputing it. Used only when Emin is None.
+
+    Returns
+    -------
+    float
+        Lower energy bound in eV where DOS is below tolerance.
+
+    Notes
+    -----
+    Prints a warning if maximum iterations are reached without convergence.
+    X @ F @ X (X = S^(-1/2)) is used for the initial Emin seed because it
+    is Hermitian by construction and its eigenvalues are the true device MO
+    energies; eigh(inv(S) @ F) would silently fail for non-trivial S.
+    """
+    if X is None:
+        X = fractional_matrix_power(S, -0.5)
+    if Emin is None:
+        D,_ = eigh(X@F@X)
+        Emin = min(D.real.flatten()) - EMIN_BUFFER
     counter = 0
-    dP = _compute_dos_at_energy(Emin, F, S, g.sigmaTot(Emin))
+    dP = _compute_dos_at_energy(Emin, F, S, g.sigmaTot(Emin), g.crossTermQTot(Emin))
     while dP>tol and counter<maxN:
-        Emin -= 1
-        dP = _compute_dos_at_energy(Emin, F, S, g.sigmaTot(Emin))
-        #print(Emin, dP)
+        Emin -= 10
+        dP = _compute_dos_at_energy(Emin, F, S, g.sigmaTot(Emin), g.crossTermQTot(Emin))
         counter += 1
     if counter == maxN:
         print(f'Warning: Emin still not within tolerance (final value = {dP}) after {maxN} energy samples')
     print(f'Calculated Emin: {Emin} eV, DOS = {dP:.2E}')
     return Emin
+
+def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=FERMI_SEARCH_CYCLES,
+            Eminf=None, TSW=None, Emin_floor=ENERGY_MIN):
+    """Calculate integration bounds by stabilizing total spectral weight.
+
+    Iteratively doubles |Eminf| (Eminf <- 2*Eminf) until Tr(rho @ S) at the
+    truncated contour matches a reference TSW computed at the configured
+    Emin_floor. Uses a one-sided convergence test (TSW_ref - TSW_new < tol)
+    so the loop only widens while the new contour is undercounting relative
+    to the reference. dTSW < 0 (reference is *smaller* than the truncated
+    contour) is the signature of a deep negative-weight pseudo-pole inside
+    the reference contour, induced by asymptotically E-linear Sigma(E)
+    from a non-orthogonal contact (see docs/tsw_convergence_notes.md);
+    in that case the truncated contour is the physically correct choice
+    and convergence is accepted to leave the pseudo-pole excluded.
+
+    The upper contour bound is held at -ENERGY_MIN (the wide config bound)
+    independently of Emin_floor so that tightening Emin_floor (e.g. via
+    calcPseudoPoleFloor) does not also chop the upper spectrum.
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix in eV.
+    S : ndarray
+        Overlap matrix.
+    g : surfG object
+        Surface Green's function calculator.
+    tol : float, optional
+        Convergence tolerance for relative TSW change (default: FERMI_CALCULATION_TOL).
+    maxN : int, optional
+        Maximum doubling iterations (default: FERMI_SEARCH_CYCLES).
+    Eminf : float or None, optional
+        Warm-start lower bound in eV. If None, initialized from min eigenvalue.
+    TSW : float or None, optional
+        Warm-start spectral weight. If None, recomputed from scratch using
+        Emin_floor as the reference contour lower bound.
+    Emin_floor : float, optional
+        Hard lower limit for Eminf in eV (default: ENERGY_MIN from config).
+        Also used as the reference contour lower bound when TSW is recomputed.
+        If the doubling loop would expand past this limit without converging,
+        the function warns and returns the current Eminf. Tighten this via
+        calcPseudoPoleFloor to keep the reference contour from straddling
+        deep pseudo-poles.
+
+    Returns
+    -------
+    tuple (float, float)
+        (Eminf, TSW) -- converged lower bound and reference spectral weight.
+    """
+    # Capture the warm-start for the postcondition check: the returned Eminf
+    # must not be shallower than the caller's warm-start (would invert the
+    # caller's lower-contour integration). The doubling loop preserves this for
+    # valid negative warm-starts, but the guard catches invalid input (e.g. a
+    # positive Eminf) and future algorithm changes.
+    Eminf_warm = Eminf
+
+    # Upper contour bound stays at the wide config bound regardless of
+    # Emin_floor; only the lower bound moves with pseudo-pole detection.
+    Emax = -ENERGY_MIN
+
+    # Initialize from eigenvalues if no warm-start values
+    if Eminf is None:
+        # X @ F @ X (X = S^(-1/2)) is Hermitian by construction; eigh is correct.
+        X = fractional_matrix_power(S, -0.5)
+        D, _ = eigh(X @ F @ X)
+        eigs = np.real(D).flatten()
+        Eminf = float(min(eigs))
+
+    if TSW is None:
+        P, _ = densityComplex(F, S, g, Emin_floor, Emax, tol, T=0)
+        TSW_ref = np.trace(P @ g.S).real
+    else:
+        TSW_ref = TSW+0.0
+
+    print(f'Lower Bound Search: TSW={TSW_ref:.2E}')
+    for _ in range(maxN):
+        P, _ = densityComplex(F, S, g, Eminf, Emax, tol, T=0)
+        TSW_new = np.trace(P @ g.S).real
+        dTSW = TSW_ref - TSW_new
+        # One-sided test: the contour at Eminf has captured all relevant
+        # spectral weight when its TSW reaches (or exceeds) the reference.
+        # dTSW < 0 means the reference (deeper) contour is *smaller* than
+        # the truncated one, which only happens when the reference encloses
+        # a deep negative-weight pseudo-pole that the truncated contour
+        # excludes. See docs/tsw_convergence_notes.md; the truncated
+        # contour is the physically correct choice in that case.
+        if dTSW / abs(TSW_ref) < tol:
+            if FERMI_DEBUG:
+                if dTSW < 0:
+                    print(f'calcTSW: dTSW<0 detected at Eminf={Eminf:.2f}, '
+                          f'dTSW={dTSW:.2E}. Deep pseudo-pole inside reference '
+                          f'contour (likely asymptotically E-linear contact '
+                          f'Sigma making S_eff = S - X_L - X_R non-PSD). '
+                          f'Truncated contour excludes it; this is the '
+                          f'intended outcome.')
+                print(f'calcTSW converged: Eminf={Eminf:.2f}, TSW={TSW_new:.4f}')
+            if Eminf_warm is not None and Eminf > Eminf_warm:
+                print(f'WARNING: calcTSW Eminf={Eminf:.2e} shallower than warm-start {Eminf_warm:.2e}; flooring.')
+                Eminf = Eminf_warm
+            return Eminf, TSW_new
+        elif FERMI_DEBUG:
+            print(f'DEBUG: Eminf={Eminf:.2f}, dTSW={dTSW:.2E}')
+
+        # Check that the next doubling stays within Emin_floor.
+        next_Eminf = Eminf * 2.0
+        if next_Eminf < Emin_floor:
+            print(f'Warning: calcTSW would expand Eminf past Emin_floor ({Emin_floor:.2e}).')
+            print(f'  Last Eminf={Eminf:.2e}, dTSW={dTSW:.2E}.')
+            print(f'  If TSW is still undercounted, lower Emin_floor in config.')
+            if Eminf_warm is not None and Eminf > Eminf_warm:
+                print(f'WARNING: calcTSW Eminf={Eminf:.2e} shallower than warm-start {Eminf_warm:.2e}; flooring.')
+                Eminf = Eminf_warm
+            return Eminf, TSW_ref
+        Eminf = next_Eminf
+
+    print(f'Warning: calcTSW did not converge after {maxN} iterations')
+    print(f'  Last Eminf={Eminf:.2e}, dTSW={dTSW:.2E}')
+    if Eminf_warm is not None and Eminf > Eminf_warm:
+        print(f'WARNING: calcTSW Eminf={Eminf:.2e} shallower than warm-start {Eminf_warm:.2e}; flooring.')
+        Eminf = Eminf_warm
+    return Eminf, TSW_ref
+
+def calcPseudoPoleFloor(F, S, g, alpha=0.1, min_buffer=50.0, E1=-1e3, E2=-1e4):
+    """Compute a safe Eminf floor by detecting pseudo-poles of the device GF.
+
+    Pseudo-poles are spurious real-axis poles of G_DD^R(E) = (E*S - F - Sigma)^{-1}
+    that arise from the asymptotically E-linear piece of Sigma when the contact
+    is non-orthogonal. If the contour integration captures them, P_DD acquires
+    negative natural-orbital occupations and is no longer DFT-compatible.
+
+    All matrices are treated as complex Hermitian throughout, so this works
+    for GHF / SOC where F, S, X, Sigma_0 have nontrivial imaginary parts as
+    well as the real-symmetric closed-shell case.
+
+    See docs/pseudo_pole_handling.md for the derivation and worked examples.
+
+    Algorithm:
+        1. Two-point asymptotic probe of Sigma:
+             X       = (Sigma(E2) - Sigma(E1)) / (E2 - E1)
+             Sigma_0 = Sigma(E1) - E1 * X
+        2. Form the effective generalized eigenproblem H_eff v = E S_eff v
+           that governs deep-|E| poles of G_DD^R:
+             H_eff = F + Sigma_0       (Hermitian)
+             S_eff = S - X             (Hermitian, possibly indefinite)
+        3. Reduce to the standard non-Hermitian eigproblem T = S_eff^{-1} H_eff
+           and solve with the JAX general eig (via gauNEGF.utils.eig).
+           Eigenvalues are real for Hermitian (H, S) even with indefinite S;
+           take Re(...) to drop floating-point imaginary noise.
+        4. Classify each eigenvector by its Hermitian S_eff-norm:
+             v^H S_eff v > 0  -> physical pole (not returned)
+             v^H S_eff v < 0  -> pseudo-pole (returned)
+           Number of pseudo-poles equals the number of negative eigenvalues
+           of S_eff (Sylvester's law of inertia).
+        5. Filter to negative-energy pseudo-poles only (positive ones cannot
+           be excluded by Eminf, which is a LOWER bound). For each, compute
+           floor_i = E_pp_i + max(alpha * |E_pp_i|, min_buffer); return the
+           shallowest (largest) floor_i, or ENERGY_MIN if no negative
+           pseudo-poles exist or if the shallowest buffered floor is >= 0.
+
+    Parameters
+    ----------
+    F : ndarray (N, N)
+        Device Fock matrix in eV. Complex Hermitian for GHF/SOC, real-symmetric
+        otherwise; both are handled.
+    S : ndarray (N, N)
+        Device overlap matrix. Complex Hermitian, positive-definite.
+    g : surfG-like object
+        Surface Green's function calculator with sigmaTot(E) method.
+    alpha : float, optional
+        Fractional buffer coefficient (default 0.1, i.e. 10%). For each
+        pseudo-pole at energy E_pp, the buffer is max(alpha * |E_pp|,
+        min_buffer). The fractional component reflects the scale-invariance
+        of the asymptotic Sigma ~ E*X regime: pole "width" near the resolvent
+        singularity scales with |E|, so a constant-eV buffer is overkill at
+        deep poles and inadequate at moderate ones.
+    min_buffer : float, optional
+        Absolute floor for the buffer in eV (default 50). Prevents the
+        fractional formula from placing Eminf arbitrarily close to a
+        moderate-depth pseudo-pole. Set both alpha=0 and min_buffer=0
+        to disable buffering entirely (useful for tests of raw pole
+        detection).
+    E1, E2 : float, optional
+        Deep probe energies (eV) for asymptotic extraction. Default -1e3, -1e4.
+
+    Returns
+    -------
+    Eminf_floor : float
+        Safe lower bound for Eminf in eV. Returns ENERGY_MIN from config if
+        no pseudo-poles are detected.
+
+    Notes
+    -----
+    Buffer formula: per pseudo-pole, the gap is max(alpha * |E_pp|, min_buffer).
+    The fractional term handles scale-invariance (deep poles need proportionally
+    larger gaps); min_buffer prevents a meaninglessly tight gap near shallow poles.
+    Defaults of 0.1 and 50 eV give ~300 eV gap at -3000 eV poles.
+
+    Positive pseudo-poles are filtered out: they cannot be excluded by Eminf
+    (a LOWER bound) and cancel in calcTSW's dTSW comparison.
+
+    A returned floor is GUARANTEED strictly negative (or exactly ENERGY_MIN). If
+    the shallowest buffered floor is >= 0 (pseudo-pole mixed with physical states),
+    returns ENERGY_MIN and lets calcTSW's dTSW<0 path handle the system.
+
+    F, S, X, Sigma_0 are kept fully complex: taking Re() of a Hermitian matrix
+    drops its antisymmetric imaginary part, giving a symmetric matrix with
+    different eigenvalues -- this matters for GHF/SOC.
+    """
+    # Two-point asymptotic probe of Sigma (preserves complex-Hermitian structure).
+    Sigma1 = jnp.asarray(g.sigmaTot(E1))
+    Sigma2 = jnp.asarray(g.sigmaTot(E2))
+    X = (Sigma2 - Sigma1) / (E2 - E1)
+    Sigma_0 = Sigma1 - E1 * X
+
+    # Effective generalized (H, S) for the deep-|E| asymptotic G_DD^R.
+    H_eff = jnp.asarray(F) + Sigma_0
+    S_eff = jnp.asarray(S) - X
+
+    # Reduce (H, S) generalized problem -- where S may be INDEFINITE -- to the
+    # standard non-Hermitian eigproblem of T = S^{-1} H. utils.eig (jit-wrapped
+    # jnp.linalg.eig) handles complex / non-Hermitian T via LAPACK.
+    eigvals_c, eigvecs_c = eig(inv(S_eff) @ H_eff)
+
+    # Eigenvalues are real for Hermitian (H, S) even with indefinite S.
+    # Real-part is to discard numerical imaginary noise from JAX's complex-typed
+    # return, not a physics approximation.
+    eigvals = jnp.real(eigvals_c)
+
+    # Hermitian S_eff-norm: v^H S v (use conj() for the H-conjugate transpose).
+    # v^H S v is real for Hermitian S; we wrap in real() just to drop the
+    # exact-zero imaginary part from einsum.
+    norms = jnp.real(jnp.einsum('in,ij,jn->n',
+                                 eigvecs_c.conj(), S_eff, eigvecs_c))
+
+    pp_energies = np.asarray(jnp.sort(eigvals[norms < 0]))
+
+    # Positive pseudo-poles cannot be excluded by Eminf (it's a LOWER bound);
+    # only negative-energy pseudo-poles inform the floor.
+    pp_neg = pp_energies[pp_energies < 0]
+    if len(pp_neg) == 0:
+        return float(ENERGY_MIN)
+
+    # Per-pseudo-pole buffer: fractional (alpha * |E_pp|) because the
+    # asymptotic E*X regime that creates pseudo-poles is scale-invariant,
+    # plus an absolute min_buffer so shallow poles don't get a meaninglessly
+    # tight gap. Each pole's required floor is E_pp + buffer(E_pp).
+    abs_pp = np.abs(pp_neg)
+    buffers = np.maximum(alpha * abs_pp, min_buffer)
+    floors = pp_neg + buffers
+
+    # Eminf must clear ALL deep pseudo-poles -> take the shallowest (largest)
+    # of the per-pole floors. If even that is non-negative, no safe negative
+    # Eminf exists; fall back to ENERGY_MIN and let calcTSW's dTSW<0 path
+    # handle the system.
+    shallowest = float(np.max(floors))
+    if shallowest >= 0:
+        return float(ENERGY_MIN)
+    return shallowest
 
 def integralFit(F, S, g, mu, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_TOL, T=TEMPERATURE, maxN=MAX_CYCLES):
     """
@@ -883,7 +1334,8 @@ def integralFit(F, S, g, mu, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_TOL, T=TEMP
     rho = np.zeros(np.shape(F))
     while dP > tol and Ncomplex < maxN:
         Ncomplex *= 2 # Start with 8 points, double each time
-        rho_ = np.real(densityComplexN(F, S, g, Emin,  mu, Ncomplex, T=T))
+        rho_, _ = densityComplexN(F, S, g, Emin,  mu, Ncomplex, T=T)
+        rho_ = np.real(rho_)
         dP = max(abs(np.diag(rho_ - rho)))
         print(f"MaxDP = {dP:.2E}, N = {sum(np.diag(rho_).real):2f}")
         rho = rho_
@@ -900,7 +1352,7 @@ def integralFit(F, S, g, mu, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_TOL, T=TEMP
     rho = np.zeros(np.shape(F))
     while dP > tol and Nreal < maxN:
         Nreal *= 2 # Start with 16 points, double each time
-        rho_ = np.real(densityRealN(F, S, g, Eminf, Emin, Nreal, T=0))
+        rho_ = np.real(densityRealN(F, S, g, Eminf, Emin, Nreal, T=0)[0])
         dP = max(abs(np.diag(rho_ - rho)))
         print(f"MaxDP = {dP:.2E}")
         rho = rho_
@@ -964,12 +1416,13 @@ def integralFitNEGF(F, S, g, fermi, qV, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_
     return N
 
 
-def getFermiContact(g, ne, tol=FERMI_CALCULATION_TOL, Eminf=ENERGY_MIN, maxcycles=MAX_CYCLES, T=TEMPERATURE, nOrbs=0):
+def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATION_TOL,
+                   conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE):
     """
-    Calculate Fermi energy for a contact.
+    Calculate Fermi energy for a contact using adaptive integration.
 
-    Determines the Fermi energy for a contact system (Bethe lattice or 1D chain)
-    by matching the electron count.
+    Determines the Fermi energy for a contact system (3D lattice or 1D chain)
+    by matching the electron count using bisection with adaptive complex contour integration.
 
     Parameters
     ----------
@@ -977,85 +1430,61 @@ def getFermiContact(g, ne, tol=FERMI_CALCULATION_TOL, Eminf=ENERGY_MIN, maxcycle
         Surface Green's function calculator
     ne : float
         Target number of electrons
+    Emin : float, optional
+        Lower bound for complex contour integration in eV. If None, calculated from DOS.
+    lBound : float, optional
+        Lower bound for bisection search in eV. If None, estimated from eigenvalues.
+    uBound : float, optional
+        Upper bound for bisection search in eV. If None, estimated from eigenvalues.
     tol : float, optional
-        Convergence tolerance (default: 1e-4)
-    Eminf : float, optional
-        Lower bound for integration (default: -1e6)
+        Tolerance for adaptive integration (default: ADAPTIVE_INTEGRATION_TOL)
+    conv : float, optional
+        Convergence tolerance for electron count (default: FERMI_CALCULATION_TOL)
     maxcycles : int, optional
-        Maximum number of iterations (default: 1000)
-    nOrbs : int, optional
-        Number of orbitals to consider (0 for all) (default: 0)
+        Maximum number of iterations (default: FERMI_SEARCH_CYCLES)
+    T : float, optional
+        Temperature in Kelvin (default: TEMPERATURE)
 
     Returns
     -------
     float
         Fermi energy in eV
     """
-    # Set up infinite system from contact
+    # Set up initial guess from eigenvalues
     S = g.S
     F = g.F
     orbs, _ = eig(inv(S)@F)
     orbs = np.sort(np.real(orbs))
-    fermi = (orbs[int(ne)-1] + orbs[int(ne)])/2
-    Emin, N1, N2 = integralFit(F, S, g, fermi, Eminf, tol, T, maxN=maxcycles)
-    Emax = max(orbs)
-    return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, 
-                        Eminf, T, tol, maxcycles, nOrbs)[0]
 
-def getFermi1DContact(gSys, ne, ind=0, tol=FERMI_CALCULATION_TOL, Eminf=ENERGY_MIN, T=TEMPERATURE, maxcycles=MAX_CYCLES):
-    """
-    Calculate Fermi energy for a 1D chain contact.
+    # Calculate Emin from DOS if not provided
+    if Emin is None:
+        Emin = calcEmin(F, S, g, tol=conv, maxN=maxcycles)
 
-    Specialized version of getFermiContact for 1D chain contacts, handling
-    the periodic boundary conditions correctly.
+    # Count electrons below Emin (zero-DOS region: real-axis ANT converges in ~6 pts)
+    Eminf, _TSW = calcTSW(F, S, g, Eminf=Emin, tol=conv)
+    P, _delta_N_lower = densityComplex(F, S, g, Eminf, Emin, tol, T=0)
+    nLower = np.trace(P@g.S).real + _delta_N_lower
+    assert nLower < ne, "ne ({ne}) exceeds mininum number of electrons ({nLower:.2f})"
+    print(f"{nLower:.2f} electrons below Emin.")
+    ne -= nLower # Subtract from total
 
-    Parameters
-    ----------
-    gSys : surfG object
-        Surface Green's function calculator for the full system
-    ne : float
-        Target number of electrons per unit cell
-    ind : int, optional
-        Contact index (0 for left, -1 for right) (default: 0)
-    tol : float, optional
-        Convergence tolerance (default: 1e-4)
-    Eminf : float, optional
-        Lower bound for integration (default: -1e6)
-    maxcycles : int, optional
-        Maximum number of iterations (default: 1000)
+    # Set bounds from eigenvalues if not provided
+    if lBound is None:
+        lBound = min(orbs)
+    if uBound is None:
+        uBound = max(orbs)
 
-    Returns
-    -------
-    tuple
-        (fermi, Emin, N1, N2) - Optimized parameters:
-        - fermi: Calculated Fermi energy in eV
-        - Emin: Lower bound for complex contour
-        - N1: Number of complex contour points
-        - N2: Number of real axis points
-    """
-    # Set up infinite system from contact
-    F = gSys.aList[ind]
-    S = gSys.aSList[ind]
-    tau = gSys.bList[ind]
-    stau = gSys.bSList[ind]
-    inds = np.arange(len(F))
-    g = surfG(F, S, [inds], [tau], [stau], eta=1e-6)
+    # Initial guess for Fermi energy
+    Ef = (orbs[int(ne)-1] + orbs[int(ne)])/2
 
-    # Initial guess and integral setup using two layers
-    Forbs = np.block([[F, tau], [tau.conj().T, F]])
-    Sorbs = np.block([[S, stau], [stau.T, S]])
-    gorbs = surfG(Forbs, Sorbs, [inds], [tau], [stau], eta=1e-6)
-    orbs, _ = jnp.linalg.eigh(jnp.linalg.inv(Sorbs)@Forbs)
-    orbs = np.sort(np.real(orbs))
-    fermi = (orbs[2*int(ne)-1] + orbs[2*int(ne)])/2
-    Emin, N1, N2 = integralFit(Forbs, Sorbs, gorbs, fermi, Eminf, tol, T, maxN=maxcycles)
-    Emax = max(orbs)
-    return calcFermi(g, ne, Emin, Emax, fermi, N1, N2, Eminf, T, tol, maxcycles)
+    return calcFermi(g, ne, Emin, Ef, lBound=lBound, uBound=uBound,
+                    tol=tol, conv=conv, maxcycles=maxcycles, T=T)
 
 # Calculate the fermi energy of the surface Green's Function object
-def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=ENERGY_MIN, T=TEMPERATURE, tol=FERMI_CALCULATION_TOL, maxcycles=MAX_CYCLES, nOrbs=0):
+def calcFermi(g, ne, Emin, Ef, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATION_TOL,
+              conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE):
     """
-    Calculate Fermi energy using bisection method.
+    Calculate Fermi energy using bisection method with adaptive integration.
 
     Parameters
     ----------
@@ -1064,83 +1493,90 @@ def calcFermi(g, ne, Emin, Emax, fermiGuess=0, N1=100, N2=50, Eminf=ENERGY_MIN, 
     ne : float
         Target number of electrons
     Emin : float
-        Lower bound for complex contour in eV
-    Emax : float
-        Upper bound for search in eV
-    fermiGuess : float, optional
-        Initial guess for Fermi energy in eV (default: 0)
-    N1 : int, optional
-        Number of complex contour points (default: 100)
-    N2 : int, optional
-        Number of real axis points (default: 50)
-    Eminf : float, optional
-        Lower bound for real axis integration in eV (default: -1e6)
+        Lower bound for complex contour integration in eV
+    Ef : float
+        Initial guess for Fermi energy in eV
+    lBound : float, optional
+        Lower bound for bisection search in eV. If None, determined dynamically.
+    uBound : float, optional
+        Upper bound for bisection search in eV. If None, determined dynamically.
     tol : float, optional
-        Convergence tolerance (default: 1e-4)
+        Tolerance for adaptive integration (default: ADAPTIVE_INTEGRATION_TOL)
+    conv : float, optional
+        Convergence criterion for electron count (default: FERMI_CALCULATION_TOL)
     maxcycles : int, optional
-        Maximum number of iterations (default: 20)
-    nOrbs : int, optional
-        Number of orbitals to consider, 0 for all (default: 0)
-
+        Maximum number of iterations (default: FERMI_SEARCH_CYCLES)
+    T : float, optional
+        Temperature in Kelvin (default: TEMPERATURE)
     Returns
     -------
-    tuple
-        (fermi, Emin, N1, N2) - Optimized parameters:
-        - fermi: Calculated Fermi energy in eV
-        - Emin: Lower bound for complex contour
-        - N1: Number of complex contour points
-        - N2: Number of real axis points
+    float
+        Calculated Fermi energy in eV
     """
-    # Fermi Energy search using full contact
-    dos_eminf = _compute_dos_at_energy(Eminf, g.F, g.S, g.sigmaTot(Eminf))
-    print(f'Eminf DOS = {dos_eminf}')
-    fermi = fermiGuess
-    if N2 is None:
-        pLow = densityReal(g.F, g.S, g, Eminf, Emin, tol, T, showText=False)
-    else:
-        pLow = densityRealN(g.F, g.S, g, Eminf, Emin, N2, T, showText=False)
-    if nOrbs==0:
-        nELow = np.trace(pLow@g.S)
-    else:
-        nELow = np.trace((pLow@g.S)[-nOrbs:, -nOrbs:])
-    print(f'Electrons below lowest onsite energy: {nELow}')
-    if nELow >= ne:
-        raise Exception('Calculated Fermi energy is below lowest orbital energy!')
-    if N1 is None:
-        pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, tol, T, showText=False, method='legendre')
-    else:
-        pMu = lambda E: densityComplexN(g.F, g.S, g, Emin, E, N1, T, showText=False, method='legendre')
-    
-    # Fermi search using bisection method (F not changing, highly stable)
-    Ncurr = -1
-    counter = 0 
-    lBound = Emin
-    uBound = Emax
-    print('Calculating Fermi energy using bisection:')
-    while abs(ne - Ncurr) > tol and uBound-lBound > tol/10 and counter < maxcycles:
-        g.setF(g.F, fermi, fermi)
-        if N2 is None:
-            pLow = densityReal(g.F, g.S, g, Eminf, Emin, tol, T=0, showText=False)
-        else:
-            pLow = densityRealN(g.F, g.S, g, Eminf, Emin, N2, T=0, showText=False)
-        p_ = np.real(pLow+pMu(fermi))
-        if nOrbs==0:
-            Ncurr = np.trace(p_@g.S)
-        else:
-            Ncurr = np.trace((p_@g.S)[-nOrbs:, -nOrbs:])
-        dN = ne-Ncurr
-        if dN > 0 and fermi > lBound:
-            lBound = fermi
-        elif dN < 0 and fermi < uBound:
-            uBound = fermi
-        if abs(ne-Ncurr)>tol:
-            fermi = (uBound + lBound)/2
-        print("DN:",dN, "Fermi:", fermi, "Bounds:", lBound, uBound)
+    assert ne <= len(g.F), "Number of electrons cannot exceed number of basis functions!"
+
+    # Use adaptive complex contour integration
+    pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, tol, T)
+
+    E = Ef
+    counter = 0
+    dE = tol
+
+    # Initial calculation
+    g.setF(g.F, E, E)
+    P, _delta_N = pMu(E)
+    Ncurr = np.trace(P@g.S).real + _delta_N
+
+    # Establish bounds if not provided
+    while None in [uBound, lBound] and counter < maxcycles:
+        if counter == maxcycles - 1:
+            dE = 1e3
+        if Ncurr > ne:
+            uBound = E
+            Ef = uBound
+            E -= dE
+        if Ncurr < ne:
+            lBound = E
+            Ef = lBound
+            E += dE
+        if FERMI_DEBUG:
+            print(f"DEBUG: Ef={Ef:.2f}, dN={ne-Ncurr:.2E}, dE={dE:.2E}")
+
+        # Estimate step size using DOS
+        dos = _compute_dos_at_energy(E, g.F, g.S, g.sigmaTot(E), g.crossTermQTot(E), max(g.eta, ETA))
+        dE = max(2*abs(Ncurr-ne)/dos, dE)
         counter += 1
-    if abs(ne - Ncurr) > tol and counter > maxcycles:
-        print(f'Warning: Fermi energy still not within tolerance! Ef = {fermi:.2f} eV, N = {Ncurr:.2f})')
-    print(f'Finished after {counter} iterations, Ef = {fermi:.2f}')
-    return fermi, Emin, N1, N2
+
+        g.setF(g.F, E, E)
+        P, _delta_N = pMu(E)
+        Ncurr = np.trace(P@g.S).real + _delta_N
+
+    # Bisection search
+    print('Calculating Fermi energy using bisection with adaptive integration:')
+    while abs(ne - Ncurr) > conv and counter < maxcycles and uBound != lBound:
+        dN = ne - Ncurr
+        if dN > 0 and Ef > lBound:
+            lBound = Ef
+        elif dN < 0 and Ef < uBound:
+            uBound = Ef
+        Ef = (uBound + lBound) / 2
+        dE = uBound - lBound
+        if FERMI_DEBUG:
+            print(f"DEBUG: Ef={Ef:.2f}, dN={dN:.2E}, dE={dE:.2E}")
+        counter += 1
+        if abs(dN) > conv:
+            g.setF(g.F, Ef, Ef)
+            P, _delta_N = pMu(Ef)
+            Ncurr = np.trace(P@g.S).real + _delta_N
+
+    if counter == maxcycles:
+        print(f'Warning: Max cycles reached, convergence = {abs(Ncurr-ne):.2E}')
+    elif uBound == lBound:
+        print(f'Warning: Bisection failed, convergence = {abs(Ncurr-ne):.2E}')
+    else:
+        print(f'Finished after {counter} iterations, Ef = {Ef:.2f}')
+
+    return Ef
 
 def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI_CALCULATION_TOL, 
                     maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE, uBound=None, lBound=None):
@@ -1153,13 +1589,14 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
     else:   
         pMu = lambda E: densityComplexN(g.F, g.S, g, Emin, E, N, T)
     E = Ef + 0.0
+    Ef0 = Ef + 0.0
     P = None
     Ncurr = ne+0
     dE = tol
     counter = 0
     g.setF(g.F, E, E)
-    P = pMu(E)
-    Ncurr = np.trace(P@g.S).real
+    P, _delta_N = pMu(E)
+    Ncurr = np.trace(P@g.S).real + _delta_N
     while None in [uBound, lBound] and counter<maxcycles:
         if counter==maxcycles:
             dE = 1e3
@@ -1173,12 +1610,12 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
             E += dE
         if FERMI_DEBUG:
             print(f"DEBUG: Ef={Ef:.2f}, dN={ne-Ncurr:.2E}, dE={dE:.2E}")
-        dos = _compute_dos_at_energy(E, g.S, g.F, g.sigmaTot(E))
+        dos = _compute_dos_at_energy(E, g.F, g.S, g.sigmaTot(E), g.crossTermQTot(E), max(g.eta, ETA))
         dE = max(2*abs(Ncurr-ne)/dos, dE)
         counter += 1
         g.setF(g.F, E, E)
-        P = pMu(E)
-        Ncurr = np.trace(P@g.S).real
+        P, _delta_N = pMu(E)
+        Ncurr = np.trace(P@g.S).real + _delta_N
     while abs(ne - Ncurr) > conv and counter < maxcycles and uBound != lBound:
         dN = ne-Ncurr
         if dN > 0 and Ef > lBound:
@@ -1192,12 +1629,16 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
         counter += 1
         if abs(dN) > conv:
             g.setF(g.F, Ef, Ef)
-            P = pMu(Ef)
-            Ncurr = np.trace(P@g.S)
+            P, _delta_N = pMu(Ef)
+            Ncurr = np.trace(P@g.S).real + _delta_N
     if counter == maxcycles:
         print(f'Warning: Max cycles reached, convergence = {abs(Ncurr-ne):.2E}')
+        print(f'Reverting to previous Fermi level...')
+        Ef = Ef0
     elif uBound == lBound:
         print(f'Warning: Bisection failed, convergence = {abs(Ncurr-ne):.2E}')
+        print(f'Reverting to previous Fermi level...')
+        Ef = Ef0
     return Ef, dE, P
 
 def calcFermiSecant(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, 
@@ -1212,15 +1653,15 @@ def calcFermiSecant(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
     else:   
         pMu = lambda E: densityComplexN(g.F, g.S, g, Emin, E, N, T)
     g.setF(g.F, Ef, Ef)
-    P = pMu(Ef)
-    nCurr = np.trace(P@g.S).real
+    P, _delta_N = pMu(Ef)
+    nCurr = np.trace(P@g.S).real + _delta_N
     dE = conv
     counter = 0
     while abs(nCurr-ne) > conv and counter < maxcycles:
         Ef += dE
         g.setF(g.F, Ef, Ef)
-        P = pMu(Ef)
-        nNext = np.trace(P@g.S).real
+        P, _delta_N = pMu(Ef)
+        nNext = np.trace(P@g.S).real + _delta_N
         if FERMI_DEBUG:
             print(f"DEBUG: Ef={Ef:.2f}, dN={nNext-ne:.2E}, dE={dE:.2E}")
         if abs(nNext - nCurr)<1e-10:
@@ -1249,6 +1690,7 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, tol, T)
     else:   
         pMu = lambda E: densityComplexN(g.F, g.S, g, Emin, E, N, T)
+    Ef0 = Ef + 0.0
 
     # Initialize three points around initial guess
     E2 = Ef
@@ -1262,8 +1704,8 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
     nList = []
     for E in [E2, E1, E0]:
         g.setF(g.F, E, E)
-        P = pMu(E)
-        n = np.trace(P@g.S).real - ne
+        P, _delta_N = pMu(E)
+        n = np.trace(P@g.S).real + _delta_N - ne
         if n > 0:
             uBound = min(uBound, E) if uBound is not None else E
         elif n < 0:
@@ -1309,8 +1751,8 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
 
         E2 = Enext
         g.setF(g.F, E2, E2)
-        P = pMu(E2)
-        n2 = np.trace(P@g.S).real - ne
+        P, _delta_N = pMu(E2)
+        n2 = np.trace(P@g.S).real + _delta_N - ne
 
         if n2 > 0:
             uBound = min(uBound, E2) if uBound is not None else E2
@@ -1327,6 +1769,8 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
 
     if counter == maxcycles:
         print(f'Warning: Max cycles reached, convergence = {abs(n2):.2E}')
+        print(f'Reverting to previous Fermi level...')
+        Ef = Ef0
 
     return E2, dE, P, abs(n2), uBound, lBound
 
@@ -1391,8 +1835,8 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
     # Initialize with first point
     E = Ef
     g.setF(g.F, E, E)
-    P = pMu(E)
-    n = np.trace(P@g.S).real - ne
+    P, _delta_N = pMu(E)
+    n = np.trace(P@g.S).real + _delta_N - ne
 
     if abs(n) < conv:
         return E, 0, P, abs(n), uBound, lBound
@@ -1407,8 +1851,8 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
     while counter < maxcycles:
         E = Ef + step
         g.setF(g.F, E, E)
-        P = pMu(E)
-        n = np.trace(P@g.S).real - ne
+        P, _delta_N = pMu(E)
+        n = np.trace(P@g.S).real + _delta_N - ne
         if n > 0:
             uBound = min(uBound, E) if uBound is not None else E
         elif n < 0:
@@ -1461,34 +1905,12 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         root_distances = np.abs(roots - E_pts[-1])
         nearest_idx = np.argmin(root_distances)
         E_next = roots[nearest_idx].real
-    
-        # Enforce monotonicity: Higher E -> higher N 
-        # If N-nE > 0: need lower E, so E_next must be < E_pts[-1]
-        # If N-nE < 0: need higher E, so E_next must be > E_pts[-1]
-        if n_pts[-1] > 0 and E_next > E_pts[-1]:
-            # Polynomial violated monotonicity - discard it and step in correct direction
-            E_next = E_pts[-1] - abs(dE) * 10
-            # Remove the last point that led to bad interpolation
-            E_pts.pop()
-            n_pts.pop()
-            counter -= 1  # Don't count this as a valid iteration
-            if FERMI_DEBUG:
-                print('Warning: monotonicity exception corrected!')
-        elif n_pts[-1] < 0 and E_next < E_pts[-1]:
-            # Polynomial violated monotonicity - discard it and step in correct direction
-            E_next = E_pts[-1] + abs(dE) * 10
-            # Remove the last point that led to bad interpolation
-            E_pts.pop()
-            n_pts.pop()
-            counter -= 1  # Don't count this as a valid iteration
-            if FERMI_DEBUG:
-                print('Warning: monotonicity exception corrected!')
 
         # Calculate new point
         E = E_next
         g.setF(g.F, E, E)
-        P = pMu(E)
-        n = np.trace(P@g.S).real - ne
+        P, _delta_N = pMu(E)
+        n = np.trace(P@g.S).real + _delta_N - ne
         if n > 0:
             uBound = min(uBound, E) if uBound is not None else E
         elif n < 0:
@@ -1513,4 +1935,5 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         print(f'Warning: Max cycles reached, convergence = {abs(n):.2E}')
 
     return E, dE, P, abs(n), uBound, lBound
+
 

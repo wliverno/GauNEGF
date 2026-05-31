@@ -22,10 +22,11 @@ Example of spin-dependent transport:
     # Set up spin-dependent contacts
     sig_up = [-0.1j]
     sig_down = [-0.05j]
-    inds = negf.setSigma([1], [2])
+    # Define contact indices explicitly (NEGF.setSigma does not return them)
+    inds = [[1], [2]]
     sig1 = np.diag(sig_up*len(inds[0]) + sig_down*len(inds[0]))
     sig2 = np.diag(sig_down*len(inds[1]) + sig_up*len(inds[1]))
-    negf.setSigma([1], [2], sig1, sig2)
+    negf.setSigma(lContact=inds[0], rContact=inds[1], sig=sig1, sig2=sig2)
     
     # Run at equilibrium
     negf.setVoltage(0.0)
@@ -48,14 +49,20 @@ Finite temperature can be set globally in the ``config.py`` file:
 
     TEMPERATURE = 300
 
-Or locally in an NEGF object by setting the temperature argument:
+Or locally on an NEGFE object by setting the temperature argument
+(NEGFE overrides setSigma/setContactBethe/setContact1D to accept the
+``T`` keyword; the base NEGF class does not):
 
 .. code-block:: python
- 
-    # Set basic temperature-dependent contact 
+
+    from gauNEGF.scfE import NEGFE
+
+    negf = NEGFE('molecule', basis='lanl2dz')
+
+    # Set basic temperature-dependent contact
     negf.setSigma(
-        [1], [2],  
-        -0.05j, 
+        lContact=[1], rContact=[2],
+        sig=-0.05j,
         T=300     # Temperature in Kelvin
     )
 
@@ -69,9 +76,14 @@ Or locally in an NEGF object by setting the temperature argument:
 Energy-Dependent Contacts
 ---------------------
 
-Using realistic contact models:
+Using realistic contact models (NEGFE provides setContactBethe and
+setContact1D; both are NEGFE-only methods):
 
 .. code-block:: python
+
+    from gauNEGF.scfE import NEGFE
+
+    negf = NEGFE('molContacts', basis='lanl2dz')
 
     # Bethe lattice contacts at atoms {1,2,3} and {6,7,8}
     negf.setContactBethe(
@@ -79,13 +91,13 @@ Using realistic contact models:
         latFile='Au', # Slater Koster parameters define in Au.bethe
         eta=1e-6      # Broadening term (eV)
     )
-    
-    # 1D chain contacts attached to atoms 1 and 6
+
+    # 1D chain contacts auto-extracted from the device Fock block.
+    # See /guides/contacts_1d for the explicit-matrix and tau-list patterns.
     negf.setContact1D(
-        contactList= [[1],[6]],
-        tauList = [[2], [5]],   # hopping calculated from 1 to 2 and 6 to 5
-        neList = [4,  4],       # 4 electrons per cell
-        eta = 1e-6              # Broadening term (eV)
+        contactList=[[1], [6]],
+        symmetrize_contacts=True,
+        eta=1e-3
     )
 
 Custom Analysis
@@ -120,4 +132,11 @@ Advanced analysis tools:
     
     plt.tight_layout()
     plt.show()
+
+See Also
+--------
+
+* :doc:`/guides/contacts_bethe` -- Bethe lattice contact setup, including SOC workflows
+* :doc:`/guides/contacts_1d` -- full 1D chain contact setup patterns
+* :doc:`/guides/workflow_recipes` -- IV sweeps, checkpointing, multi-temperature workflows
 

@@ -1,0 +1,29 @@
+{
+  "group": "D3",
+  "files_audited": [
+    "gauNEGF/matTools.py",
+    "gauNEGF/integrate.py",
+    "gauNEGF/spinTools.py",
+    "gauNEGF/utils.py",
+    "gauNEGF/protocols.py",
+    "gauNEGF/config.py",
+    "gauNEGF/fermiSearch.py"
+  ],
+  "findings": [
+    {
+      "file_path": "gauNEGF/spinTools.py",
+      "line_range": [177, 192],
+      "current_snippet": "def genOrthRots(spinVec):\n    \"\"\"\n    Generate a set of orthogonal spin rotations for spin-torque analysis.\n\n    Given an input spin quantization axis, constructs 7 rotation matrices\n    mapping to: the original axis (identity), two pairs of orthogonal axes\n    (+/-vec1, +/-vec2), and two independent 180 degree rotations to the \n    anti-parallel directions (-original via vec1, -original via vec2). The \n    orthogonal basis is built to avoid singularities when the input is aligned \n    with any coordinate axis.\n\n    Notes\n    -----\n    Indices 5 and 6 both target -original but rotate around different axes\n    (vec1 and vec2 respectively). \n    \"\"\"",
+      "issue": "Function returns tuple (rotations, directions) but docstring lacks Returns section.",
+      "proposed_fix": "def genOrthRots(spinVec):\n    \"\"\"\n    Generate a set of orthogonal spin rotations for spin-torque analysis.\n\n    Given an input spin quantization axis, constructs 7 rotation matrices\n    mapping to: the original axis (identity), two pairs of orthogonal axes\n    (+/-vec1, +/-vec2), and two independent 180 degree rotations to the \n    anti-parallel directions (-original via vec1, -original via vec2). The \n    orthogonal basis is built to avoid singularities when the input is aligned \n    with any coordinate axis.\n\n    Returns\n    -------\n    rotations : list of ndarray, each of shape (2, 2)\n        7 SU(2) rotation matrices in order:\n        [identity, +vec1, -vec1, +vec2, -vec2, -original (via vec1),\n        -original (via vec2)].\n    directions : ndarray of shape (7, 3)\n        Unit vectors corresponding to each rotation target.\n\n    Notes\n    -----\n    Indices 5 and 6 both target -original but rotate around different axes\n    (vec1 and vec2 respectively). \n    \"\"\"",
+      "confidence": "mechanical",
+      "code_bug": false
+    }
+  ],
+  "summary": {
+    "total_findings": 1,
+    "mechanical_count": 1,
+    "judgment_count": 0,
+    "code_bug_count": 0
+  }
+}
