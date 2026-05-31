@@ -15,7 +15,7 @@ OVERLAP_EIGENVALUE_RATIO = 1e-6     # Floor overlap eigenvalues below this fract
 FERMI_SEARCH_CYCLES = 10            # Number of cycles to run search before returning
 SURFACE_GREEN_CONVERGENCE = 1e-5    # Surface Green's function convergence
 SURFACE_RELAXATION_FACTOR = 0.1     # Relaxation/Mixing factor for Green's function convergence
-FERMI_DEBUG=True                    # Debugging for fermi search functions
+FERMI_DEBUG = False                 # Verbose internal diagnostics off by default. Set True to debug Fermi search, asymptotic Sigma, or surface Green's function convergence.
 
 # Integration Parameters
 ADAPTIVE_INTEGRATION_TOL = 1e-4     # Adaptive integration tolerance

@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="gauNEGF",
-    version="1.0.0",
+    version="0.2.0",
     author="William Livernois",
     author_email="willll@uw.edu",
     description="A Python package for Non-Equilibrium Green's Function calculations with Gaussian",
