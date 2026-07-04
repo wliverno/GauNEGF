@@ -29,7 +29,7 @@ jax.config.update("jax_enable_x64", True)
 # Configuration
 from gauNEGF.config import (TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, FERMI_DEBUG,
                             FERMI_SEARCH_CYCLES, N_KT, ENERGY_MIN, MAX_CYCLES, MAX_GRID_POINTS, ETA,
-                            EMIN_BUFFER)
+                            EMIN_BUFFER, USE_INERTIA_EMIN)
 from scipy.special import roots_legendre
 from scipy.special import roots_chebyu
 import matplotlib.pyplot as plt
@@ -1008,6 +1008,10 @@ def calcEmin(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=MAX_CYCLES, Emin=None, X=N
     X @ F @ X (X = S^(-1/2)) is used for the initial Emin seed because it
     is Hermitian by construction and its eigenvalues are the true device MO
     energies; eigh(inv(S) @ F) would silently fail for non-trivial S.
+
+    .. deprecated::
+        Superseded by find_lower_bound + single contour (USE_INERTIA_EMIN).
+        Retained for the default (flag-off) path for one release.
     """
     if X is None:
         X = fractional_matrix_power(S, -0.5)
@@ -1073,6 +1077,10 @@ def calcTSW(F, S, g, tol=FERMI_CALCULATION_TOL, maxN=FERMI_SEARCH_CYCLES,
     -------
     tuple (float, float)
         (Eminf, TSW) -- converged lower bound and reference spectral weight.
+
+    .. deprecated::
+        Superseded by find_lower_bound + single contour (USE_INERTIA_EMIN).
+        Retained for the default (flag-off) path for one release.
     """
     # Capture the warm-start for the postcondition check: the returned Eminf
     # must not be shallower than the caller's warm-start (would invert the
@@ -1284,6 +1292,79 @@ def calcPseudoPoleFloor(F, S, g, alpha=0.1, min_buffer=50.0, E1=-1e3, E2=-1e4):
         return float(ENERGY_MIN)
     return shallowest
 
+def find_lower_bound(F, S, g, maxN=MAX_CYCLES, factor=2.0):
+    """Integration lower bound (Eminf) below every pole of G^R = [E S - F -
+    Sigma(E)]^{-1}, via a seed + step-down walk referenced to the TOTAL SPECTRAL
+    WEIGHT (not the matrix dimension N).
+
+    The number of poles -- states with real spectral weight -- is generally LESS
+    than the matrix dimension N for a non-orthogonal basis: the finite overlap and
+    the asymptotically E-linear contact self-energy reduce the effective count
+    (a handful of eigenvalues of M(E) ~ E*(S - X_asymp) never go negative). So the
+    reference is n_ref = n_neg(ENERGY_MIN), the inertia count of the Hermitian part
+    of M(E) = E S - F - Sigma(E) at the deepest config cutoff -- the true number of
+    poles. The walk seeds at calcEmin's band floor (min generalized eigenvalue of
+    (F, S) minus EMIN_BUFFER) and steps DOWN with calcTSW's geometric doubling
+    until n_neg(E) reaches n_ref, i.e. E is below every pole. Referencing n_ref
+    instead of N is what makes this robust to a (mildly) non-PSD effective overlap;
+    the DOS test calcEmin uses would have to guess that count. The seed is usually
+    already below every pole, so the common case returns with zero steps. All
+    matrix math is JAX (on-device eigh). See
+    docs/superpowers/specs/2026-06-14-inertia-lower-bound-design.md Sec 3.
+
+    Parameters
+    ----------
+    F : ndarray
+        Fock matrix in eV.
+    S : ndarray
+        Overlap matrix.
+    g : surfG object
+        Provides sigmaTot(E) -> contact self-energy at energy E (eV).
+    maxN : int, optional
+        Maximum number of doubling steps (default: MAX_CYCLES).
+    factor : float, optional
+        Geometric step-down factor applied to Emin each step (default: 2.0).
+
+    Returns
+    -------
+    float
+        Integration lower bound in eV (n_neg == n_ref there, below every pole).
+        Always defined -- n_ref = n_neg(ENERGY_MIN) is reached by ENERGY_MIN at
+        the latest.
+    """
+    Fj = jnp.asarray(F)
+    Sj = jnp.asarray(S)
+
+    def _nneg(E):
+        # Number of negative eigenvalues of the Hermitian part of M(E) = number
+        # of poles below E.
+        M = float(E) * Sj - Fj - jnp.asarray(g.sigmaTot(float(E)))
+        Mh = 0.5 * (M + M.conj().T)
+        return int(jnp.sum(eigh(Mh)[0] < 0.0))
+
+    # Reference: total number of poles = inertia count at the deepest config
+    # cutoff (< matrix dimension N for a non-orthogonal basis / finite overlap).
+    n_ref = _nneg(float(ENERGY_MIN))
+
+    # Seed at the Lowdin band floor minus EMIN_BUFFER -- calcEmin's seed, on JAX.
+    ws, Vs = eigh(Sj)
+    X = Vs @ jnp.diag(ws ** -0.5) @ Vs.conj().T
+    D = jnp.real(eigh(X @ Fj @ X)[0])
+    Emin = float(jnp.min(D)) - EMIN_BUFFER
+
+    # Walk down (calcTSW doubling) until all n_ref poles are below Emin. Emin then
+    # sits just below the lowest pole.
+    counter = 0
+    while _nneg(Emin) < n_ref and counter < maxN and Emin > ENERGY_MIN:
+        Emin = max(Emin * factor, float(ENERGY_MIN))
+        counter += 1
+    # Push a full EMIN_BUFFER below that point so the contour's lower endpoint
+    # stays well clear of the poles. The seed's buffer is below the bare band
+    # floor (min eig), which the contact self-energy's downward shift of the
+    # lowest pole can erode to ~nothing -- so the buffer must be applied here,
+    # relative to where the poles actually end.
+    return max(float(ENERGY_MIN), Emin - EMIN_BUFFER)
+
 def integralFit(F, S, g, mu, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_TOL, T=TEMPERATURE, maxN=MAX_CYCLES):
     """
     Optimize integration parameters for density calculations.
@@ -1417,7 +1498,8 @@ def integralFitNEGF(F, S, g, fermi, qV, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_
 
 
 def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATION_TOL,
-                   conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE):
+                    conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE,
+                    useInertiaEmin=None):
     """
     Calculate Fermi energy for a contact using adaptive integration.
 
@@ -1456,6 +1538,27 @@ def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INT
     orbs, _ = eig(inv(S)@F)
     orbs = np.sort(np.real(orbs))
 
+    if useInertiaEmin is None:
+        useInertiaEmin = USE_INERTIA_EMIN
+
+    if useInertiaEmin:
+        # SINGLE-CONTOUR inertia path: find_lower_bound returns the integration
+        # floor Eminf directly (seed + inertia step-down); no separate lower
+        # contour, no nLower subtraction. calcFermi integrates [Eminf, mu] and
+        # targets the full ne.
+        Eminf = find_lower_bound(F, S, g)
+        if Eminf is not None:
+            if lBound is None:
+                lBound = min(orbs)
+            if uBound is None:
+                uBound = max(orbs)
+            idx = max(min(int(ne), len(orbs) - 1), 1)
+            Ef = (orbs[idx - 1] + orbs[idx]) / 2
+            print(f"Single-contour floor Eminf = {Eminf:.2f} eV")
+            return calcFermi(g, ne, Eminf, Ef, lBound=lBound, uBound=uBound,
+                             tol=tol, conv=conv, maxcycles=maxcycles, T=T)
+        print("find_lower_bound returned None; falling back to legacy two-contour path")
+
     # Calculate Emin from DOS if not provided
     if Emin is None:
         Emin = calcEmin(F, S, g, tol=conv, maxN=maxcycles)
@@ -1474,8 +1577,11 @@ def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INT
     if uBound is None:
         uBound = max(orbs)
 
-    # Initial guess for Fermi energy
-    Ef = (orbs[int(ne)-1] + orbs[int(ne)])/2
+    # Initial guess for Fermi energy. Clamp the orbital index to [1, len-1] so a
+    # full/near-full count (orbs[int(ne)] out of range) or ne<1 (negative wrap to
+    # orbs[-1]) cannot blow up -- Ef is only calcFermi's starting guess.
+    idx = max(min(int(ne), len(orbs) - 1), 1)
+    Ef = (orbs[idx - 1] + orbs[idx]) / 2
 
     return calcFermi(g, ne, Emin, Ef, lBound=lBound, uBound=uBound,
                     tol=tol, conv=conv, maxcycles=maxcycles, T=T)

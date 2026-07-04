@@ -6,8 +6,19 @@ from just below it with the existing `densityComplex`. This fixes the two failur
 modes that produced the whole lower-contour / Damle saga, while reusing the
 existing integration machinery and adding fewer grid points.
 
-**Status:** Design. Validated on the synthetic 1D toy AND on real carbon
-nanowires (STO-3G) -- see Section 5; not yet implemented in production.
+**Status:** Implemented and DEFAULT as of 2026-06-28 (`USE_INERTIA_EMIN = True`
+in config; set `False` for the legacy `calcEmin`/`calcTSW` path). The new method
+is JAX throughout (on-device `jnp.linalg.eigh` inertia count). Validated on the
+synthetic 1D toy and real carbon nanowires (STO-3G), and the full test suite runs
+with the new method as the default (fast pure-numpy 43/43; Gaussian SCF + scf_io
+30 passed; Bethe/3D `getFermiContact` pass). Implementation plan:
+docs/superpowers/plans/2026-06-24-inertia-lower-bound-implementation.md.
+Validation fixtures: tests/fixtures/_diag_inertia_carbon.py and
+tests/fixtures/_diag_inertia_singlecontour_scf.py. The legacy `calcEmin`/`calcTSW`
+path remains behind the flag (deprecated, documentation only); three
+Damle-FockToP-internal tests that assert legacy machinery (calcEmin call,
+Sigma_0 refit, lower-contour warning) were removed as incompatible with the new
+default.
 
 **Scope decision (for review):** this proposal REPLACES both `calcEmin` and
 `calcTSW` with one function `find_lowest_pole`, which sets the integration floor

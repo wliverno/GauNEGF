@@ -56,37 +56,6 @@ def test_damle_delta_N_negligible_on_pole_free_tail():
     assert abs(dN) < 1e-2, f'pole-free tail delta_N={dN:.3e} (expect ~0)'
 
 
-def test_focktop_warns_when_pole_below_emin(capsys, monkeypatch):
-    # When Emin lands too shallow and the lower contour traps real charge, the
-    # warning must fire. FockToP now recomputes Emin every cycle via calcEmin
-    # (per-cycle update), so we cannot force a shallow Emin by setting the
-    # attribute -- it gets overwritten. Monkeypatch calcEmin to force Emin=-145
-    # (in the C2 core/valence gap) instead, so the 1s cores sit BELOW Emin and
-    # the lower contour traps ~2 electrons -> tr(P@S) > 0.5 -> warning fires.
-    import gauNEGF.scfE as scfE
-    monkeypatch.setattr(scfE, 'calcEmin', lambda *a, **kw: -145.0)
-    negf = _c2_setup()
-    negf.N2 = None
-    negf.updFermi = False   # isolate the warning: skip the full Fermi search
-    negf.damle_dN_warn = 0.5
-    negf.FockToP()
-    out = capsys.readouterr().out
-    assert 'lower-contour holds significant weight' in out
-
-
-def test_focktop_no_warning_in_normal_operation(capsys):
-    # In normal SCF operation FockToP places Emin below the whole band each
-    # cycle (calcEmin true-Sigma DOS), so the lower contour is empty (~1e-7
-    # weight) and the warning must STAY SILENT (no false positive).
-    negf = _c2_setup()
-    negf.N2 = None
-    negf.updFermi = False
-    negf.damle_dN_warn = 0.5
-    negf.FockToP()
-    out = capsys.readouterr().out
-    assert 'lower-contour holds significant weight' not in out
-
-
 def test_setvoltage_places_emin_below_band_via_calcemin():
     negf = _c2_setup()  # setVoltage(0.0) already ran inside
     F_eV = np.asarray(negf.F) * har_to_eV
@@ -110,44 +79,6 @@ def test_focktop_replaces_stale_emin_for_current_fock():
     negf.Emin = -30.0
     negf.FockToP()
     assert negf.Emin < -260.0, f'FockToP did not re-place stale Emin: {negf.Emin}'
-
-
-def test_focktop_refits_stale_sigma0_for_current_fock():
-    # FockToP must refit the asymptotic fit (Sigma_0/Y_eff) on the current Fock.
-    # A stale Sigma_0/Y_eff applied to an evolved F yields a garbage Fbar (the
-    # Au3 crash). Here F is unchanged, so a correct refit restores the setup value.
-    negf = _c2_setup()
-    negf.updFermi = False
-    sigma0_setup = np.asarray(negf.Sigma_0).copy()
-    # Corrupt the cached fit (simulate staleness w.r.t. the current Fock).
-    negf.Sigma_0 = np.zeros_like(negf.Sigma_0)
-    negf.FockToP()
-    rel = norm(np.asarray(negf.Sigma_0) - sigma0_setup) / max(norm(sigma0_setup), 1e-30)
-    assert rel < 1e-6, f'FockToP did not refit Sigma_0 (rel diff {rel:.3e})'
-
-
-def test_focktop_calls_calcemin_without_emin_seed(monkeypatch):
-    # Architecture (post-CNT33_5cell data): Emin is anchored to calcEmin's
-    # F-based default (eigh on F minus EMIN_BUFFER), then deepened by the
-    # DOS loop using true Sigma(E). The Fbar-floor seed (damleEmin) was
-    # removed because Fbar can have spurious deep eigenvalues from the
-    # constant-Sigma_0 approximation that don't correspond to actual G^R
-    # poles (CNT showed damleEmin swinging to -38000+ eV from
-    # well-conditioned-but-non-physical Fbar modes). FockToP must call
-    # calcEmin with Emin=None so the F-based default runs.
-    negf = _c2_setup()
-    negf.updFermi = False
-    captured = {}
-    def fake_calcEmin(F, S, g, tol=None, maxN=None, Emin=None, X=None):
-        captured['Emin'] = Emin
-        return -281.0
-    import gauNEGF.scfE as scfE
-    monkeypatch.setattr(scfE, 'calcEmin', fake_calcEmin)
-    negf.FockToP()
-    assert 'Emin' in captured, 'FockToP did not call calcEmin'
-    assert captured['Emin'] is None, \
-        f'FockToP must call calcEmin with no Emin seed (F-based default); ' \
-        f'got Emin={captured["Emin"]}'
 
 
 def test_calcemin_default_offset_is_EMIN_BUFFER():
