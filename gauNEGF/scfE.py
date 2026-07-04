@@ -22,7 +22,7 @@ jax.config.update("jax_enable_x64", True)
 from gauNEGF.matTools import *
 from gauNEGF.density import *
 from gauNEGF.utils import inv, eig, eigh, inv_sqrt_general
-from gauNEGF.config import (ETA, TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, EMIN_BUFFER, ENERGY_MIN, FERMI_DEBUG)
+from gauNEGF.config import (ETA, TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, EMIN_BUFFER, ENERGY_MIN, FERMI_DEBUG, USE_INERTIA_EMIN)
 from gauNEGF.scf import NEGF
 from gauNEGF.surfG1D import surfG
 from gauNEGF.surfGBethe import surfGB
@@ -406,6 +406,7 @@ class NEGFE(NEGF):
             self.tol = tol
         else:
             self.Emin = Emin
+        self.useInertiaEmin = getattr(self, 'useInertiaEmin', USE_INERTIA_EMIN)
         self.N1 = N1
         self.N2 = N2
         self.Nnegf = Nnegf
@@ -511,7 +512,31 @@ class NEGFE(NEGF):
         """
         self._symmetrize_F()
         print('Calculating lower density matrix:')
-        if self.N2 is None:
+        # Decide the inertia path FIRST, but FALL BACK to the Damle lower contour
+        # on None -- never raise (the global constraint requires callers to detect
+        # None and fall back, not crash). self.Emin is only mutated on the branch
+        # that is actually taken, so a fallback leaves it for calcEmin to set.
+        _use_inertia = (self.N2 is None) and getattr(self, 'useInertiaEmin', False)
+        _Eminf = None
+        if _use_inertia:
+            F_eV = self.F * har_to_eV
+            _Eminf = find_lower_bound(F_eV, self.S, self.g)
+            if _Eminf is None:
+                print("find_lower_bound returned None (non-PSD effective overlap "
+                      "/ diffuse basis); falling back to the Damle lower-contour "
+                      "path for this cycle.")
+        if _use_inertia and _Eminf is not None:
+            # SINGLE-CONTOUR inertia path: find_lower_bound gives the integration
+            # floor directly. No separate lower contour: P starts empty and
+            # nLower = 0, so the full contour [self.Emin, mu] is integrated by
+            # compContourP2 below and the Fermi search targets the full count.
+            self.Emin = _Eminf
+            self.Eminf = self.Emin  # keep the predict-path / bisectFermi floor
+                                    # (scfE.py:588,599) consistent with the contour
+            P = np.zeros(np.shape(self.F), dtype=complex)
+            nLower = 0.0
+            print(f"Single-contour floor Emin = {self.Emin:.2f} eV; no lower contour.")
+        elif self.N2 is None:
             # self.F changes every SCF cycle, and the asymptotic fit
             # (Sigma_0 / S_eff / Y_eff) AND Emin all depend on it -- recompute
             # them on the CURRENT Fock before building the lower contour.
