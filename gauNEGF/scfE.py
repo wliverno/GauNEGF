@@ -726,7 +726,19 @@ class NEGFE(NEGF):
         -------
         float
             Energy difference from previous iteration
+
+        Raises
+        ------
+        RuntimeError
+            If called before setVoltage() has defined mu1/mu2. setDen()
+            triggers PToFock() via the base class, so on a fresh NEGFE the
+            call order must be setVoltage(...) then setDen(...).
         """
+        if not hasattr(self, 'mu1'):
+            raise RuntimeError(
+                'NEGFE.PToFock: mu1/mu2 undefined - call setVoltage() before '
+                'setDen()/SCF() on a fresh NEGFE object (setDen -> PToFock -> '
+                'g.setF(F, mu1, mu2) requires the chemical potentials).')
         Fock_old = self.F.copy()
         dE = super().PToFock()
         self.F, self.locs = getFock(self.bar, self.spin)

@@ -496,7 +496,7 @@ class surfGB:
             return jnp.kron(M_rot, jnp.eye(2))
         return M_rot
     
-    def sigma(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
+    def sigma(self, E, i, conv=SURFACE_GREEN_CONVERGENCE, dFermi=None):
         """
         Calculate self-energy matrix for a specific contact.
 
@@ -530,8 +530,13 @@ class surfGB:
             DOI: 10.1063/1.3526044
         """
         # Shift E to reference frame of immutable H0/Vlist0 (keeps dFermi
-        # outside the JIT boundary of surfGBAt.sigma)
-        E_shifted = E - self.gList[i].dFermi
+        # outside the JIT boundary of surfGBAt.sigma). dFermi may be
+        # passed explicitly as a TRACED value (2026-07-07): cached compiled
+        # kernels in integrate.py thread the current contact fermi shifts
+        # through as runtime arguments, so a fermi update reuses the same
+        # executable instead of recompiling.
+        dF = self.gList[i].dFermi if dFermi is None else dFermi
+        E_shifted = E - dF
         sigSurf = self.gList[i].sigmaSurf(E_shifted, conv)
 
         # Get contact-specific data for this static contact index
@@ -576,7 +581,7 @@ class surfGB:
 
         return sig
     
-    def sigmaTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
+    def sigmaTot(self, E, conv=SURFACE_GREEN_CONVERGENCE, dFermis=None):
         """
         Calculate total self-energy matrix from all contacts.
 
@@ -595,7 +600,11 @@ class surfGB:
             Total self-energy matrix in the full device basis
         """
         num_contacts = len(self.indsLists)
-        sigs = [self.sigma(E, i, conv) for i in range(num_contacts)]
+        if dFermis is None:
+            sigs = [self.sigma(E, i, conv) for i in range(num_contacts)]
+        else:
+            sigs = [self.sigma(E, i, conv, dFermi=dFermis[i])
+                    for i in range(num_contacts)]
         return sum(sigs)
 
     def crossTermQ(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
@@ -690,6 +699,10 @@ class surfGB:
         Ef : float
             New Fermi energy in eV
         """
+        # NOTE (2026-07-07): no kernel-cache version bump here - fermi
+        # shifts flow through cached kernels as TRACED dFermis arguments
+        # (integrate.py), so a fermi update reuses the same executable.
+        # updateH keeps the stored state current for non-kernel callers.
         self.gList[i].updateH(Ef)
     
     def setF(self, F, muL, muR):

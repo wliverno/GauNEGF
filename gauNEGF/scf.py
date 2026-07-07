@@ -45,7 +45,8 @@ from gauNEGF.spinTools import spinorTF
 
 # Use JAX functions directly
 from gauNEGF.config import (SCF_CONVERGENCE_TOL, SCF_DAMPING, SCF_MAX_CYCLES,
-                            FERMI_CALCULATION_TOL, PULAY_MIXING_SIZE, ENERGY_MIN)
+                            FERMI_CALCULATION_TOL, PULAY_MIXING_SIZE, ENERGY_MIN,
+                            CLEAR_JAX_CACHES_PER_CYCLE)
 from gauNEGF.utils import fractional_matrix_power, inv, eig
 
 
@@ -791,6 +792,18 @@ class NEGF(object):
             EList, occList = self.FockToP()
             RMSDP, MaxDP = self.PMix(damping, isPulay)
             dE = self.PToFock()
+
+            # EMERGENCY VALVE (default off - see config): drop integrate.py's
+            # persistent kernel cache AND jax's caches every cycle. The
+            # kernel cache makes compiled integrators reusable across cycles
+            # (the vm.max_map_count leak fix, 2026-07-07), so enabling this
+            # sacrifices that reuse - flip on only if map growth reappears
+            # (check /proc/<pid>/maps against vm.max_map_count 65530).
+            if CLEAR_JAX_CACHES_PER_CYCLE:
+                import jax as _jax
+                from gauNEGF import integrate as _gint
+                _gint.clear_kernel_cache()
+                _jax.clear_caches()
             
             # Write monitor variables
             TotalE.append(self.Total_E)

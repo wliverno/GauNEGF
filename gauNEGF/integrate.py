@@ -59,6 +59,58 @@ MEMORY_PER_MATRIX_FACTOR = 16         # Bytes per complex128 element
 BYTES_TO_GB = 1e9                     # Conversion factor
 
 # =============================================================================
+# PERSISTENT COMPILED-KERNEL CACHE (2026-07-07)
+# =============================================================================
+# The integrators previously rebuilt their vmap/scan closures on EVERY call,
+# defeating jax's function-identity cache: each SCF cycle re-traced and
+# re-compiled everything (leaking ~1.1k memory mappings/cycle until
+# vm.max_map_count killed the job at ~cycle 45 on big-basis systems).
+# Kernels close over the surfG object g, whose state can mutate (setF /
+# updateFermi), so persistence needs explicit invalidation: mutating methods
+# bump g._gauNEGF_version, and kernels are cached per
+# (kind, id(g), version). Within one version, jax's own jit cache then
+# handles shape specialization (the adaptive ladder's few lengths compile
+# once each and are reused for the rest of the run).
+_KERNEL_CACHE = {}
+
+def _cached_kernel(kind, g, builder):
+    """Return (and memoize) a compiled kernel for this g's current version."""
+    key = (kind, id(g), getattr(g, '_gauNEGF_version', 0))
+    fn = _KERNEL_CACHE.get(key)
+    if fn is None:
+        # evict kernels for stale versions of this same object
+        for k in [k for k in _KERNEL_CACHE
+                  if k[0] == kind and k[1] == id(g) and k[2] != key[2]]:
+            del _KERNEL_CACHE[k]
+        fn = builder()
+        _KERNEL_CACHE[key] = fn
+        parallel_logger.info(f"Kernel compiled+cached: {kind} v{key[2]}")
+    return fn
+
+def clear_kernel_cache():
+    """Drop all cached kernels (emergency valve; see config
+    CLEAR_JAX_CACHES_PER_CYCLE)."""
+    _KERNEL_CACHE.clear()
+
+def _current_dfermis(g):
+    """Per-contact fermi shifts as a jnp array (traced kernel argument).
+    Bethe-protocol objects expose gList[i].dFermi; others get a dummy
+    zero vector (their sigmaTot ignores the argument via the *_dfs-less
+    call path chosen at kernel build time)."""
+    gl = getattr(g, 'gList', None)
+    if gl is None:
+        return jnp.zeros(1)
+    return jnp.array([getattr(c, 'dFermi', 0.0) for c in gl], dtype=float)
+
+def _sigma_tot_call(g):
+    """Build-time choice: Bethe-protocol g takes traced dFermis; other
+    protocols keep their (E,)-only signature (version-bump invalidation
+    covers their mutations - see surfG1D.setF)."""
+    if getattr(g, 'gList', None) is not None:
+        return lambda E, dfs: g.sigmaTot(E, dFermis=dfs)
+    return lambda E, dfs: g.sigmaTot(E)
+
+# =============================================================================
 # MODULE-LEVEL JIT FUNCTIONS (clean, no nesting)
 # =============================================================================
 
@@ -99,13 +151,23 @@ def _GInt(weighted_func, F, S, g, Elist, weights, ind=None):
     num_energies = len(Elist)
     matrix_size_gb = (matrix_size * matrix_size * MEMORY_PER_MATRIX_FACTOR) / BYTES_TO_GB
 
+    # Cached jitted kernels: g is closed over (its version keys the cache);
+    # E/w/F/S are runtime arguments so jax's jit cache specializes per shape
+    # ONCE and reuses across every subsequent call/cycle.
+    kind = getattr(weighted_func, '_kernel_kind', weighted_func.__name__)
+
     if num_energies * matrix_size_gb < MAX_VMAP_MEMORY_GB:
         parallel_logger.info(f"GInt using vmap: {matrix_size}x{matrix_size} matrix, {num_energies} energies, {num_energies*matrix_size_gb:.2f}GB")
-        # Shard energy points across devices for parallel computation
+        def _build_vmap():
+            def kern(E, w, F_, S_, dfs):
+                res = jax.vmap(weighted_func, in_axes=(0, 0, None, None, None, None))(E, w, F_, S_, dfs, g)
+                return jnp.sum(res, axis=0)
+            return jax.jit(kern)
+        kernel = _cached_kernel(('vmap', kind), g, _build_vmap)
         Elist_sharded = shard_array(Elist_jax, axis=0)
         weights_sharded = shard_array(weights_jax, axis=0)
-        result = jax.vmap(weighted_func, in_axes=(0, 0, None, None, None))(Elist_sharded, weights_sharded, F_jax, S_jax, g)
-        integrated = jnp.sum(result, axis=0)
+        integrated = kernel(Elist_sharded, weights_sharded, F_jax, S_jax,
+                            _current_dfermis(g))
         if FORCE_SYNCHRONOUS:
             jax.block_until_ready(integrated)
         elapsed = time.time() - start_time
@@ -116,31 +178,42 @@ def _GInt(weighted_func, F, S, g, Elist, weights, ind=None):
         batch_size = max(1, int(MAX_VMAP_MEMORY_GB//matrix_size_gb))
         parallel_logger.info(f"GInt using batched mapping: {matrix_size}x{matrix_size} matrix, {num_energies} energies, Batch size: {batch_size} ({MAX_VMAP_MEMORY_GB:.2f}GB/batch)")
         start_time = time.time()
-        def scan_fn(carry, inputs):
-            E_batch, w_batch = inputs
-            # Shard batch across devices for parallel computation
-            E_batch_sharded = shard_array(E_batch, axis=0)
-            w_batch_sharded = shard_array(w_batch, axis=0)
-            result = jax.vmap(weighted_func, in_axes=(0, 0, None, None, None))(E_batch_sharded, w_batch_sharded, F_jax, S_jax, g)
-            carry += jnp.sum(result, axis=0)
-            count = jnp.ones(result.shape[0])
-            return carry, count
 
-        # Reshape into fixed-size batches
-        n_batches = len(Elist) // batch_size
-        Elist_batched = Elist_jax[:n_batches * batch_size].reshape(n_batches, batch_size)
-        weights_batched = weights_jax[:n_batches * batch_size].reshape(n_batches, batch_size)
-        Elist_tail = Elist_jax[n_batches*batch_size:]
-        weights_tail = weights_jax[n_batches*batch_size:]
 
-        # scan over batches (sequential), then vmap within each batch (parallel)
-        result = jnp.zeros_like(F_jax, dtype=complex)
-        result, count = jax.lax.scan(scan_fn, result, (Elist_batched, weights_batched))
-        total = np.sum(count)
-        if len(Elist_tail)>0:
-            result, count2 = scan_fn(result, (Elist_tail, weights_tail))
-            total += np.sum(count2)
-        assert total == num_energies, f"Integration only used {total} points, expected {num_energies} points"
+        # Pad to a whole number of batches (2026-07-07): a variable-length
+        # tail call compiles a fresh XLA executable per distinct remainder,
+        # feeding the vm.max_map_count leak. Padding with weight=0 points
+        # (E = last energy, a known-safe evaluation point) is exact and
+        # keeps ONE compiled shape family per batch geometry.
+        n_batches = (len(Elist) + batch_size - 1) // batch_size
+        n_pad = n_batches * batch_size - len(Elist)
+        if n_pad > 0:
+            Elist_jax = jnp.concatenate([Elist_jax, jnp.full(n_pad, Elist_jax[-1])])
+            weights_jax = jnp.concatenate([weights_jax, jnp.zeros(n_pad, dtype=weights_jax.dtype)])
+        Elist_batched = Elist_jax.reshape(n_batches, batch_size)
+        weights_batched = weights_jax.reshape(n_batches, batch_size)
+
+        # scan over batches (sequential), vmap within each batch; the whole
+        # scan is one cached jitted kernel (specializes per (n_batches,
+        # batch_size) shape once, then reused every call/cycle)
+        def _build_scan():
+            def kern(Eb, wb, F_, S_, dfs):
+                def scan_fn(carry, inputs):
+                    E_batch, w_batch = inputs
+                    res_b = jax.vmap(weighted_func,
+                                     in_axes=(0, 0, None, None, None, None))(
+                        E_batch, w_batch, F_, S_, dfs, g)
+                    carry += jnp.sum(res_b, axis=0)
+                    return carry, jnp.ones(res_b.shape[0])
+                init = jnp.zeros_like(F_, dtype=complex)
+                res, count = jax.lax.scan(scan_fn, init, (Eb, wb))
+                return res, jnp.sum(count)
+            return jax.jit(kern)
+        kernel = _cached_kernel(('scan', kind), g, _build_scan)
+        result, total = kernel(Elist_batched, weights_batched, F_jax, S_jax,
+                               _current_dfermis(g))
+        total = float(total)
+        assert total == num_energies + n_pad, f"Integration used {total} points, expected {num_energies}+{n_pad} padded"
         if FORCE_SYNCHRONOUS:
             jax.block_until_ready(result)
         elapsed = time.time() - start_time
@@ -171,11 +244,13 @@ def GrInt(F, S, g, Elist, weights):
     ndarray
         Integrated retarded Green's function (NxN)
     """
-    def weighted_func_Gr(E, weight, F_jax, S_jax, g):
-        sigTot = g.sigmaTot(E)
+    _stot = _sigma_tot_call(g)
+    def weighted_func_Gr(E, weight, F_jax, S_jax, dfs, g):
+        sigTot = _stot(E, dfs)
         eta = max(g.eta, ETA)
         Gr = _gr_matrix_ops(sigTot, E, F_jax, S_jax, eta)
         return weight * Gr
+    weighted_func_Gr._kernel_kind = 'gr'
     parallel_logger.info(f"Calculating G^R with GInt...")
     return _GInt(weighted_func_Gr, F, S, g, Elist, weights)
 
@@ -202,8 +277,9 @@ def _GIntCross(F, S, g, Elist, weights):
     num_energies = len(Elist)
     num_contacts = g.num_contacts
 
-    def weighted_combined(E, w, F_jax, S_jax, g):
-        sigTot = g.sigmaTot(E)
+    _stot = _sigma_tot_call(g)
+    def weighted_combined(E, w, F_jax, S_jax, dfs, g):
+        sigTot = _stot(E, dfs)
         eta = max(g.eta, ETA)
         Gr = _gr_matrix_ops(sigTot, E, F_jax, S_jax, eta)
         # Inline crossTermQTot with zero-init (vmappable, no None type change)
@@ -220,44 +296,51 @@ def _GIntCross(F, S, g, Elist, weights):
         parallel_logger.info(
             f"GIntCross using vmap: {matrix_size}x{matrix_size} matrix, "
             f"{num_energies} energies (single-pass)")
+        def _build_cross_vmap():
+            def kern(E, w, F_, S_, dfs):
+                mats, scls = jax.vmap(
+                    weighted_combined, in_axes=(0, 0, None, None, None, None)
+                )(E, w, F_, S_, dfs, g)
+                return jnp.sum(mats, axis=0), jnp.sum(scls)
+            return jax.jit(kern)
+        kernel = _cached_kernel(('cross_vmap', 'gr_cross'), g, _build_cross_vmap)
         Elist_sharded = shard_array(Elist_jax, axis=0)
         weights_sharded = shard_array(weights_jax, axis=0)
-        matrices, scalars = jax.vmap(
-            weighted_combined, in_axes=(0, 0, None, None, None)
-        )(Elist_sharded, weights_sharded, F_jax, S_jax, g)
-        matrix_sum = jnp.sum(matrices, axis=0)
-        scalar_sum = jnp.sum(scalars)
+        matrix_sum, scalar_sum = kernel(Elist_sharded, weights_sharded,
+                                        F_jax, S_jax, _current_dfermis(g))
     else:
         batch_size = max(1, int(MAX_VMAP_MEMORY_GB // matrix_size_gb))
         parallel_logger.info(
             f"GIntCross using batched: {matrix_size}x{matrix_size} matrix, "
             f"{num_energies} energies, batch={batch_size} (single-pass)")
 
-        def scan_fn(carry, inputs):
-            mat_acc, scl_acc = carry
-            E_batch, w_batch = inputs
-            E_batch_sharded = shard_array(E_batch, axis=0)
-            w_batch_sharded = shard_array(w_batch, axis=0)
-            mats, scls = jax.vmap(
-                weighted_combined, in_axes=(0, 0, None, None, None)
-            )(E_batch_sharded, w_batch_sharded, F_jax, S_jax, g)
-            mat_acc = mat_acc + jnp.sum(mats, axis=0)
-            scl_acc = scl_acc + jnp.sum(scls)
-            return (mat_acc, scl_acc), None
 
-        n_batches = num_energies // batch_size
-        Elist_batched = Elist_jax[:n_batches * batch_size].reshape(n_batches, batch_size)
-        weights_batched = weights_jax[:n_batches * batch_size].reshape(n_batches, batch_size)
-        Elist_tail = Elist_jax[n_batches * batch_size:]
-        weights_tail = weights_jax[n_batches * batch_size:]
+        # Pad to whole batches (see _GInt note - one compiled shape family)
+        n_batches = (num_energies + batch_size - 1) // batch_size
+        n_pad = n_batches * batch_size - num_energies
+        if n_pad > 0:
+            Elist_jax = jnp.concatenate([Elist_jax, jnp.full(n_pad, Elist_jax[-1])])
+            weights_jax = jnp.concatenate([weights_jax, jnp.zeros(n_pad, dtype=weights_jax.dtype)])
+        Elist_batched = Elist_jax.reshape(n_batches, batch_size)
+        weights_batched = weights_jax.reshape(n_batches, batch_size)
 
-        init = (jnp.zeros_like(F_jax, dtype=complex), 0.0 + 0j)
-        (matrix_sum, scalar_sum), _ = jax.lax.scan(
-            scan_fn, init, (Elist_batched, weights_batched))
-
-        if len(Elist_tail) > 0:
-            (matrix_sum, scalar_sum), _ = scan_fn(
-                (matrix_sum, scalar_sum), (Elist_tail, weights_tail))
+        def _build_cross_scan():
+            def kern(Eb, wb, F_, S_, dfs):
+                def scan_fn(carry, inputs):
+                    mat_acc, scl_acc = carry
+                    E_batch, w_batch = inputs
+                    mats, scls = jax.vmap(
+                        weighted_combined, in_axes=(0, 0, None, None, None, None)
+                    )(E_batch, w_batch, F_, S_, dfs, g)
+                    return (mat_acc + jnp.sum(mats, axis=0),
+                            scl_acc + jnp.sum(scls)), None
+                init = (jnp.zeros_like(F_, dtype=complex), 0.0 + 0j)
+                (m, sc), _ = jax.lax.scan(scan_fn, init, (Eb, wb))
+                return m, sc
+            return jax.jit(kern)
+        kernel = _cached_kernel(('cross_scan', 'gr_cross'), g, _build_cross_scan)
+        matrix_sum, scalar_sum = kernel(Elist_batched, weights_batched,
+                                        F_jax, S_jax, _current_dfermis(g))
 
     if FORCE_SYNCHRONOUS:
         jax.block_until_ready(matrix_sum)
@@ -315,12 +398,14 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
     ndarray
         Integrated lesser Green's function (NxN)
     """
-    def weighted_func_GrLess(E, weight, F_jax, S_jax, g):
+    _stot = _sigma_tot_call(g)
+    def weighted_func_GrLess(E, weight, F_jax, S_jax, dfs, g):
         useTot = (ind is None)
-        sigTot = g.sigmaTot(E)
+        sigTot = _stot(E, dfs)
         sigma = sigTot if useTot else g.sigma(E, ind)
         eta = max(g.eta, ETA)
         Gless = _gless_matrix_ops(sigma, sigTot, E, F_jax, S_jax, eta)
         return weight * Gless
+    weighted_func_GrLess._kernel_kind = f'gless_{ind}'
     parallel_logger.info(f"Calculating G< with GInt...")
     return _GInt(weighted_func_GrLess, F, S, g, Elist, weights, ind)
