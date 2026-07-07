@@ -23,6 +23,7 @@ N_KT = 10                           # Number of kT for integration limits
 ENERGY_MIN = -1e6                   # eV - lower bound for energy integration - MUST BE NEGATIVE
 EMIN_BUFFER = 20.0                  # eV - buffer below min eigenvalue for Damle/contour split point
 USE_INERTIA_EMIN = True         # Default: use find_lower_bound single-contour floor instead of calcEmin/calcTSW two-contour split (set False for the legacy path)
+CLEAR_JAX_CACHES_PER_CYCLE = False  # Emergency valve: ALSO purges integrate.py's persistent kernel cache. Default off since the kernel cache (2026-07-07) makes compiled integrators reusable across cycles - the map-leak root cause (retrace-per-call) is fixed at the source; flip True only if map growth reappears
 MAX_CYCLES = 100                    # Maximum iteration cycles
 MAX_GRID_POINTS = 500               # Maximum number of grid points
 

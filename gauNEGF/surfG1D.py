@@ -411,6 +411,9 @@ class surfG:
         mu2 : float or None, optional
             Chemical potential for second contact in eV (default: None)
         """
+        # Invalidate cached compiled integrator kernels (integrate.py):
+        # contact blocks derive from F, so any setF may change sigmaTot.
+        self._gauNEGF_version = getattr(self, '_gauNEGF_version', 0) + 1
         self.F = jnp.array(F)
         if self.tauFromFock:
             taus = self.tauInds
