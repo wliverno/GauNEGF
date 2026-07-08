@@ -477,12 +477,11 @@ class surfG:
         inds = self.indsList[i]
         stau = self.stauList[i]
         tau = self.tauList[i]
-        # Pre-shift E for the surface Green's function call only. The device-
-        # contact coupling tau (F_dc block) is not rigid-shifted, so t/bar_t
-        # use raw E. Matches surfGBAt convention.
+        # Rigid lead shift: couplings use the shifted energy too -- exact
+        # only if every S-weighted block shifts together (cf. surfGB.updateH).
         E_shifted = E - self.dFermiList[i]
-        t = (-tau) if stau is None else (E*stau - tau)
-        bar_t = (-tau.conj().T) if stau is None else (E*stau.conj().T - tau.conj().T)
+        t = (-tau) if stau is None else (E_shifted*stau - tau)
+        bar_t = (-tau.conj().T) if stau is None else (E_shifted*stau.conj().T - tau.conj().T)
         n = len(self.aList[i])
         C_mid = self.CList[i][:n, :n]
         t_reg = t @ C_mid
@@ -515,11 +514,13 @@ class surfG:
         tau = self.tauList[i]
         n = len(self.aList[i])
         E_shifted = E - self.dFermiList[i]
-        t = E * stau - tau
+        # EOM couplings carry the lead shift (see sigma()); bare stau
+        # factors in Q_fwd/Q_rev are overlap blocks and do not shift.
+        t = E_shifted * stau - tau
         C_mid = self.CList[i][:n, :n]
         t_reg = t @ C_mid
         g_surf = self.g(E_shifted, i, conv)
-        bar_t = E * stau.conj().T - tau.conj().T
+        bar_t = E_shifted * stau.conj().T - tau.conj().T
         bar_t_reg = C_mid.conj().T @ bar_t
         Q_fwd = t_reg @ g_surf @ stau.conj().T
         Q_rev = stau @ g_surf @ bar_t_reg

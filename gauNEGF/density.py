@@ -491,6 +491,12 @@ def bisectFermi(V, Vc, D, Gam, Nexp, conv=FERMI_CALCULATION_TOL, Eminf=ENERGY_MI
     """
     Emin = min(D.real)
     Emax = max(D.real)
+    # Seed fermi so the function is total: if the entry state already
+    # satisfies |dN| <= conv the loop never runs (seen on resume of an
+    # already-converged predict-path state, job 36915480) and the return
+    # would hit an unbound local. The seed equals what iteration 1 would
+    # have tested, so search semantics are unchanged.
+    fermi = (Emin + Emax) / 2
     dN = Nexp
     Niter = 0
     while abs(dN) > conv and Niter<1000:
@@ -1555,8 +1561,11 @@ def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INT
             idx = max(min(int(ne), len(orbs) - 1), 1)
             Ef = (orbs[idx - 1] + orbs[idx]) / 2
             print(f"Single-contour floor Eminf = {Eminf:.2f} eV")
+            # trackFermi=False: contact determination holds the leads
+            # fixed; only device searches (known fermi0) track trial mu.
             return calcFermi(g, ne, Eminf, Ef, lBound=lBound, uBound=uBound,
-                             tol=tol, conv=conv, maxcycles=maxcycles, T=T)
+                             tol=tol, conv=conv, maxcycles=maxcycles, T=T,
+                             trackFermi=False)
         print("find_lower_bound returned None; falling back to legacy two-contour path")
 
     # Calculate Emin from DOS if not provided
@@ -1584,11 +1593,13 @@ def getFermiContact(g, ne, Emin=None, lBound=None, uBound=None, tol=ADAPTIVE_INT
     Ef = (orbs[idx - 1] + orbs[idx]) / 2
 
     return calcFermi(g, ne, Emin, Ef, lBound=lBound, uBound=uBound,
-                    tol=tol, conv=conv, maxcycles=maxcycles, T=T)
+                    tol=tol, conv=conv, maxcycles=maxcycles, T=T,
+                    trackFermi=False)
 
 # Calculate the fermi energy of the surface Green's Function object
 def calcFermi(g, ne, Emin, Ef, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATION_TOL,
-              conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE):
+              conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE,
+              trackFermi=True):
     """
     Calculate Fermi energy using bisection method with adaptive integration.
 
@@ -1629,7 +1640,8 @@ def calcFermi(g, ne, Emin, Ef, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATIO
     dE = tol
 
     # Initial calculation
-    g.setF(g.F, E, E)
+    if trackFermi:
+        g.setF(g.F, E, E)
     P, _delta_N = pMu(E)
     Ncurr = np.trace(P@g.S).real + _delta_N
 
@@ -1653,7 +1665,8 @@ def calcFermi(g, ne, Emin, Ef, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATIO
         dE = max(2*abs(Ncurr-ne)/dos, dE)
         counter += 1
 
-        g.setF(g.F, E, E)
+        if trackFermi:
+            g.setF(g.F, E, E)
         P, _delta_N = pMu(E)
         Ncurr = np.trace(P@g.S).real + _delta_N
 
@@ -1671,7 +1684,8 @@ def calcFermi(g, ne, Emin, Ef, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATIO
             print(f"DEBUG: Ef={Ef:.2f}, dN={dN:.2E}, dE={dE:.2E}")
         counter += 1
         if abs(dN) > conv:
-            g.setF(g.F, Ef, Ef)
+            if trackFermi:
+                g.setF(g.F, Ef, Ef)
             P, _delta_N = pMu(Ef)
             Ncurr = np.trace(P@g.S).real + _delta_N
 
