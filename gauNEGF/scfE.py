@@ -581,15 +581,17 @@ class NEGFE(NEGF):
                                                 self.Eminf, self.Emin, self.N2, T=0)
             nLower = np.trace(self.S @ P).real + _delta_N_lower
 
-        # Helper function for densityComplex()
+        # Helper function for densityComplex(). Returns (P, delta_N): the
+        # cross term is part of the electron count and callers that audit
+        # the count must include it.
         def compContourP2(mu):
                 if self.N1 is not None:
-                    P, _ = densityComplexN(self.F*har_to_eV, self.S, self.g, self.Emin,
+                    P, dN_ = densityComplexN(self.F*har_to_eV, self.S, self.g, self.Emin,
                                                     mu, N=self.N1, T=self.T)
                 else:
-                    P, _ = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin,
+                    P, dN_ = densityComplex(self.F*har_to_eV, self.S, self.g, self.Emin,
                                                     mu, tol=self.tol, T=self.T)
-                return P
+                return P, dN_
 
         # Fermi Energy Update using local self-energy approximation
         if self.updFermi:
@@ -598,7 +600,25 @@ class NEGFE(NEGF):
             if self.spin =='r':
                 ne /= 2
             conv= min(self.convLevel, FERMI_CALCULATION_TOL)
-            if self.fermiMethod.lower() =='predict':
+            # Freeze guard: skip the search when the previous cycle's
+            # CROSS-TERM-INCLUSIVE mismatch (tr(P@S) + delta_N vs target,
+            # the same metric the search methods converge -- never the
+            # bare trace) is already below conv. A search with nothing to
+            # solve can walk along its dN ~ 0 plateau; the fixed-fermi
+            # density path is used instead, its own count is re-audited
+            # below, and the search re-engages when the count moves.
+            method = self.fermiMethod.lower()
+            if getattr(self, 'dN_inclusive', None) is not None \
+                    and self.dN_inclusive < conv:
+                method = 'frozen'
+                print(f'Fermi frozen at {self.fermi:.2f} eV '
+                      f'(|dN| = {self.dN_inclusive:.2E} < {conv:.1E})')
+                print('Calculating equilibrium density matrix:')
+                P2f, dNf = compContourP2(self.mu1)
+                P += P2f
+                self.dN_inclusive = abs(
+                    ne - nLower - np.trace(P2f @ self.S).real - dNf)
+            if method =='predict':
                 # Generate inputs for energy-independent density calculation
                 X = jnp.array(self.X)
                 sig1, sig2 = self.getSigma(self.fermi)
@@ -626,7 +646,10 @@ class NEGFE(NEGF):
                 else:
                     print('Warning: Local sigma approximation not valid, Fermi energy not updated...')
                 print('Calculating equilibrium density matrix:')
-                P += compContourP2(self.mu1)
+                P2p, dNp = compContourP2(self.mu1)
+                P += P2p
+                self.dN_inclusive = abs(
+                    ne - nLower - np.trace(P2p @ self.S).real - dNp)
 
                 # Fix number of electrons
                 # TODO: nActual omits cross-term delta_N; acceptable since predict
@@ -638,7 +661,7 @@ class NEGFE(NEGF):
             methodFail = False
             uBound = None
             lBound = None
-            if self.fermiMethod.lower() =='poly':
+            if method =='poly':
                 print('POLYNOMIAL REGRESSION METHOD:')
                 self.fermi, dE, P2, dN, uBound, lBound = calcFermiPolyFit(self.g, ne-nLower, self.Emin, fermi_old, 
                                             self.N1, tol=self.tol, conv=conv, T=self.T)
@@ -649,9 +672,10 @@ class NEGFE(NEGF):
                     fermi_old = self.fermi + 0.0
                 else:
                     print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
-                    P = P+P2 if self.mu1 == self.mu2 else compContourP2(self.mu1)
+                    self.dN_inclusive = abs(dN)
+                    P = P+P2 if self.mu1 == self.mu2 else compContourP2(self.mu1)[0]
             
-            if self.fermiMethod.lower() =='muller':
+            if method =='muller':
                 print('MULLER METHOD:')
                 self.fermi, dE, P2, dN, uBound, lBound = calcFermiMuller(self.g, ne-nLower, self.Emin, fermi_old, 
                                             self.N1, tol=self.tol, conv=conv, T=self.T)
@@ -662,9 +686,10 @@ class NEGFE(NEGF):
                     fermi_old = self.fermi + 0.0
                 else:
                     print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
-                    P = P+P2 if self.mu1 == self.mu2 else compContourP2(self.mu1)
+                    self.dN_inclusive = abs(dN)
+                    P = P+P2 if self.mu1 == self.mu2 else compContourP2(self.mu1)[0]
 
-            if self.fermiMethod.lower() =='secant':
+            if method =='secant':
                 print('SECANT METHOD:')
                 self.fermi, dE, P2, dN = calcFermiSecant(self.g, ne-nLower, self.Emin, fermi_old, 
                                             self.N1, tol=self.tol, conv=conv, T=self.T)
@@ -675,17 +700,19 @@ class NEGFE(NEGF):
                     fermi_old = self.fermi + 0.0
                 else:
                     print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
-                    P = P+P2 if self.mu1 == self.mu2 else compContourP2(self.mu1)
+                    self.dN_inclusive = abs(dN)
+                    P = P+P2 if self.mu1 == self.mu2 else compContourP2(self.mu1)[0]
 
-            if self.fermiMethod.lower() =='bisect' or methodFail:
+            if method =='bisect' or methodFail:
                 print('BISECT METHOD:')
                 self.fermi, dE, P2 = calcFermiBisect(self.g, ne-nLower, self.Emin, fermi_old, 
                                             self.N1, tol=self.tol, conv=conv, T=self.T, uBound=uBound, lBound=lBound)  
                 print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
                 print('Setting equilibrium density matrix...') 
-                P = P+P2 if self.mu1 == self.mu2 else compContourP2(self.mu1)
+                self.dN_inclusive = None    # bisect reports no count mismatch
+                P = P+P2 if self.mu1 == self.mu2 else compContourP2(self.mu1)[0]
             
-            if self.fermiMethod.lower() not in ['muller', 'secant', 'bisect', 'predict', 'poly']:
+            if method not in ['muller', 'secant', 'bisect', 'predict', 'poly', 'frozen']:
                 raise Exception('Error: invalid Fermi search method, needs to be \'muller\',' + \
                                                  '\'secant\', \'bisect\' or \'predict\' or \'default\'')
             # Shift Emin, mu1, and mu2 and update contact self-energies
@@ -693,7 +720,7 @@ class NEGFE(NEGF):
             self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
         else:
             print('Calculating equilibrium density matrix:')
-            P+= compContourP2(self.mu1)
+            P += compContourP2(self.mu1)[0]
          
         # If bias applied, need to integrate G<
         if self.mu1 != self.mu2:

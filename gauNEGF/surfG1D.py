@@ -255,6 +255,7 @@ class surfG:
         self.aSList0 = [jnp.array(s) for s in self.aSList]
         self.bSList0 = [jnp.array(s) for s in self.bSList]
         self._regularizeContacts()
+        self._checkBlochOverlap()
         # Final snapshot: intrinsic contact reference state. g/sigma read these
         # so the rigid-band shift is applied via E only -- aList itself never
         # mutates post-init in the contactFromFock=False branch.
@@ -262,6 +263,54 @@ class surfG:
         self.bList0  = [jnp.array(b) for b in self.bList]
         self.aSList0 = [jnp.array(s) for s in self.aSList]
         self.bSList0 = [jnp.array(s) for s in self.bSList]
+
+
+    def _checkBlochOverlap(self, nk=73):
+        """Warn when a contact's infinite-chain Bloch overlap is non-PD.
+
+        S(k) = Sa + Sb e^{ik} + Sb^H e^{-ik} must be positive definite for
+        all k for the semi-infinite lead to be a passive physical system.
+        Violation voids the PSD guarantee on Gamma (transmission can exceed
+        the channel count without bound) even when the surface-GF solve
+        converges exactly. A minimal contact basis is necessary but not
+        sufficient: truncating the model at too small a cell can amputate
+        long-range overlap and drive S(k) indefinite even when the finite
+        supercell overlap block is PD, so the cell must span the basis's
+        overlap range. For REAL overlap blocks S(-k) = S(k)^T shares the
+        spectrum, so k in [0, pi] covers the BZ; complex blocks scan the
+        full [-pi, pi). Runs once per object: the overlap blocks derive
+        from S, which never mutates post-init, so re-checking on the
+        per-cycle setF path would be redundant.
+        """
+        if getattr(self, '_blochChecked', False):
+            return
+        self._blochChecked = True
+        import numpy as _np
+        for i in range(len(self.indsList)):
+            Sb = self.bSList[i]
+            if Sb is None or not bool(_np.any(_np.asarray(Sb))):
+                continue                      # orthogonal coupling: S(k) = Sa
+            Sa = _np.asarray(self.aSList[i])
+            Sb = _np.asarray(Sb)
+            if _np.max(_np.abs(_np.imag(Sa))) > 0 or \
+                    _np.max(_np.abs(_np.imag(Sb))) > 0:
+                kgrid = _np.linspace(-_np.pi, _np.pi, 2 * nk, endpoint=False)
+            else:
+                kgrid = _np.linspace(0.0, _np.pi, nk)
+            mn, kn = _np.inf, 0.0
+            for k in kgrid:
+                w = _np.linalg.eigvalsh(
+                    Sa + Sb*_np.exp(1j*k) + Sb.conj().T*_np.exp(-1j*k)).min()
+                if w < mn:
+                    mn, kn = w, k
+            if mn <= 0:
+                print(f'WARNING: contact {i} Bloch overlap S(k) is non-'
+                      f'positive-definite (min eig {mn:.3e} at '
+                      f'k={kn/_np.pi:.2f}pi). The semi-infinite lead is not '
+                      f'a passive system: Gamma may be indefinite and '
+                      f'transmission unbounded at energies coupling to the '
+                      f'negative-norm sector. Results in affected energy '
+                      f'windows are not physical.')
 
     def _regularizeContacts(self):
         """Ensure the infinite chain overlap is PSD via congruent eigenvalue clipping.

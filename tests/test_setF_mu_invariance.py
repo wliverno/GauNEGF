@@ -1,29 +1,30 @@
 """Test how surfG.setF(F, muL, muR) mu changes propagate to cached Sigma_0 / Y_eff.
 
-Background: surfG1D applies a rigid-band Fermi shift ONLY to the surface
-Green's function, NOT to the device-contact coupling t. See surfG1D.sigma()
-lines 487-497:
+Background (UPDATED 2026-07-08, shift-algebra regression fix): surfG1D
+applies the rigid-band Fermi shift to the surface Green's function AND to
+the E-dependent coupling -- the exact shifted-lead identity. surfG1D.sigma():
 
     E_shifted = E - dFermiList[i]
-    t = (-tau) if stau is None else (E*stau - tau)   # raw E, NOT shifted
-    sig = t_reg @ g_surf(E_shifted) @ bar_t_reg       # only g_surf is shifted
+    t = (-tau) if stau is None else (E_shifted*stau - tau)   # shifted
+    sig = t_reg @ g_surf(E_shifted) @ bar_t_reg              # shifted
 
-For non-orthogonal device-contact coupling (stau != None) and asymptotic
-g_surf(E) ~ G_1/E + O(1/E^2), Taylor expand:
+so sigma_new(E) = sigma_old(E - dF) exactly (every S-weighted block of the
+lead shifts together, matching surfGB.updateH). For the asymptotically
+E-linear tail sigma(E) ~ Sigma_0 + X*E this gives:
 
-    g_surf(E - dF) = G_1/E + dF*G_1/E^2 + O(1/E^3)
-    delta sig(E)   = (E*stau - tau) @ (+dF*G_1/E^2) @ (E*stau.T - tau.T)
-                   = +dF * stau @ G_1 @ stau.T + O(1/E)
-
-The leading shift is a CONSTANT in E, so:
+    sigma_new(E) ~ Sigma_0 + X*(E - dF) = (Sigma_0 - X*dF) + X*E
 
     X_asymp invariant under mu shift.
     S_eff   invariant (only depends on X_asymp).
     Y_eff   invariant.
-    Sigma_0 shifts by +sum_i X_i * dFermi_i  (POSITIVE sign).
+    Sigma_0 shifts by -sum_i X_i * dFermi_i  (NEGATIVE sign).
 
 If both contacts shift by the same dFermi:
-    delta Sigma_0 = +X_asymp_total * dFermi
+    delta Sigma_0 = -X_asymp_total * dFermi
+
+(The pre-fix code shifted only g_surf, leaving the coupling at raw E; that
+inconsistent algebra produced a +X*dF shift, which these tests originally
+encoded. The sign flip here is the regression test FOR the fix.)
 
 This test runs setF -> _initAsymptoticSigma -> shift mu via setF ->
 _initAsymptoticSigma again, and checks the predicted invariance/shift.
@@ -134,11 +135,11 @@ def test_y_eff_invariant_under_setF_mu_change():
 
 
 def test_sigma_0_shifts_by_predicted_amount():
-    """Sigma_0 must shift by +X_asymp_total * dFermi when both mu's shift equally.
+    """Sigma_0 must shift by -X_asymp_total * dFermi when both mu's shift equally.
 
-    Derivation (see module docstring): only g_surf is rigid-shifted in surfG;
-    Taylor expansion of g_surf(E - dF) about E gives delta Sigma_0 = +X * dF
-    at leading order.
+    Derivation (see module docstring): the exact shifted-lead algebra gives
+    sigma_new(E) = sigma_old(E - dF), so the E-linear tail's intercept moves
+    by -X * dF at leading order.
 
     If THIS test passes, it confirms cached self.Sigma_0 in NEGFE goes stale
     after any voltage change. The fix is to re-call self._initAsymptoticSigma()
@@ -155,7 +156,7 @@ def test_sigma_0_shifts_by_predicted_amount():
     Sigma_0_after = obj.Sigma_0.copy()
 
     actual_shift = Sigma_0_after - Sigma_0_before
-    predicted_shift = +X_asymp * dFermi
+    predicted_shift = -X_asymp * dFermi
     rel_err = (np.linalg.norm(actual_shift - predicted_shift) /
                max(np.linalg.norm(predicted_shift), 1e-30))
 
@@ -176,9 +177,9 @@ def test_sigma_0_shifts_by_predicted_amount():
 def test_asymmetric_bias_sigma_0_shift():
     """Per-contact rigid shifts add correctly under asymmetric bias dFermi_L != dFermi_R.
 
-    Total delta Sigma_0 is element-wise:
-        delta Sigma_0[L block] = X_L * dFermi_L
-        delta Sigma_0[R block] = X_R * dFermi_R
+    Total delta Sigma_0 is element-wise (exact shifted-lead algebra):
+        delta Sigma_0[L block] = -X_L * dFermi_L
+        delta Sigma_0[R block] = -X_R * dFermi_R
         delta Sigma_0 elsewhere = 0
 
     For a contact that only touches device orbitals in indsList[i], the
@@ -202,8 +203,8 @@ def test_asymmetric_bias_sigma_0_shift():
     lInd = np.asarray(obj.g.indsList[0])
     rInd = np.asarray(obj.g.indsList[-1])
     predicted = np.zeros_like(X_total)
-    predicted[np.ix_(lInd, lInd)] = X_total[np.ix_(lInd, lInd)] * dFermi_L
-    predicted[np.ix_(rInd, rInd)] = X_total[np.ix_(rInd, rInd)] * dFermi_R
+    predicted[np.ix_(lInd, lInd)] = -X_total[np.ix_(lInd, lInd)] * dFermi_L
+    predicted[np.ix_(rInd, rInd)] = -X_total[np.ix_(rInd, rInd)] * dFermi_R
     rel_err = (np.linalg.norm(actual - predicted) /
                max(np.linalg.norm(predicted), 1e-30))
     print(f'  ||actual||    = {np.linalg.norm(actual):.3e}')
@@ -223,7 +224,7 @@ def test_setVoltage_refreshes_cached_sigma_0():
 
     Drives the simple shift via qV=0, fermi=0.5 (uniform shift, both contacts
     move to mu=0.5). For our symmetric fixture this gives the largest signal:
-    delta Sigma_0_total = X_total * 0.5.
+    delta Sigma_0_total = -X_total * 0.5.
     """
     from unittest.mock import MagicMock
 
@@ -250,7 +251,7 @@ def test_setVoltage_refreshes_cached_sigma_0():
     obj.setVoltage(qV=0.0, fermi=0.5)
 
     actual_shift = obj.Sigma_0 - Sigma_0_initial
-    predicted_shift = +X_asymp * 0.5
+    predicted_shift = -X_asymp * 0.5
     rel_err = (np.linalg.norm(actual_shift - predicted_shift) /
                max(np.linalg.norm(predicted_shift), 1e-30))
     print(f'  ||actual shift||    = {np.linalg.norm(actual_shift):.3e}')
