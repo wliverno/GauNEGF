@@ -194,10 +194,10 @@ class NEGFE(NEGF):
     def _symmetrize_F(self):
         lInd = self.lInd
         rInd = self.rInd
-        if getattr(self.g, 'contactFromFock', False):
-            self.F[np.ix_(lInd, lInd)] = np.asarray(self.g.aList[0])/har_to_eV
-            self.F[np.ix_(rInd, rInd)] = np.asarray(self.g.aList[-1])/har_to_eV
-        if getattr(self, '_symmetrize_contacts', True):
+        # No aList->F writeback here: g.setF derives aList FROM this F, so
+        # the average below must see the fresh blocks. Fallback False: only
+        # setContact1D sets the flag; Bethe/sigma contacts never average.
+        if getattr(self, '_symmetrize_contacts', False):
             avg = (self.F[np.ix_(lInd, lInd)] + self.F[np.ix_(rInd, rInd)]) / 2
             self.F[np.ix_(lInd, lInd)] = avg
             self.F[np.ix_(rInd, rInd)] = avg
