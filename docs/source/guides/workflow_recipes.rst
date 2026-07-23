@@ -76,8 +76,10 @@ Code Example
         # Resume from checkpoint if it exists
         if os.path.exists(matName):
             A = io.loadmat(matName)
-            negf.setDen(A['den'])
+            # ORDER MATTERS: setVoltage before setDen -- setDen triggers
+            # PToFock, which needs mu1/mu2 that only setVoltage defines.
             negf.setVoltage(V, A['fermi'][0][0])
+            negf.setDen(A['den'])
         else:
             negf.setVoltage(V, negf.fermi)
 
@@ -114,7 +116,8 @@ Key Points
 * **Resume logic**: Before SCF, check if the MAT file exists using ``os.path.exists()``.
   If so, load the prior density and Fermi level to hot-start.
 
-* **Current returns**: ``calculate_current()`` returns a tuple ``(I, Is)``:
+* **Current returns**: ``calculate_current()`` returns a tuple ``(I, Is)``
+  for spin='u'/'ro'/'g' (a bare scalar float only for spin='r'):
 
   - ``I`` is the total current (scalar).
   - ``Is`` is spin-resolved current with shape (4,) for spin='g': ``[Iuu, Iud, Idu, Idd]``.
@@ -255,7 +258,7 @@ Code Example
 Key Points
 ^^^^^^^^^^
 
-* **checkpoint_file**: Path to an HDF5-like (.npz) file. The file is created on first call
+* **checkpoint_file**: Path to a NumPy ``.npz`` archive. The file is created on first call
   and reused on resume.
 
 * **checkpoint_interval**: How many energy points to compute before saving.
@@ -307,10 +310,15 @@ Code Example
                           [36, 37, 38, 39, 40, 41]], 'AuSOC')
 
     # Hot-start with prior density and Fermi
-    negf.setDen(prior_density)  # Load density matrix
+    # ORDER MATTERS: setVoltage before setDen -- setDen triggers PToFock,
+    # which needs mu1/mu2 that only setVoltage defines (fresh NEGFE object
+    # here, so there is no earlier setVoltage call to rely on).
     negf.setVoltage(0.0, prior_fermi)  # Set initial Fermi level
-    # Add `negf.setVoltage(0.0)` here if you want to re-enable Fermi search
-    # during the warm-started SCF (see contacts_bethe.rst warm-start pattern).
+    negf.setDen(prior_density)  # Load density matrix
+    # NOTE: a bare setVoltage(0.0) here would NOT re-enable the Fermi
+    # search -- once fermi is pinned, self.fermi is no longer None, so
+    # updFermi stays False regardless of what you pass next. Re-enabling
+    # requires a fresh NEGFE object, or negf.updFermi = True set manually.
 
     # SCF from warm-start (converges faster)
     negf.SCF(1e-3, 0.02, 200, checkpoint=False)
@@ -319,7 +327,10 @@ Key Points
 ^^^^^^^^^^
 
 * **setDen()**: Load a prior density matrix using :meth:`gauNEGF.scf.NEGF.setDen`.
-  This initializes the density in the SCF loop.
+  This initializes the density in the SCF loop. **Call setVoltage() first**
+  -- setDen() triggers PToFock(), which needs the ``mu1``/``mu2`` chemical
+  potentials that only setVoltage() defines; calling setDen() first on a
+  fresh object raises a RuntimeError.
 
 * **setVoltage() second argument**: The second positional argument to
   :meth:`gauNEGF.scf.NEGF.setVoltage` is the Fermi level (or chemical potential).

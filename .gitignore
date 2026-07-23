@@ -26,3 +26,7 @@ docs/search.html
 
 # Git worktrees
 .worktrees/
+
+# paper campaign lives in its own nested repo (paper/.git); never
+# tracked here
+paper/

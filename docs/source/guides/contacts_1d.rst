@@ -96,7 +96,7 @@ Extract Matrices from the Large Cluster
     # Run Gaussian on the large cluster
     bar = qcb.BinAr(debug=False, lenint=8, inputfile="CNT33_11_minbasis.gjf")
     bar.update(model='b3lyp', basis='STO-3G', toutput='out.log',
-               chkname="CNT33_11_minbasis.chk", dofock=True)
+               chkname="CNT33_11_minbasis.chk", dofock='scf')
 
     S_full = np.array(bar.matlist['OVERLAP'].expand())
     P_full = np.array(bar.matlist['ALPHA SCF DENSITY MATRIX'].expand())
@@ -121,10 +121,12 @@ Choose the most central cells. For a 10-cell system extracting 5 cells:
 b) Count electrons
 ~~~~~~~~~~~~~~~~~~~
 
-For 1D contacts the per-unit-cell electron count is needed by
-:meth:`gauNEGF.scfE.NEGFE.setContact1D` (the ``neList`` argument). Use
-the physical electron count of the unit cell -- it is exact and
-basis-set independent:
+This step is only needed if you plan to pass explicit ``alphas`` to
+:meth:`gauNEGF.scfE.NEGFE.setContact1D` (not used by Patterns A or C
+below). ``neList``/``muList`` take effect only together with explicit
+``alphas`` -- they are silently ignored on the contactList-only
+auto-extraction path. When you do need it, use the physical electron
+count of the unit cell -- it is exact and basis-set independent:
 
 .. code-block:: python
 
@@ -221,8 +223,8 @@ Pattern A: Auto-Extract from Device Fock (recommended)
 
 Use this pattern when you have a device cluster extracted from a larger
 DFT calculation. ``setContact1D`` reads the contact-cell and inter-cell
-coupling matrices directly from the device Fock and overlap, and the contact
-electron count from the device density matrix. No explicit matrices required.
+coupling matrices directly from the device Fock and overlap. No explicit
+matrices required.
 
 .. code-block:: python
 
@@ -246,7 +248,9 @@ electron count from the device density matrix. No explicit matrices required.
 * **symmetrize_contacts**: Set ``True`` when both contacts are the same
   material (e.g., periodic nanotube, nanowire). This averages the on-site
   Fock blocks during SCF to prevent artificial symmetry breaking from
-  opposite directional coupling signs in sigma_L vs sigma_R.
+  opposite directional coupling signs in sigma_L vs sigma_R. Pattern A
+  auto-detects this as ``True`` by default (no explicit ``tauList`` is
+  given here), so passing it explicitly is for clarity, not required.
 * **eta**: Broadening (eV). Larger values (1e-3) speed up surface Green's
   function convergence but smear sharp features. See
   :doc:`config_tuning` for ETA tuning.
@@ -287,8 +291,8 @@ useful when the device onsite approximation is adequate.
    contacts), pass the explicit matrices listed in
    :meth:`gauNEGF.scfE.NEGFE.setContact1D`.
 
-Pattern C: Auto-Extraction from DFT (contactList + neList only)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Pattern C: Auto-Extraction from DFT (contactList only)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Use this pattern when you do NOT have pre-extracted bulk matrices and want
 gauNEGF to extract contact parameters directly from Gaussian. The coupling
@@ -299,10 +303,9 @@ matrices are auto-computed from the DFT geometry stored in the device ``.gjf``.
     # adapted from CNanowire.py (minimal specification)
     negf = NEGFE(fn='C2', func='b3lyp', basis='lanl2dz', fullSCF=False)
 
-    # Only atoms and neList; matrices auto-extracted from Gaussian
+    # Only atoms; matrices auto-extracted from Gaussian
     inds = negf.setContact1D(
         [[1], [2]],                      # contactList: atoms per contact
-        neList=[ne_per_unit_cell, ne_per_unit_cell],
         eta=1e-4
     )
 
@@ -310,6 +313,18 @@ matrices are auto-computed from the DFT geometry stored in the device ``.gjf``.
     negf.setVoltage(0.0, fermiMethod='poly')
     negf.SCF(1e-2, 0.02, 100)
     negf.SCF(1e-4, 0.02, 1000, pulay=False)
+
+.. warning::
+
+   **Do not pass** ``neList`` **with auto-extraction (Pattern C).**
+   ``neList``/``muList`` only take effect together with explicit
+   ``alphas`` (see :meth:`gauNEGF.scfE.NEGFE.setContact1D`). On this
+   contactList-only path, any ``neList`` you pass is silently ignored --
+   it is not an error, it just has no effect. The Fermi search anchor is
+   the system electron count on the device (``bar.ne``), not a
+   per-contact target. An assertion that catches a ``neList`` passed
+   without ``alphas`` is planned (package queue item); until then the
+   argument is accepted but does nothing.
 
 .. warning::
 
@@ -332,8 +347,8 @@ Run the SCF
 
 .. code-block:: python
 
-    # Set voltage and initial Fermi level from contact calculation
-    negf.setVoltage(0.0, negf.g.fermiList[0])
+    # Let the Fermi search run (default fermiMethod='muller')
+    negf.setVoltage(0.0)
 
     # Run SCF: tolerance, damping, max iterations
     negf.SCF(1e-3, 0.02, 1000)
@@ -341,11 +356,23 @@ Run the SCF
     # Save results
     negf.saveMAT('output.mat')
 
+.. note::
+
+   ``negf.g.fermiList`` exists only on the explicit-``alphas`` branch of
+   ``setContact1D`` (populated inside ``setF``). Patterns A/B/C above all
+   leave ``alphas=None``, so ``negf.g.fermiList`` is not available and
+   ``negf.g.fermiList[0]`` would raise ``AttributeError`` -- and even where
+   it exists, passing it as an explicit fermi here would re-pin the fermi
+   the same way the Pattern C warning above cautions against. Use
+   ``negf.setVoltage(0.0)`` (as shown) to let the search run.
+
 **SCF parameters**
 
 * **tolerance** (1e-3): convergence criterion on the density matrix change
 * **damping** (0.02): linear mixing parameter -- smaller is more stable but
-  slower. Range: 0.01 to 0.1.
+  slower. Range: 0.02 to 0.05 (campaign-measured production default; wider
+  excursions, e.g. down toward 0.005 or up to 0.1, are for diagnosing a
+  specific problem, not routine use -- see :doc:`config_tuning`).
 * **max iterations** (1000): safety cap
 
 -------------------------------------------
@@ -398,7 +425,9 @@ Common Pitfalls
    Either omit it (default ``fermiMethod='muller'`` runs) or pass only the
    ``fermiMethod=`` keyword.
 
-8. **Forgetting symmetrize_contacts=True**: For parity-symmetric systems
-   (both contacts same material), set ``symmetrize_contacts=True`` in
-   ``setContact1D``. This prevents numerical artifacts from breaking
-   symmetry during SCF iteration.
+8. **Pattern B defaults to symmetrize_contacts=False**: the flag
+   auto-detects ``True`` only when ``tauList`` is not passed (Patterns A
+   and C get it automatically). If you pass an explicit ``tauList``
+   (Pattern B) for two same-material leads, set
+   ``symmetrize_contacts=True`` explicitly -- otherwise the on-site Fock
+   blocks are not averaged and parity symmetry can break during SCF.
