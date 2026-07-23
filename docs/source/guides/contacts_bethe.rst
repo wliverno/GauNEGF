@@ -61,14 +61,23 @@ Parameters
   Selects the Slater-Koster parameter file:
 
   * ``'Au'`` -- Gold FCC [111] surface without spin-orbit coupling
+  * ``'Au2'`` -- Orthogonalized Au FCC [111] lattice (all overlap
+    Slater-Koster keys are zero). Trades some physical accuracy for
+    faster, more stable SCF convergence at extended contacts (many-atom
+    leads); see the crossover guidance in the skill for when to prefer
+    this over ``'Au'``.
   * ``'AuSOC'`` -- Gold FCC [111] surface with spin-orbit coupling enabled
 
   Wrong choice leads to incorrect orbital couplings and transport results.
 
 **eta** (float, default 1e-5 eV)
   Broadening parameter for the surface Green's function. Controls the
-  numerical stability of the contour integration. Use 1e-6 eV for high
-  precision or when testing convergence; 1e-5 eV is standard for production.
+  numerical stability of the contour integration. 1e-5 eV is the
+  recommended value for production Bethe contacts. Going to 1e-6 eV can
+  sharpen spectral resolution near band edges but may cause numerical
+  issues if the Green's function is poorly conditioned -- prefer 1e-5 eV
+  unless you have a specific reason to go lower, and check convergence
+  carefully if you do.
 
 **T** (float, default 0 K)
   Temperature in Kelvin. Set to 300 for room-temperature transport;
@@ -175,9 +184,12 @@ Warm-Start for Refinement
    A = io.loadmat('NEGFSystem_loose.mat')
    negf.setDen(A['den'])
    negf.setVoltage(0.0, A['fermi'][0][0])
-   # Run setVoltage again to turn on fermiSearch if needed:
-   negf.setVoltage(0.0)
-   
+   # NOTE: a bare setVoltage(0.0) here would NOT re-enable the Fermi
+   # search -- once fermi is pinned, self.fermi is no longer None, so
+   # updFermi stays False no matter what you pass next. To re-enable the
+   # search, construct a fresh NEGFE object, or set
+   # negf.updFermi = True manually before the next SCF() call.
+
    # Refine with tighter convergence and smaller damping
    # checkpoint=False to ensure density not overwritten
    # by checkpoint file ({fn}_P.mat)

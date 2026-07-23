@@ -6,9 +6,21 @@ Overview
 --------
 
 All gauNEGF default parameters live in :mod:`gauNEGF.config`. You can override them locally
-by passing them as arguments to contact setup functions (``eta=``, ``T=``) or to SCF (``tol=``, ``damp=``).
+by passing them as arguments to contact setup functions (``eta=``, ``T=``) or to SCF (``conv=``, ``damping=``).
 This guide covers the parameters most likely to need tuning when optimizing convergence for your
 system.
+
+.. note::
+
+   Module-level constants (``SCF_DAMPING``, ``ETA``, ``SURFACE_GREEN_CONVERGENCE``,
+   etc.) are bound into ``gauNEGF.scf``/``scfE``/``density`` at *import time*
+   (``from gauNEGF.config import ...``) and as function default-argument
+   values. Setting ``config.X = ...`` after those modules are already
+   imported has NO effect (this includes ``config.CLEAR_JAX_CACHES_PER_CYCLE``).
+   To change a default globally, set ``config.X = ...`` **before** importing
+   ``gauNEGF.scf``/``scfE``/``density`` for the first time -- otherwise pass
+   the value per-call (``conv=``, ``damping=``, ``eta=``, ``T=``, ``tol=``,
+   ``maxcycles=``), which always works regardless of import order.
 
 Default Configuration
 ---------------------
@@ -99,7 +111,7 @@ electron count.
    * - ``'poly'``
      - Medium
      - Medium-Fast
-     - Recommended in production. Balances stability and speed with 3rd order polynomial fitting.
+     - Slightly faster than muller; muller remains the safer default. Balances stability and speed with 3rd order polynomial fitting.
    * - ``'secant'``
      - Low
      - Fast
@@ -107,7 +119,12 @@ electron count.
    * - ``'predict'``
      - Lowest
      - Very fast
-     - Stable only for weakly coupled contacts, uses previous guess upon failure (check warnings)
+     - Stable only for weakly coupled contacts, uses previous guess upon failure (check warnings). Also rescales the density matrix every cycle to force the target electron count (``P *= ne/nActual``) -- this hides count mismatches from the usual dN diagnostics, so a bad fermi under ``'predict'`` will not show up as a charge-count error.
+
+This stability/speed ranking applies uniformly across contact types (1D,
+Bethe, constant sigma): ``'muller'`` is the safe default everywhere;
+``'poly'`` trades a little stability for speed and is a reasonable choice
+when you have already validated a system converges cleanly.
 
 See :doc:`contact_choice` for guidance on which contact type is appropriate, and :doc:`contacts_1d`
 for detailed setup instructions.
@@ -123,11 +140,15 @@ each SCF iteration. It acts as a mixing coefficient: new density = (1 - damping)
 
 **Tuning guidelines:**
 
-- **Recommended Range: 0.002 to 0.1**, Anything outside of that range highly unstable
+- **Recommended Range: 0.02 to 0.05** -- the campaign-measured default for
+  production runs. Wider excursions (down toward 0.005 or up to 0.1) are
+  reasonable when diagnosing a specific problem (see the two-phase strategy
+  below, or the SCF tuning workflow's Steps 2-3), but 0.02-0.05 is the range
+  to start from and return to.
 
-- **High Mixing (0.1) for saddle points** Use if iterations seem "stuck", try with or without pulay interpolation.
+- **High Mixing (up to 0.1) for saddle points** Use if iterations seem "stuck", try with or without pulay interpolation.
 
-- **Low Mixing (0.002) for unstable systems** Use when SCF oscillates or overshoots, increase nPulay if unstable
+- **Low Mixing (down toward 0.005) for unstable systems** Use when SCF oscillates or overshoots, increase nPulay if unstable.
 
 **Production strategy:**
 
@@ -224,10 +245,13 @@ Surface Green's Function Convergence
 **SURFACE_GREEN_CONVERGENCE (default 1e-5):**
   Convergence threshold for the iterative inversion that builds the contact
   surface Green's function. The default is the lowest safe value: going
-  **below 1e-5** can produce numerical instability in the contour integration
-  and is not recommended. Going **above 1e-5** (e.g. 1e-4) speeds up contact
-  setup at the cost of slightly less accurate self-energies, which is useful
-  for exploratory runs or initial convergence sweeps.
+  **below 1e-5** can produce numerical instability, because the recursion
+  simply stops at its internal iteration cap (``MAX_ITER=10000``) before
+  reaching the tighter tolerance, leaving an unconverged surface Green's
+  function baked into the contour integration -- this is not recommended.
+  Going **above 1e-5** (e.g. 1e-4) speeds up contact setup at the cost of
+  slightly less accurate self-energies, which is useful for exploratory
+  runs or initial convergence sweeps.
 
 
 Integration Tolerances
@@ -268,6 +292,10 @@ Workflow: Tuning Convergence
   - Turn on fermi search in initial runs - fermi energy setpoint may be near orbital energies
   - Explicitly set fermiMethod in setVoltage: ``negf.setVoltage(0.0, fermiMethod='muller')``
   - Add a finite temperature to smooth out integration: ``negf.setContact1D([[1,2],[5,6]], T=300)``
+    (this smooths the Fermi search/integration itself, distinct from using T as an
+    SCF stabilizer -- as an SCF stabilizer, T=300 tested null in the campaign
+    measurements behind the skill's guidance; that was a bug-era measurement and a
+    post-fix retest is in flight)
   - Otherwise revert back to bisection (``fermiMethod='bisect'``) if all else fails
 
 
