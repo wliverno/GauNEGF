@@ -863,7 +863,9 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True, meth
     theta = np.pi/2 * (x + 1)
     Elist = center + r*np.exp(1j*theta)
     dz = 1j * r * np.exp(1j*theta)
-    weights = (np.pi/2)*w*fermi(Elist, mu, T)*dz
+    # No fermi factor on the arc: its e^-nKT tail oscillates unresolvably
+    # and floors the grid at T>0. Do not reintroduce (2026-07-25 fix commit).
+    weights = (np.pi/2)*w*dz
 
     if showText:
         print(f'Complex Integration over {N} points...')
@@ -884,8 +886,10 @@ def densityComplexN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True, meth
         Elist = broadening * (x_fermi) + mu
         weights = broadening*w_fermi*fermi(Elist, mu, T)
         broadInt, cross_broad = GrIntCross(F, S, g, Elist, weights)
-        lineInt += broadInt
-        cross_scalar += cross_broad
+        # Subtract: the arc runs Emax->Emin (backward), so the forward
+        # window enters with a minus (sign bug fixed 2026-07-25).
+        lineInt -= broadInt
+        cross_scalar -= cross_broad
 
     if showText:
         print('Integration done!')
@@ -947,7 +951,8 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
         theta = np.pi/2 * (x + 1)
         z = center + r*np.exp(1j*theta)
         dz = 1j * r * np.exp(1j*theta)
-        weights = (np.pi/2)*w*dz*fermi(z, mu, T)
+        # No fermi factor on the arc -- see densityComplexN.
+        weights = (np.pi/2)*w*dz
         return GrIntCross(F, S, g, z, weights)
 
     print('Complex Contour Integration:')
@@ -962,8 +967,9 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
             return GrIntCross(F, S, g, E, weights)
 
         broad_lineInt, broad_cross = integratePointsAdaptiveANT(computePointBroadening, tol=tol, debug=debug)
-        lineInt += broad_lineInt
-        cross_scalar += broad_cross
+        # Subtract: backward arc, forward window -- see densityComplexN.
+        lineInt -= broad_lineInt
+        cross_scalar -= broad_cross
 
     # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19)
     P = (-1j/(2*jnp.pi)) * (lineInt - lineInt.conj().T)

@@ -27,6 +27,13 @@ The density and DOS integrals (`GrInt` -> `GrIntCross`, `densityComplex`,
 contour. Result: correct charge / DOS / transmission on any non-orthogonal
 contact setup.
 
+**Finite-temperature equilibrium contour (corrected 2026-07):** the
+arc and Fermi-window pieces are combined with consistent orientation
+and the arc is integrated without the (analytically negligible) fermi
+factor, so finite-T equilibrium densities converge cleanly at any
+contact broadening. Covered by tests/test_arc_fermi_unity.py.
+Finite-T results computed with earlier versions should be recomputed.
+
 Supporting work shipped at the same time:
 
 - **Damle analytic lower contour**: one eigendecomposition + analytic
