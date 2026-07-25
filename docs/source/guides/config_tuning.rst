@@ -211,6 +211,14 @@ affect the device Hamiltonian, only the Fermi-Dirac distribution in the contact 
 
 - **300 K:** Room temperature. Adds thermal broadening (kT ~ 0.026 eV); electrons and holes leak slightly across the Fermi energy. Use for finite-temperature transport or to model thermal effects.
 
+.. note::
+   The finite-temperature equilibrium contour was corrected in
+   July 2026; T > 0 results computed with earlier versions should
+   be recomputed. As a side benefit, finite T moves the contour's
+   real-axis touchdown away from the Fermi energy, which can improve
+   integration robustness for metallic systems with frontier states
+   at E_F.
+
 **Pass locally:**
 
 .. code-block:: python
