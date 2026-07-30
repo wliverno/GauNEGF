@@ -488,6 +488,10 @@ class NEGFE(NEGF):
             sig1[np.ix_(self.lInd, self.lInd)], 
             sig2[np.ix_(self.rInd, self.rInd)])
         negf.setDen(self.P)
+        # Refresh F from bar: setDen only rebuilds the Fock inside the
+        # Gaussian bar; without this, spawn.F is the stale Harris Fock
+        # (tests/test_spawn_negf.py::test_03c, 2026-07-29).
+        negf.F, negf.locs = getFock(negf.bar, negf.spin)
         qV = mu1-mu2
         fermi = (mu1+mu2)/2
         if self.updFermi:
