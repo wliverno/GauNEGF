@@ -482,11 +482,12 @@ class NEGFE(NEGF):
         if mu2 is None:
             mu2 = self.mu2
         sig1, sig2 = self.getSigma(mu1, mu2)
-        negf = NEGF(self.ifile[:-4], self.basis, self.func, self.spin, False, 
+        negf = NEGF(self.ifile[:-4], self.basis, self.func, self.spin, False,
                     self.otherRoute, self.section,len(self.pB)-1)
-        negf.setSigma(self.lContact, self.rContact, 
-            sig1[np.ix_(self.lInd, self.lInd)], 
-            sig2[np.ix_(self.rInd, self.rInd)])
+        # Full-support sigma: orthogonalized lattices carry deorthogonalized
+        # coupling beyond the contact blocks; exact lattices are block-confined.
+        negf.setSigma(self.lContact, self.rContact,
+            np.asarray(sig1), np.asarray(sig2))
         negf.setDen(self.P)
         # Refresh F from bar: setDen only rebuilds the Fock inside the
         # Gaussian bar; without this, spawn.F is the stale Harris Fock

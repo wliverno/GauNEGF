@@ -511,6 +511,20 @@ class NEGF(object):
                 print("Debug shape (sig1, inds1, sig2, inds2): ", sig.shape, lInd.shape, sig2.shape, rInd.shape)
                 raise Exception('Sigma matrix dimension mismatch!')
         elif np.ndim(sig) == 2 and np.ndim(sig2) == 2:
+            # Full device-sized sigma: keep off-block support (orth Bethe
+            # deorthogonalization spillover), skip block embedding below.
+            if len(sig) == self.nsto and len(sig2) == self.nsto:
+                self.rInd = rInd
+                self.lInd = lInd
+                bg = -1j * 1e-9 * np.asarray(self.S)
+                self.sigma1 = np.asarray(sig, dtype=complex) + bg
+                self.sigma2 = np.asarray(sig2, dtype=complex) + bg
+                self.sigma12 = self.sigma1 + self.sigma2
+                print('Max imag sigma:',
+                      str(np.max(np.abs(np.imag(self.sigma12)))))
+                self.Gam1 = (self.sigma1 - self.sigma1.conj().T)*1j
+                self.Gam2 = (self.sigma2 - self.sigma2.conj().T)*1j
+                return lInd, rInd
             if len(sig) == len(lInd) and len(sig2) == len(rInd):
                 pass
             elif len(sig) == len(rInd)/2 and len(sig2) == len(rInd)/2:
