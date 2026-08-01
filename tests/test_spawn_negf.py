@@ -210,8 +210,10 @@ def test_02_frozen_sigma_matches_parent(parent_ctx, spawn):
     print(f'{TAG} spawn sigma1 off-block deviation from -1e-9j*S = '
           f'{off_dev:.3e}; parent sigma1 off-block max = {par_off:.3e} '
           f'(freezing block-only loses this much)')
-    assert np.allclose(s1[lIx], sig1_ref[lIx], rtol=0.0, atol=1e-10)
-    assert np.allclose(s2[rIx], sig2_ref[rIx], rtol=0.0, atol=1e-10)
+    # spawnNEGF passes full-support sigma; setSigma's full-size path adds
+    # the -1e-9j*S background additively, perturbing blocks at 1e-9 scale.
+    assert np.allclose(s1[lIx], sig1_ref[lIx], rtol=0.0, atol=1e-8)
+    assert np.allclose(s2[rIx], sig2_ref[rIx], rtol=0.0, atol=1e-8)
 
 
 def test_03a_bar_fock_matches_parent(parent_ctx, spawn, results):
