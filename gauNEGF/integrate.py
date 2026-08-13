@@ -55,7 +55,14 @@ MAX_VMAP_MEMORY_GB = 1.0              # Use vmap if estimated memory < this (GB)
 FORCE_SYNCHRONOUS = False             # Force synchronous operation (for accurate timing)
 
 # Memory calculation constants
-MEMORY_PER_MATRIX_FACTOR = 16         # Bytes per complex128 element
+# Effective bytes per element per energy point. 16 is the size of ONE
+# complex128 element; the kernels hold several live matrices per point
+# (_gless_matrix_ops materializes I, mat_r, mat_a, Gr_E, Ga_E, gamma_E,
+# gless, and jnp.linalg.solve takes its own workspace), so 16 undercounts
+# the batch cost ~3x. MEASURED 2026-08-04 on GPU as the slope of peak
+# device bytes vs n_points (cancels fixed pool/executable overhead):
+# 2.93x across 4 configs, 1.4% spread -> 16*2.93 ~= 47.
+MEMORY_PER_MATRIX_FACTOR = 47         # Effective bytes/element/point (measured)
 BYTES_TO_GB = 1e9                     # Conversion factor
 
 # =============================================================================
