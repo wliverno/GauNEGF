@@ -324,7 +324,6 @@ class surfG:
 
         This keeps the basis dimension unchanged and each basis vector as close as
         possible to an original orbital. No downstream sigma correction is needed.
-        See docs/plans/2026-03-10-congruent-clipping-design.md.
         """
         
         if not hasattr(self, "CList"):
@@ -575,10 +574,10 @@ class surfG:
         Q_rev_raw = stau @ g_surf @ bar_t_reg
         Q_sym_raw = (Q_fwd_raw + Q_rev_raw) / 2
 
-        def embed(Q_raw):
-            Q = jnp.zeros(self.F.shape, dtype=complex)
-            return Q.at[jnp.ix_(inds, inds)].set(Q_raw)
-        return embed(Q_fwd_raw), embed(Q_rev_raw), embed(Q_sym_raw)
+        Q_fwd = jnp.zeros(self.F.shape, dtype=complex).at[jnp.ix_(inds, inds)].set(Q_fwd_raw)
+        Q_rev = jnp.zeros(self.F.shape, dtype=complex).at[jnp.ix_(inds, inds)].set(Q_rev_raw)
+        Q_sym = jnp.zeros(self.F.shape, dtype=complex).at[jnp.ix_(inds, inds)].set(Q_sym_raw)
+        return Q_fwd, Q_rev, Q_sym
 
     def crossTermQTot(self, E, conv=SURFACE_GREEN_CONVERGENCE, dFermi=None):
         """Sum of Q_sym over all contacts. Returns None if all contacts orthogonal."""

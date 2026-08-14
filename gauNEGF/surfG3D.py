@@ -483,15 +483,16 @@ class surfG3:
             Q_atoms = self.gList[i].crossTermQSurf(E_shifted, active_dirs=sigInds, G_AB=G_AB)
             sigs = [s.at[jnp.ix_(Finds, Finds)].set(q) for s, q in zip(sigs, Q_atoms)]
 
-        def deorth(sig):
+        deorthed = []
+        for sig in sigs:
             if self.Sdict['sss'] == 0:
                 sig = times(self.Xi, sig, self.Xi)
             if self.spin == 'u' or self.spin == 'ro':
                 sig = jnp.kron(jnp.eye(2), sig)
             elif self.spin == 'g':
                 sig = jnp.kron(sig, jnp.eye(2))
-            return sig
-        return tuple(deorth(s) for s in sigs)
+            deorthed.append(sig)
+        return tuple(deorthed)
 
     def crossTermQTot(self, E, conv=1e-4, dFermi=None):
         """Total cross-term Q_sym from all contacts."""

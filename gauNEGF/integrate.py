@@ -285,6 +285,7 @@ def _GIntCross(F, S, g, Elist, weights):
     num_contacts = g.num_contacts
 
     _stot = _sigma_tot_call(g)
+    threads_shifts = getattr(g, 'gList', None) is not None
     def weighted_combined(E, w, F_jax, S_jax, dfs, g):
         sigTot = _stot(E, dfs)
         eta = max(g.eta, ETA)
@@ -292,7 +293,7 @@ def _GIntCross(F, S, g, Elist, weights):
         # Inline crossTermQTot with zero-init (vmappable, no None type change)
         Q_tot = jnp.zeros_like(F_jax, dtype=complex)
         for i in range(num_contacts):
-            Q_i = g.crossTermQ(E, i)
+            Q_i = g.crossTermQ(E, i, dFermi=dfs[i]) if threads_shifts else g.crossTermQ(E, i)
             if Q_i is not None:  # static at trace time (stau is None check)
                 Q_tot = Q_tot + Q_i[2]
         return w * Gr, w * jnp.trace(Gr @ Q_tot)
@@ -406,10 +407,18 @@ def GrLessInt(F, S, g, Elist, weights, ind=None):
         Integrated lesser Green's function (NxN)
     """
     _stot = _sigma_tot_call(g)
+    # gList classes (Bethe) thread the shared dfs shift array; others keep
+    # their own stored per-contact shifts, so dfs would just be zeros for them.
+    threads_shifts = getattr(g, 'gList', None) is not None
     def weighted_func_GrLess(E, weight, F_jax, S_jax, dfs, g):
         useTot = (ind is None)
         sigTot = _stot(E, dfs)
-        sigma = sigTot if useTot else g.sigma(E, ind)
+        if useTot:
+            sigma = sigTot
+        elif threads_shifts:
+            sigma = g.sigma(E, ind, dFermi=dfs[ind])
+        else:
+            sigma = g.sigma(E, ind)
         eta = max(g.eta, ETA)
         Gless = _gless_matrix_ops(sigma, sigTot, E, F_jax, S_jax, eta)
         return weight * Gless

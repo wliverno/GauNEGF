@@ -634,19 +634,21 @@ class surfGB:
                 sigs = [s.at[jnp.ix_(Finds, Finds)].set(q)
                         for s, q in zip(sigs, Q_atoms)]
 
-        def deorth(s):
+        deorthed = []
+        for s in sigs:
             if self.SOC:
                 Xi2 = jnp.kron(self.Xi, jnp.eye(2))
-                return lax.cond(self.Sdict['sss'] == 0,
-                                lambda x: Xi2 @ x @ Xi2, lambda x: x, s)
-            s = lax.cond(self.Sdict['sss'] == 0,
-                         lambda x: self.Xi @ x @ self.Xi, lambda x: x, s)
-            if self.spin == 'u' or self.spin == 'ro':
-                s = jnp.kron(jnp.eye(2), s)
-            elif self.spin == 'g':
-                s = jnp.kron(s, jnp.eye(2))
-            return s
-        return tuple(deorth(s) for s in sigs)
+                s = lax.cond(self.Sdict['sss'] == 0,
+                             lambda x: Xi2 @ x @ Xi2, lambda x: x, s)
+            else:
+                s = lax.cond(self.Sdict['sss'] == 0,
+                             lambda x: self.Xi @ x @ self.Xi, lambda x: x, s)
+                if self.spin == 'u' or self.spin == 'ro':
+                    s = jnp.kron(jnp.eye(2), s)
+                elif self.spin == 'g':
+                    s = jnp.kron(s, jnp.eye(2))
+            deorthed.append(s)
+        return tuple(deorthed)
 
     def crossTermQTot(self, E, conv=SURFACE_GREEN_CONVERGENCE, dFermi=None):
         """Total cross-term Q_sym from all contacts."""

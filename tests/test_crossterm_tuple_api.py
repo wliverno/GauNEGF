@@ -18,7 +18,7 @@ def _tuple_case(g, key, i=0, use_surf=False):
     assert np.allclose(np.array(qs), (np.array(qf) + np.array(qr)) / 2,
                        rtol=0, atol=1e-14)
     # bit-identity on CPU (baseline provenance); GPU backends cannot
-    # reproduce CPU floats bitwise, so tight allclose there (B6)
+    # reproduce CPU floats bitwise, so tight allclose there
     import jax
     if jax.default_backend() == 'cpu':
         assert np.array_equal(np.array(qs), BASE[key])
@@ -32,15 +32,13 @@ def test_surfGBAt_tuple_and_baseline():
     _tuple_case(make_surfGBAt(), 'surfGBAt_c0')
 
 def test_surfGAt3D_crossTermQSurf_tuple_and_baseline():
-    # surfGAt3D.crossTermQSurf (surface path, 9 directions) is FINITE at -5.0+0.1j.
-    # Baseline captures this energy. Expects tuple return once Task 2 implements API.
+    # surfGAt3D.crossTermQSurf (surface path, 9 directions) is FINITE at -5.0+0.1j
     _tuple_case(make_surfGAt3D(), 'surfGAt3D_surf', use_surf=True)
 
 def test_surfGAt3D_bulk_nan_known_defect():
-    # Documents pre-existing defect: crossTermQ delegates to crossTermQBulk
-    # (12-direction bulk iteration), which produces NaN systematically on this toy.
-    # surfG3D is red-status; this test ensures we track if the bulk path ever gets fixed.
-    # If this test fails, the defect was fixed and baseline should be extended.
+    # crossTermQBulk diverges on this fixture; this test documents the defect
+    # -- if it starts failing, the bulk path was fixed and the baseline should
+    # be extended.
     g = make_surfGAt3D()
     Q_bulk = np.array(g.crossTermQ(-5.0 + 0.1j, 0)[2])
     assert not np.all(np.isfinite(Q_bulk)), \
