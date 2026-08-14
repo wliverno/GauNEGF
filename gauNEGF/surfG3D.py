@@ -468,32 +468,35 @@ class surfG3:
         sigs = [self.sigma(E, i, conv) for i in range(len(self.indsLists))]
         return sum(sigs)
 
-    def crossTermQ(self, E, i, conv=1e-4):
-        """Cross-term Q_sym for contact i in full device basis.
+    def crossTermQ(self, E, i, conv=1e-4, dFermi=None):
+        """(Q_fwd, Q_rev, Q_sym) for contact i in full device basis.
 
         Mirrors surfG3.sigma: computes G_AB via gSurf, then for each atom
         in contact i assembles Q using active directions, applies Xi.
         """
-        E_shifted = E - self.gList[i].dFermi
-        sig = jnp.zeros((self.N, self.N), dtype=complex)
+        shift = self.gList[i].dFermi if dFermi is None else dFermi
+        E_shifted = E - shift
+        sigs = [jnp.zeros((self.N, self.N), dtype=complex) for _ in range(3)]
         G_AB = self.gList[i].gSurf(E_shifted, conv)
         for nInds, Finds in zip(self.nIndLists[i], self.indsLists[i]):
             sigInds = list(set(range(9)) - {int(x) for x in nInds})
-            Q_atom = self.gList[i].crossTermQSurf(E_shifted, active_dirs=sigInds, G_AB=G_AB)
-            sig = sig.at[jnp.ix_(Finds, Finds)].set(Q_atom)
+            Q_atoms = self.gList[i].crossTermQSurf(E_shifted, active_dirs=sigInds, G_AB=G_AB)
+            sigs = [s.at[jnp.ix_(Finds, Finds)].set(q) for s, q in zip(sigs, Q_atoms)]
 
-        if self.Sdict['sss'] == 0:
-            sig = times(self.Xi, sig, self.Xi)
-        if self.spin == 'u' or self.spin == 'ro':
-            sig = jnp.kron(jnp.eye(2), sig)
-        elif self.spin == 'g':
-            sig = jnp.kron(sig, jnp.eye(2))
-        return sig
+        def deorth(sig):
+            if self.Sdict['sss'] == 0:
+                sig = times(self.Xi, sig, self.Xi)
+            if self.spin == 'u' or self.spin == 'ro':
+                sig = jnp.kron(jnp.eye(2), sig)
+            elif self.spin == 'g':
+                sig = jnp.kron(sig, jnp.eye(2))
+            return sig
+        return tuple(deorth(s) for s in sigs)
 
-    def crossTermQTot(self, E, conv=1e-4):
+    def crossTermQTot(self, E, conv=1e-4, dFermi=None):
         """Total cross-term Q_sym from all contacts."""
-        qs = [self.crossTermQ(E, i, conv) for i in range(len(self.indsLists))]
-        return sum(qs)
+        qs = [self.crossTermQ(E, i, conv, dFermi=dFermi) for i in range(len(self.indsLists))]
+        return sum(q[2] for q in qs)
 
     def getSigma(self, Elist=[None, None], conv=1e-4):
         """
@@ -1173,11 +1176,11 @@ class surfGAt3D:
         return tau @ G_sub @ bar_tau  # dim x dim
 
     def crossTermQSurf(self, E, active_dirs=None, conv=1e-4, mix=0.1, G_AB=None):
-        """Symmetrized cross-term Q_sym using G_AB propagator.
+        """Cross-term matrices Q_fwd, Q_rev, Q_sym using G_AB propagator.
 
-        Q_sym = (tau @ G_sub @ S_LD + S_DL @ G_sub @ tau^dagger) / 2
-
-        where tau is the same phase-free coupling used in sigma().
+        Q_fwd = tau @ G_sub @ S_LD ; Q_rev = S_DL @ G_sub @ tau^dagger ;
+        Q_sym = (Q_fwd + Q_rev) / 2, where tau is the same phase-free
+        coupling used in sigma().
         """
         if active_dirs is None:
             active_dirs = list(range(9))
@@ -1206,7 +1209,8 @@ class surfGAt3D:
 
         Q_fwd = tau @ G_sub @ S_LD       # (dim, dim)
         Q_rev = S_DL @ G_sub @ bar_tau   # (dim, dim)
-        return (Q_fwd + Q_rev) / 2
+        Q = (Q_fwd + Q_rev) / 2
+        return Q_fwd, Q_rev, Q
 
     # Empty function for compatibility with density.py methods
     def setF(self, F, mu1, mu2):
@@ -1263,10 +1267,11 @@ class surfGAt3D:
         return self.sigmaTot(E)
 
     def crossTermQBulk(self, E):
-        """Bulk cross-term Q_sym using G_AB propagator (dim x dim).
+        """Bulk cross-term matrices Q_fwd, Q_rev, Q_sym using G_AB propagator (dim x dim).
 
-        Computes the symmetrized cross-term for Mulliken population correction:
-            Q_sym = (tau @ G_AB @ S_LD + S_DL @ G_AB @ bar_tau) / 2
+        Computes the cross-term for Mulliken population correction:
+            Q_fwd = tau @ G_AB @ S_LD ; Q_rev = S_DL @ G_AB @ bar_tau ;
+            Q_sym = (Q_fwd + Q_rev) / 2
 
         where tau and bar_tau use all 12 neighbor directions.
 
@@ -1277,8 +1282,8 @@ class surfGAt3D:
 
         Returns
         -------
-        ndarray
-            Symmetrized cross-term matrix (shape: dim x dim)
+        tuple of ndarray
+            (Q_fwd, Q_rev, Q_sym), each shape (dim, dim)
         """
         G_AB = self.gBulk(E)  # 108 x 108
         z = E + self.eta * 1j
@@ -1292,10 +1297,11 @@ class surfGAt3D:
                                  for k in range(12)], axis=1)
         Q_fwd = tau @ G_AB @ S_LD
         Q_rev = S_DL @ G_AB @ bar_tau
-        return (Q_fwd + Q_rev) / 2
+        Q = (Q_fwd + Q_rev) / 2
+        return Q_fwd, Q_rev, Q
 
-    def crossTermQ(self, E, i):
-        """Cross-term Q_sym for contact i (delegates to crossTermQBulk).
+    def crossTermQ(self, E, i, dFermi=None):
+        """(Q_fwd, Q_rev, Q_sym) for contact i (delegates to crossTermQBulk).
 
         Parameters
         ----------
@@ -1303,15 +1309,18 @@ class surfGAt3D:
             Energy point in eV
         i : int
             Contact index (must be 0)
+        dFermi : float, optional
+            Fermi shift override; defaults to self.dFermi.
 
         Returns
         -------
-        ndarray
-            Symmetrized cross-term matrix (shape: dim x dim)
+        tuple of ndarray
+            (Q_fwd, Q_rev, Q_sym), each shape (dim, dim)
         """
-        return self.crossTermQBulk(E - self.dFermi)
+        shift = self.dFermi if dFermi is None else dFermi
+        return self.crossTermQBulk(E - shift)
 
-    def crossTermQTot(self, E):
+    def crossTermQTot(self, E, dFermi=None):
         """Total cross-term Q_sym (single bulk contact).
 
         Parameters
@@ -1324,7 +1333,8 @@ class surfGAt3D:
         ndarray
             Symmetrized cross-term matrix (shape: dim x dim)
         """
-        return self.crossTermQ(E, 0)
+        q = self.crossTermQ(E, 0, dFermi=dFermi)
+        return None if q is None else q[2]
 
     def DOS(self, E, conv=1e-4, mix=0.1):
         """

@@ -1,0 +1,9 @@
+%chk=C2_chain.chk
+#p b3lyp/lanl2dz nosymm
+
+C2 unit cell for pseudo-pole detection test (double-zeta LANL2DZ basis).
+
+0 1
+C               -0.75000000    0.00000000    0.00000000
+C                0.75000000    0.00000000    0.00000000
+

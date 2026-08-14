@@ -48,16 +48,24 @@ class SurfGProtocol(Protocol):
         """Update Fock matrix and contact chemical potentials."""
         ...
 
-    def crossTermQ(self, E: complex, i: int, conv: float = ...) -> Optional[np.ndarray]:
-        """Symmetrized cross-term overlap matrix Q_sym_i in full device basis.
+    def crossTermQ(self, E: complex, i: int, conv: float = ...,
+                   dFermi: Optional[float] = None
+                   ) -> Optional[tuple]:
+        """Cross-term matrices (Q_fwd, Q_rev, Q_sym) for contact i,
+        each in the full device basis; None if contact i is orthogonal.
 
-        Returns None if contact i has orthogonal coupling (S_DL = 0).
+        Q_fwd = tau_Di g_i S_iD ; Q_rev = S_Di g_i taubar_iD ;
+        Q_sym = (Q_fwd + Q_rev) / 2.
 
-        The cross-term electron count correction is:
-            delta_N_i = -(1/pi) * Im(sum_k w_k * Tr(G_DD^R(z_k) @ Q_sym_i(z_k)))
+        Sign conventions for the cross-term count:
+          forward real axis:  delta_N = +(1/pi) * Im INT f Tr[Gr Q_sym_tot] dE
+          closed contour:     delta_N = contour integral of Tr[Gr Q_sym_tot];
+                              orientation carried by traversal, no Im taken.
         """
         ...
 
-    def crossTermQTot(self, E: complex, conv: float = ...) -> Optional[np.ndarray]:
+    def crossTermQTot(self, E: complex, conv: float = ...,
+                      dFermi: Optional[float] = None
+                      ) -> Optional[np.ndarray]:
         """Sum of Q_sym over all contacts, or None if all orthogonal."""
         ...
