@@ -607,8 +607,8 @@ class surfGB:
                     for i in range(num_contacts)]
         return sum(sigs)
 
-    def crossTermQ(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
-        """Cross-term Q_sym for contact i in full device basis.
+    def crossTermQ(self, E, i, conv=SURFACE_GREEN_CONVERGENCE, dFermi=None):
+        """(Q_fwd, Q_rev, Q_sym) for contact i in full device basis.
 
         Mirrors surfGB.sigma: iterates atoms in contact i, calls
         gList[i].crossTermQSurf with per-atom active directions, assembles result,
@@ -616,50 +616,44 @@ class surfGB:
         """
         nIndLists_i = self.nIndLists[i]
         indsLists_i = self.indsLists[i]
+        shift = self.gList[i].dFermi if dFermi is None else dFermi
+        E_shifted = E - shift
 
-        E_shifted = E - self.gList[i].dFermi
+        n = 2 * self.N if self.SOC else self.N
+        sigs = [jnp.zeros((n, n), dtype=complex) for _ in range(3)]
+        for nInds, Finds in zip(nIndLists_i, indsLists_i):
+            sigInds = list(set(range(9)) - {int(x) for x in nInds})
+            Q_atoms = self.gList[i].crossTermQSurf(E_shifted,
+                                                   sigInds=sigInds, conv=conv)
+            if self.SOC:
+                socFinds = jnp.array([idx for k in Finds
+                                      for idx in (2 * k, 2 * k + 1)])
+                sigs = [s.at[jnp.ix_(socFinds, socFinds)].set(q)
+                        for s, q in zip(sigs, Q_atoms)]
+            else:
+                sigs = [s.at[jnp.ix_(Finds, Finds)].set(q)
+                        for s, q in zip(sigs, Q_atoms)]
 
-        if self.SOC:
-            # SOC matrices are 18x18 (spin already included, interleaved ordering)
-            sig = jnp.zeros((2*self.N, 2*self.N), dtype=complex)
-            for nInds, Finds in zip(nIndLists_i, indsLists_i):
-                sigInds = list(set(range(9)) - {int(x) for x in nInds})
-                Q_atom = self.gList[i].crossTermQSurf(E_shifted, sigInds=sigInds, conv=conv)
-                # Expand orbital indices to spin-orbital: k -> [2*k, 2*k+1]
-                socFinds = jnp.array([idx for k in Finds for idx in (2*k, 2*k+1)])
-                sig = sig.at[jnp.ix_(socFinds, socFinds)].set(Q_atom)
-
-            # De-orthonormalization with expanded Xi (same condition as sigma)
-            sig = lax.cond(self.Sdict['sss'] == 0,
-                           lambda s: jnp.kron(self.Xi, jnp.eye(2)) @ s @ jnp.kron(self.Xi, jnp.eye(2)),
-                           lambda s: s,
-                           sig)
-            # No trailing spin kron -- spin already in SOC matrices
-        else:
-            sig = jnp.zeros((self.N, self.N), dtype=complex)
-            for nInds, Finds in zip(nIndLists_i, indsLists_i):
-                sigInds = list(set(range(9)) - {int(x) for x in nInds})
-                Q_atom = self.gList[i].crossTermQSurf(E_shifted, sigInds=sigInds, conv=conv)
-                sig = sig.at[jnp.ix_(Finds, Finds)].set(Q_atom)
-
-            # Apply de-orthonormalization if orthonormal basis (same as sigma)
-            sig = lax.cond(self.Sdict['sss'] == 0,
-                           lambda s: self.Xi @ s @ self.Xi,
-                           lambda s: s,
-                           sig)
-
+        def deorth(s):
+            if self.SOC:
+                Xi2 = jnp.kron(self.Xi, jnp.eye(2))
+                return lax.cond(self.Sdict['sss'] == 0,
+                                lambda x: Xi2 @ x @ Xi2, lambda x: x, s)
+            s = lax.cond(self.Sdict['sss'] == 0,
+                         lambda x: self.Xi @ x @ self.Xi, lambda x: x, s)
             if self.spin == 'u' or self.spin == 'ro':
-                sig = jnp.kron(jnp.eye(2), sig)
+                s = jnp.kron(jnp.eye(2), s)
             elif self.spin == 'g':
-                sig = jnp.kron(sig, jnp.eye(2))
+                s = jnp.kron(s, jnp.eye(2))
+            return s
+        return tuple(deorth(s) for s in sigs)
 
-        return sig
-
-    def crossTermQTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
+    def crossTermQTot(self, E, conv=SURFACE_GREEN_CONVERGENCE, dFermi=None):
         """Total cross-term Q_sym from all contacts."""
         num_contacts = len(self.indsLists)
-        qs = [self.crossTermQ(E, i, conv) for i in range(num_contacts)]
-        return sum(qs)
+        qs = [self.crossTermQ(E, i, conv, dFermi=dFermi)
+              for i in range(num_contacts)]
+        return sum(q[2] for q in qs if q is not None)
 
     def getSigma(self, Elist=[None, None], conv=SURFACE_GREEN_CONVERGENCE):
         """
@@ -1165,7 +1159,7 @@ class surfGBAt:
         return sigSurf
 
     def crossTermQSurf(self, E, sigInds=None, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5):
-        """Symmetrized cross-term Q_sym = sum_k (B_k g_k S_k + S_k g_k B_k^bar) / 2.
+        """Cross-term matrices Q_fwd, Q_rev, Q_sym = sum_k (B_k g_k S_k + S_k g_k B_k^bar) / 2.
 
         sigInds: list of surface direction indices to include (default: all 9).
         Uses the neighbor Green's function g_k = inv(A - sigTot + sigSurf[pair_k])
@@ -1184,7 +1178,9 @@ class surfGBAt:
         A = E_eff * jnp.eye(self.dim) - self.H0
         sigTot = jnp.sum(sigSurf, axis=0)
 
-        Q = jnp.zeros((self.dim, self.dim), dtype=complex)
+        Qf = jnp.zeros((self.dim, self.dim), dtype=complex)
+        Qr = jnp.zeros((self.dim, self.dim), dtype=complex)
+        Q  = jnp.zeros((self.dim, self.dim), dtype=complex)
         for k in sigInds:
             pair_k = (k + 6) % 12
             if pair_k < 9:
@@ -1195,11 +1191,13 @@ class surfGBAt:
             B_k_bar = E_eff * self.Slist[k].conj().T - self.Vlist0[k].conj().T
             Q_fwd = B_k @ g_k @ self.Slist[k].conj().T
             Q_rev = self.Slist[k] @ g_k @ B_k_bar
+            Qf = Qf + Q_fwd
+            Qr = Qr + Q_rev
             Q = Q + (Q_fwd + Q_rev) / 2
-        return Q
+        return Qf, Qr, Q
 
     def crossTermQBulk(self, E, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5):
-        """Bulk cross-term Q_sym over all 12 directions.
+        """Bulk cross-term matrices Q_fwd, Q_rev, Q_sym over all 12 directions.
 
         Uses g_k = inv(A - sigTot + sigK[pair_k]) for each direction k,
         i.e. the neighbor's Green's function excluding the coupling back
@@ -1211,7 +1209,9 @@ class surfGBAt:
         A = E_eff * jnp.eye(self.dim) - self.H0
         sigTot = jnp.sum(sigK, axis=0)
 
-        Q = jnp.zeros((self.dim, self.dim), dtype=complex)
+        Qf = jnp.zeros((self.dim, self.dim), dtype=complex)
+        Qr = jnp.zeros((self.dim, self.dim), dtype=complex)
+        Q  = jnp.zeros((self.dim, self.dim), dtype=complex)
         for k in range(12):
             pair_k = (k + 6) % 12
             g_k = LA.inv(A - sigTot + sigK[pair_k])
@@ -1219,8 +1219,10 @@ class surfGBAt:
             B_k_bar = E_eff * self.Slist[k].conj().T - self.Vlist0[k].conj().T
             Q_fwd = B_k @ g_k @ self.Slist[k].conj().T
             Q_rev = self.Slist[k] @ g_k @ B_k_bar
+            Qf = Qf + Q_fwd
+            Qr = Qr + Q_rev
             Q = Q + (Q_fwd + Q_rev) / 2
-        return Q
+        return Qf, Qr, Q
 
     # Empty function for compatibility with density.py methods
     def setF(self, F, mu1, mu2):
@@ -1247,13 +1249,15 @@ class surfGBAt:
         """Self-energy for contact i (only i=0, single bulk contact)."""
         return self.sigmaTot(E, conv)
 
-    def crossTermQ(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
-        """Cross-term Q_sym for contact i (delegates to crossTermQBulk)."""
-        return self.crossTermQBulk(E - self.dFermi, conv)
+    def crossTermQ(self, E, i, conv=SURFACE_GREEN_CONVERGENCE, dFermi=None):
+        """(Q_fwd, Q_rev, Q_sym) for contact i (delegates to crossTermQBulk)."""
+        shift = self.dFermi if dFermi is None else dFermi
+        return self.crossTermQBulk(E - shift, conv)
 
-    def crossTermQTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
+    def crossTermQTot(self, E, conv=SURFACE_GREEN_CONVERGENCE, dFermi=None):
         """Total cross-term Q_sym (single contact = crossTermQ)."""
-        return self.crossTermQ(E, 0, conv)
+        q = self.crossTermQ(E, 0, conv, dFermi=dFermi)
+        return None if q is None else q[2]
 
     # Get the surface DOS of the Bethe lattice
     def DOS(self, E):

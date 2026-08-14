@@ -294,7 +294,7 @@ def _GIntCross(F, S, g, Elist, weights):
         for i in range(num_contacts):
             Q_i = g.crossTermQ(E, i)
             if Q_i is not None:  # static at trace time (stau is None check)
-                Q_tot = Q_tot + Q_i
+                Q_tot = Q_tot + Q_i[2]
         return w * Gr, w * jnp.trace(Gr @ Q_tot)
 
     matrix_size_gb = (matrix_size * matrix_size * MEMORY_PER_MATRIX_FACTOR) / BYTES_TO_GB

@@ -547,14 +547,13 @@ class surfG:
                           sigma)
         return sigma
 
-    def crossTermQ(self, E, i, conv=SURFACE_GREEN_CONVERGENCE):
-        """Symmetrized cross-term matrix Q_sym_i in full device basis.
+    def crossTermQ(self, E, i, conv=SURFACE_GREEN_CONVERGENCE, dFermi=None):
+        """Cross-term matrices for contact i in full device basis.
 
-        Q_sym = (t_eff @ g_surf @ S_LD + S_DL @ g_surf @ bar_t_eff) / 2
-
-        where t_eff is the regularized tau_DL and bar_t_eff is the regularized
-        tau_LD (EOM coupling with unconjugated E, NOT t_eff^dagger). Returns
-        None if contact i has orthogonal coupling (stauList[i] is None).
+        Returns (Q_fwd, Q_rev, Q_sym) or None if contact i is orthogonal.
+        Q_fwd = t_reg  @ g_surf @ stau^dag ; Q_rev = stau @ g_surf @ bar_t_reg;
+        Q_sym = (Q_fwd + Q_rev) / 2 (same float expression as before).
+        dFermi overrides the stored per-contact lead shift when given.
         """
         stau = self.stauList[i]
         if stau is None:
@@ -562,7 +561,8 @@ class surfG:
         inds = self.indsList[i]
         tau = self.tauList[i]
         n = len(self.aList[i])
-        E_shifted = E - self.dFermiList[i]
+        shift = self.dFermiList[i] if dFermi is None else dFermi
+        E_shifted = E - shift
         # EOM couplings carry the lead shift (see sigma()); bare stau
         # factors in Q_fwd/Q_rev are overlap blocks and do not shift.
         t = E_shifted * stau - tau
@@ -571,19 +571,22 @@ class surfG:
         g_surf = self.g(E_shifted, i, conv)
         bar_t = E_shifted * stau.conj().T - tau.conj().T
         bar_t_reg = C_mid.conj().T @ bar_t
-        Q_fwd = t_reg @ g_surf @ stau.conj().T
-        Q_rev = stau @ g_surf @ bar_t_reg
-        Q_raw = (Q_fwd + Q_rev) / 2
-        Q = jnp.zeros(self.F.shape, dtype=complex)
-        Q = Q.at[jnp.ix_(inds, inds)].set(Q_raw)
-        return Q
+        Q_fwd_raw = t_reg @ g_surf @ stau.conj().T
+        Q_rev_raw = stau @ g_surf @ bar_t_reg
+        Q_sym_raw = (Q_fwd_raw + Q_rev_raw) / 2
 
-    def crossTermQTot(self, E, conv=SURFACE_GREEN_CONVERGENCE):
+        def embed(Q_raw):
+            Q = jnp.zeros(self.F.shape, dtype=complex)
+            return Q.at[jnp.ix_(inds, inds)].set(Q_raw)
+        return embed(Q_fwd_raw), embed(Q_rev_raw), embed(Q_sym_raw)
+
+    def crossTermQTot(self, E, conv=SURFACE_GREEN_CONVERGENCE, dFermi=None):
         """Sum of Q_sym over all contacts. Returns None if all contacts orthogonal."""
         Q_tot = None
         for i in range(self.num_contacts):
-            Q_i = self.crossTermQ(E, i, conv)
-            if Q_i is not None:
+            q = self.crossTermQ(E, i, conv, dFermi=dFermi)
+            if q is not None:
+                Q_i = q[2]
                 Q_tot = Q_i if Q_tot is None else Q_tot + Q_i
         return Q_tot
 

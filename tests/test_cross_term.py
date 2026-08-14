@@ -104,8 +104,9 @@ def test_surfG1D_crossTermQ_shape():
     """crossTermQ returns a matrix with same shape as F."""
     g = make_1d_nonortho_chain()
     E = -5.0 + 0.1j
-    Q = g.crossTermQ(E, 0)
-    assert Q is not None, "crossTermQ should not be None for non-orthogonal contacts"
+    q = g.crossTermQ(E, 0)
+    assert q is not None, "crossTermQ should not be None for non-orthogonal contacts"
+    Q = q[2]
     assert Q.shape == g.F.shape, f"Q shape {Q.shape} != F shape {g.F.shape}"
 
 
@@ -113,8 +114,9 @@ def test_surfG1D_crossTermQ_nonzero_on_contact_inds():
     """Q should be nonzero only on contact orbital indices."""
     g = make_1d_nonortho_chain()
     E = -5.0 + 0.1j
-    Q = g.crossTermQ(E, 0)
-    assert Q is not None
+    q = g.crossTermQ(E, 0)
+    assert q is not None
+    Q = q[2]
     inds = np.array(g.indsList[0])
     N = g.F.shape[0]
     other_inds = [i for i in range(N) if i not in inds]
@@ -129,8 +131,10 @@ def test_surfG1D_crossTermQ_is_symmetrized():
     """Q_sym should be (Q_fwd + Q_rev)/2, not just Q_fwd (Q_fwd != Q_fwd.T generally)."""
     g = make_1d_nonortho_chain()
     E = -5.0 + 0.1j
-    Q = g.crossTermQ(E, 0)
-    assert Q is not None
+    q = g.crossTermQ(E, 0)
+    assert q is not None
+    assert np.allclose(np.array(q[2]), (np.array(q[0]) + np.array(q[1])) / 2)
+    Q = q[2]
     inds = np.array(g.indsList[0])
     Q_sub = np.array(Q)[np.ix_(inds, inds)]
     # Q_sym should be Hermitian on the real axis (for real E).
@@ -145,10 +149,10 @@ def test_surfG1D_crossTermQTot_sums_contacts():
     g = make_1d_nonortho_chain()
     E = -5.0 + 0.1j
     Q_tot = g.crossTermQTot(E)
-    Q0 = g.crossTermQ(E, 0)
-    Q1 = g.crossTermQ(E, 1)
-    assert Q0 is not None and Q1 is not None
-    expected = np.array(Q0) + np.array(Q1)
+    q0 = g.crossTermQ(E, 0)
+    q1 = g.crossTermQ(E, 1)
+    assert q0 is not None and q1 is not None
+    expected = np.array(q0[2]) + np.array(q1[2])
     np.testing.assert_allclose(np.array(Q_tot), expected, atol=1e-14)
 
 
@@ -194,18 +198,20 @@ def make_surfGBAt_zero_overlap():
 
 
 def test_surfGBAt_crossTermQ_shape():
-    """crossTermQ returns a (dim, dim) matrix."""
+    """crossTermQSurf returns a (dim, dim) Q_sym matrix."""
     gAt = make_surfGBAt()
     E = -5.0 + 0.1j
-    Q = gAt.crossTermQSurf(E)
-    assert Q is not None
+    q = gAt.crossTermQSurf(E)
+    assert q is not None
+    Q = q[2]
     assert Q.shape == (9, 9), f"Expected (9,9), got {Q.shape}"
 
 
 def test_surfGBAt_crossTermQ_orthogonal_limit():
     """When all Slist are zero, crossTermQ should be zero."""
     gAt = make_surfGBAt_zero_overlap()
-    Q = gAt.crossTermQSurf(-5.0 + 0.1j)
+    q = gAt.crossTermQSurf(-5.0 + 0.1j)
+    Q = q[2]
     np.testing.assert_allclose(np.array(Q), 0.0, atol=1e-10,
         err_msg="crossTermQ should be zero when all overlaps are zero")
 
@@ -214,8 +220,10 @@ def test_surfGBAt_crossTermQ_is_symmetrized():
     """Q_sym should have correct Hermitian-like structure."""
     gAt = make_surfGBAt()
     E = -5.0 + 0.1j
-    Q = gAt.crossTermQSurf(E)
-    assert Q is not None
+    q = gAt.crossTermQSurf(E)
+    assert q is not None
+    assert np.allclose(np.array(q[2]), (np.array(q[0]) + np.array(q[1])) / 2)
+    Q = q[2]
     # Q_sym is NOT Hermitian in general (only on real axis), but should not be
     # purely upper or lower triangular
     Q_arr = np.array(Q)
@@ -266,18 +274,20 @@ def make_surfGAt3D_zero_overlap():
 
 
 def test_surfGAt3D_crossTermQ_shape():
-    """crossTermQ returns a (dim, dim) matrix."""
+    """crossTermQSurf returns a (dim, dim) Q_sym matrix."""
     gAt = make_surfGAt3D()
     E = -5.0 + 0.1j
-    Q = gAt.crossTermQSurf(E)
-    assert Q is not None
+    q = gAt.crossTermQSurf(E)
+    assert q is not None
+    Q = q[2]
     assert Q.shape == (9, 9), f"Expected (9,9), got {Q.shape}"
 
 
 def test_surfGAt3D_crossTermQ_orthogonal_limit():
     """When all Slist are zero, crossTermQ should be zero."""
     gAt = make_surfGAt3D_zero_overlap()
-    Q = gAt.crossTermQSurf(-5.0 + 0.1j)
+    q = gAt.crossTermQSurf(-5.0 + 0.1j)
+    Q = q[2]
     np.testing.assert_allclose(np.array(Q), 0.0, atol=1e-10)
 
 
@@ -285,8 +295,10 @@ def test_surfGAt3D_crossTermQ_is_symmetrized():
     """Q_sym should be symmetrized (not purely lower triangular)."""
     gAt = make_surfGAt3D()
     E = -5.0 + 0.1j
-    Q = gAt.crossTermQSurf(E)
-    assert Q is not None
+    q = gAt.crossTermQSurf(E)
+    assert q is not None
+    assert np.allclose(np.array(q[2]), (np.array(q[0]) + np.array(q[1])) / 2)
+    Q = q[2]
     Q_arr = np.array(Q)
     assert not np.allclose(Q_arr, np.tril(Q_arr)), \
         "Q should not be purely lower triangular -- should be symmetrized"
