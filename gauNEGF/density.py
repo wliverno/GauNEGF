@@ -1321,8 +1321,7 @@ def find_lower_bound(F, S, g, maxN=MAX_CYCLES, factor=2.0):
     instead of N is what makes this robust to a (mildly) non-PSD effective overlap;
     the DOS test calcEmin uses would have to guess that count. The seed is usually
     already below every pole, so the common case returns with zero steps. All
-    matrix math is JAX (on-device eigh). See
-    docs/superpowers/specs/2026-06-14-inertia-lower-bound-design.md Sec 3.
+    matrix math is JAX (on-device eigh).
 
     Parameters
     ----------
