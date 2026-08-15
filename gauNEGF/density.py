@@ -40,7 +40,7 @@ from multiprocessing import Pool
 import os
 
 # Developed Packages:
-from gauNEGF.integrate import GrInt, GrLessInt, GrIntCross
+from gauNEGF.integrate import GrInt, GrLessInt, GrIntCross, GrLessIntCross
 
 # JIT-compiled functions
 from gauNEGF.utils import inv, eig, eigh, fractional_matrix_power
@@ -265,6 +265,8 @@ def integratePointsAdaptiveANT(computePoint, tol=ADAPTIVE_INTEGRATION_TOL, maxN=
                 new_P = P*ratio + new_result
 
             maxDP = jnp.max(jnp.abs(new_P-P))
+            if is_tuple:
+                maxDP = jnp.maximum(maxDP, jnp.abs(new_accum - accum))
             if debug:
                 full_result = computePoint(x, w)
                 P_debug = full_result[0] if is_tuple else full_result
@@ -625,7 +627,7 @@ def densityReal(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, 
     return P, delta_N
    
 
-def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=TEMPERATURE, showText=True):
+def densityGridN(F, S, g, mu1, mu2, ind, N=100, T=TEMPERATURE, showText=True):
     """
     Calculate non-equilibrium density matrix using real-axis integration.
 
@@ -644,8 +646,8 @@ def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=TEMPERATURE, showText=Tru
         Left contact chemical potential in eV
     mu2 : float
         Right contact chemical potential in eV
-    ind : int or None, optional
-        Contact index (None for total) (default: None)
+    ind : int
+        Contact index (-1 for total)
     N : int, optional
         Number of integration points (default: 100)
     T : float, optional
@@ -655,34 +657,41 @@ def densityGridN(F, S, g, mu1, mu2, ind=None, N=100, T=TEMPERATURE, showText=Tru
 
     Returns
     -------
-    ndarray
-        Non-equilibrium contribution to density matrix
+    tuple (ndarray, float)
+        Non-equilibrium contribution to density matrix and its cross-term
+        electron-count correction
     """
     nKT = N_KT
     kT = kB*T
     muLo = min(mu1, mu2)
     muHi = max(mu1, mu2)
+    if mu1 == mu2:
+        return np.array(np.zeros(np.shape(F)), dtype=complex), 0.0
     dInt = np.sign(mu2 - mu1) # Sign of bias voltage
     Emax = muHi + nKT*kT
     Emin = muLo - nKT*kT
     mid = (Emax-Emin)/2
-    den = np.array(np.zeros(np.shape(F)), dtype=complex)
     x,w = roots_legendre(N)
     x = np.real(x)
-    
+
     energies = mid*(x + 1) + Emin
     dfermi = fermi(energies, muHi, T) - fermi(energies, muLo, T)
     weights = mid*w*dfermi*dInt
 
     if showText:
         print(f'Real integration over {N} points...')
-    
-    den = GrLessInt(F, S, g, energies, weights, ind)
+
+    den, scl = GrLessIntCross(F, S, g, energies, weights, ind)
+    scl = complex(scl)
+    # an imaginary window count means an assembly bug, not physics
+    assert abs(scl.imag) <= 1e-8 * max(1.0, abs(scl.real)), (
+        'window cross scalar has non-negligible imaginary part '
+        f'({scl.imag:.3e}): assembly bug, not physics')
 
     if showText:
         print('Integration done!')
- 
-    return den/(2*np.pi)
+
+    return den/(2*np.pi), float(scl.real)/(2*np.pi)
 
 # Get non-equilibrium density at a single contact (ind) using a real energy grid
 def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=TEMPERATURE):
@@ -743,7 +752,7 @@ def densityGridTrap(F, S, g, mu1, mu2, ind=None, N=100, T=TEMPERATURE):
     
     return den/(2*np.pi)
 
-def densityGrid(F, S, g, mu1, mu2, ind=None, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, debug=False):
+def densityGrid(F, S, g, mu1, mu2, ind, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, debug=False):
     """
     Calculate non-equilibrium density matrix using real-axis integration.
 
@@ -762,8 +771,8 @@ def densityGrid(F, S, g, mu1, mu2, ind=None, tol=ADAPTIVE_INTEGRATION_TOL, T=TEM
         Left contact chemical potential in eV
     mu2 : float
         Right contact chemical potential in eV
-    ind : int or None, optional
-        Contact index (None for total) (default: None)
+    ind : int
+        Contact index (-1 for total)
     tol : float, optional
         Convergence tolerance (default: 1e-3)
     T : float, optional
@@ -773,30 +782,37 @@ def densityGrid(F, S, g, mu1, mu2, ind=None, tol=ADAPTIVE_INTEGRATION_TOL, T=TEM
 
     Returns
     -------
-    ndarray
-        Non-equilibrium contribution to density matrix
+    tuple (ndarray, float)
+        Non-equilibrium contribution to density matrix and its cross-term
+        electron-count correction
     """
     nKT = N_KT
     kT = kB*T
     muLo = min(mu1, mu2)
     muHi = max(mu1, mu2)
+    if mu1 == mu2:
+        return np.array(np.zeros(np.shape(F)), dtype=complex), 0.0
     dInt = np.sign(mu2 - mu1) # Sign of bias voltage
     Emax = muHi + nKT*kT
     Emin = muLo - nKT*kT
     mid = (Emax-Emin)/2
-    den = np.array(np.zeros(np.shape(F)), dtype=complex)
-    
+
     def computePoint(x, w):
         E = mid*(x + 1) + Emin
         dFermi = fermi(E, muHi, T) - fermi(E, muLo, T)
         weights = mid*w*dFermi*dInt
-        return GrLessInt(F, S, g, E, weights, ind)
-     
-    den = integratePointsAdaptiveANT(computePoint, tol=tol, debug=debug)
+        return GrLessIntCross(F, S, g, E, weights, ind)
+
+    den, scl = integratePointsAdaptiveANT(computePoint, tol=tol, debug=debug)
+    scl = complex(scl)
+    # an imaginary window count means an assembly bug, not physics
+    assert abs(scl.imag) <= 1e-8 * max(1.0, abs(scl.real)), (
+        'window cross scalar has non-negligible imaginary part '
+        f'({scl.imag:.3e}): assembly bug, not physics')
     if debug:
         print('Integration done!')
 
-    return den/(2*np.pi)
+    return den/(2*np.pi), float(scl.real)/(2*np.pi)
 
 
 
@@ -1495,8 +1511,10 @@ def integralFitNEGF(F, S, g, fermi, qV, Eminf=ENERGY_MIN, tol=FERMI_CALCULATION_
     rho = np.zeros(np.shape(F))
     while dP > tol and N < maxGrid:
         N *= 2 # Start with 16 points, double each time
-        rho_ = np.real(densityGridN(F, S, g, fermi, fermi+(qV/2), ind=0, N=N, T=T))
-        rho_ += np.real(densityGridN(F, S, g, fermi, fermi-(qV/2), ind=-1, N=N, T=T))
+        Pw, _ = densityGridN(F, S, g, fermi, fermi+(qV/2), ind=0, N=N, T=T)
+        rho_ = np.real(Pw)
+        Pw, _ = densityGridN(F, S, g, fermi, fermi-(qV/2), ind=-1, N=N, T=T)
+        rho_ += np.real(Pw)
         dP = max(abs(np.diag(rho_ - rho)))
         print(f"MaxDP = {dP:.2E}")
         rho = rho_
