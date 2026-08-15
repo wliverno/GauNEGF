@@ -47,6 +47,11 @@ kB = 8.617e-5           # eV/Kelvin
 V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 
 
+def count_audit(ne_perspin, nLower, eqN, windowN):
+    """Complete per-spin count balance: target vs equilibrium + bias-window density."""
+    return abs(ne_perspin - nLower - eqN - windowN)
+
+
 class NEGFE(NEGF):
     """
     Extended NEGF class with energy-dependent self-energies and temperature effects.
@@ -598,12 +603,15 @@ class NEGFE(NEGF):
                                                     mu, tol=self.tol, T=self.T)
                 return P, dN_
 
+        # Per-spin electron target, needed by the search and the post-window count audit.
+        ne = self.bar.ne
+        if self.spin =='r':
+            ne /= 2
+        self._eqN = None    # only same-cycle _eqN should feed the post-window audit
+
         # Fermi Energy Update using local self-energy approximation
         if self.updFermi:
             fermi_old = self.fermi+0.0
-            ne = self.bar.ne
-            if self.spin =='r':
-                ne /= 2
             conv= min(self.convLevel, FERMI_CALCULATION_TOL)
             # Freeze guard: skip the search when the previous cycle's
             # CROSS-TERM-INCLUSIVE mismatch (tr(P@S) + delta_N vs target,
@@ -621,8 +629,9 @@ class NEGFE(NEGF):
                 print('Calculating equilibrium density matrix:')
                 P2f, dNf = compContourP2(self.mu1)
                 P += P2f
-                self.dN_inclusive = abs(
-                    ne - nLower - np.trace(P2f @ self.S).real - dNf)
+                self._eqN = float(np.trace(P2f @ self.S).real + dNf)
+                self.dN_inclusive = count_audit(
+                    ne, nLower, self._eqN, getattr(self, 'windowN', 0.0))
             if method =='predict':
                 # Generate inputs for energy-independent density calculation
                 X = jnp.array(self.X)
@@ -653,8 +662,9 @@ class NEGFE(NEGF):
                 print('Calculating equilibrium density matrix:')
                 P2p, dNp = compContourP2(self.mu1)
                 P += P2p
-                self.dN_inclusive = abs(
-                    ne - nLower - np.trace(P2p @ self.S).real - dNp)
+                self._eqN = float(np.trace(P2p @ self.S).real + dNp)
+                self.dN_inclusive = count_audit(
+                    ne, nLower, self._eqN, getattr(self, 'windowN', 0.0))
 
                 # Fix number of electrons
                 # TODO: nActual omits cross-term delta_N; acceptable since predict
@@ -677,9 +687,15 @@ class NEGFE(NEGF):
                     fermi_old = self.fermi + 0.0
                 else:
                     print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
+                    # search residual vs contour target; complete count audit runs after the window block
                     self.dN_inclusive = abs(dN)
-                    P = P+P2 if self.mu1 == self.mu2 else compContourP2(self.mu1)[0]
-            
+                    if self.mu1 == self.mu2:
+                        P = P + P2
+                    else:
+                        P2c, dNc = compContourP2(self.mu1)
+                        P = P + P2c
+                        self._eqN = float(np.trace(P2c @ self.S).real + dNc)
+
             if method =='muller':
                 print('MULLER METHOD:')
                 self.fermi, dE, P2, dN, uBound, lBound = calcFermiMuller(self.g, ne-nLower, self.Emin, fermi_old, 
@@ -691,8 +707,14 @@ class NEGFE(NEGF):
                     fermi_old = self.fermi + 0.0
                 else:
                     print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
+                    # search residual vs contour target; complete count audit runs after the window block
                     self.dN_inclusive = abs(dN)
-                    P = P+P2 if self.mu1 == self.mu2 else compContourP2(self.mu1)[0]
+                    if self.mu1 == self.mu2:
+                        P = P + P2
+                    else:
+                        P2c, dNc = compContourP2(self.mu1)
+                        P = P + P2c
+                        self._eqN = float(np.trace(P2c @ self.S).real + dNc)
 
             if method =='secant':
                 print('SECANT METHOD:')
@@ -705,8 +727,14 @@ class NEGFE(NEGF):
                     fermi_old = self.fermi + 0.0
                 else:
                     print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
+                    # search residual vs contour target; complete count audit runs after the window block
                     self.dN_inclusive = abs(dN)
-                    P = P+P2 if self.mu1 == self.mu2 else compContourP2(self.mu1)[0]
+                    if self.mu1 == self.mu2:
+                        P = P + P2
+                    else:
+                        P2c, dNc = compContourP2(self.mu1)
+                        P = P + P2c
+                        self._eqN = float(np.trace(P2c @ self.S).real + dNc)
 
             if method =='bisect' or methodFail:
                 print('BISECT METHOD:')
@@ -725,17 +753,28 @@ class NEGFE(NEGF):
             self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
         else:
             print('Calculating equilibrium density matrix:')
-            P += compContourP2(self.mu1)[0]
-         
+            P2e, dNe = compContourP2(self.mu1)
+            P += P2e
+            self._eqN = float(np.trace(P2e @ self.S).real + dNe)
+
         # If bias applied, need to integrate G<
+        self.windowN = 0.0
         if self.mu1 != self.mu2:
             print('Calculating non-equilibrium density matrix:')
             if self.Nnegf is not None:
-                P += densityGridN(self.F*har_to_eV, self.S, self.g, self.mu1, self.mu2, ind=-1, 
+                Pwin, dNwin = densityGridN(self.F*har_to_eV, self.S, self.g,
+                                    self.mu1, self.mu2, ind=-1,
                                     N=self.Nnegf, T=self.T)
             else:
-                P += densityGrid(self.F*har_to_eV, self.S, self.g, self.mu1, self.mu2, ind=-1,
+                Pwin, dNwin = densityGrid(self.F*har_to_eV, self.S, self.g,
+                                    self.mu1, self.mu2, ind=-1,
                                     tol=self.tol, T=self.T)
+            P += Pwin
+            self.windowN = float(np.trace(Pwin @ self.S).real + dNwin)
+
+        # Complete-count audit: refresh dN_inclusive to include the bias window, whichever branch ran above.
+        if getattr(self, '_eqN', None) is not None:
+            self.dN_inclusive = count_audit(ne, nLower, self._eqN, self.windowN)
 
         # Calculate Level Occupation, Lowdin TF,  Return
         D,V = eigh(self.X@(self.F*har_to_eV)@self.X)
