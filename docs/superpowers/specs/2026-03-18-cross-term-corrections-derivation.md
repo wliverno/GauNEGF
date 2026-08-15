@@ -540,6 +540,21 @@ If self-consistent contacts are used (updating lead parameters from the Fock mat
 
 ## 7. Summary of Required Changes
 
+> **CORRECTED 2026-08-13.** The previous version of this section stated the
+> cross-term sign as $\delta N_\alpha = -\frac{1}{\pi}\,\mathrm{Im}[\dots]$
+> universally. That sign is correct only for the **backward-running** complex
+> contour used by `densityComplex`/`densityComplexN` (prefactor
+> $P_{DL} = -\frac{i}{2\pi}(\dots)$); the **forward** real axis
+> (`densityReal`, `densityRealN`, `damleCrossTerm`, prefactor
+> $P_{DL} = +\frac{i}{2\pi}(\dots)$) flips every sign in the derivation below
+> and gives $\delta N_\alpha = +\frac{1}{\pi}\,\mathrm{Im}[\dots]$ instead.
+> The original error numerically cancelled against the backward contour
+> orientation already present in `densityComplex`/`densityComplexN`, which is
+> why the bug went unnoticed there while silently flipping the sign of the
+> forward real-axis result. Both signs are now stated correctly and
+> independently below. See
+> `docs/superpowers/specs/2026-08-13-noneq-crossterm-design.md`.
+
 ### Must fix (affects Fermi search accuracy)
 
 1. **Electron count correction:** Add $\delta N_L + \delta N_R$ to the electron count in all Fermi search methods (`calcFermi`, `calcFermiBisect`, `calcFermiSecant`, `calcFermiMuller`, `calcFermiPolyFit`, `getFermiContact`)
@@ -562,7 +577,7 @@ The cross-term electron count becomes:
 
 $$\delta N_\alpha = -\frac{1}{\pi}\, \mathrm{Im}\!\left[\sum_k w_k\, \mathrm{Tr}\!\left(G_{DD}^R(z_k)\, Q_\alpha^{\mathrm{sym}}(z_k)\right)\right]$$
 
-**Proof:** Starting from $\delta N_\alpha = \mathrm{Tr}(P_{DL}\, S_{LD})$ and the contour integral formula for the off-diagonal block, $P_{DL} = \frac{-i}{2\pi}(\text{lineInt}_{DL} - \text{lineInt}_{LD}^\dagger)$:
+**Proof (backward-contour orientation):** Starting from $\delta N_\alpha = \mathrm{Tr}(P_{DL}\, S_{LD})$ and the contour integral formula for the off-diagonal block on a **backward-running** contour (as used by `densityComplex`/`densityComplexN`), $P_{DL} = \frac{-i}{2\pi}(\text{lineInt}_{DL} - \text{lineInt}_{LD}^\dagger)$:
 
 $$\delta N_\alpha = \frac{-i}{2\pi}\left[\mathrm{Tr}(\text{lineInt}_{DL}\, S_{LD}) - \mathrm{Tr}(\text{lineInt}_{LD}^\dagger\, S_{LD})\right]$$
 
@@ -599,7 +614,13 @@ $$= -\frac{1}{2\pi}\,\mathrm{Im}\!\left[\sum_k w_k\, \mathrm{Tr}\!\left(G_{DD}^R
 
 Defining $Q^{\mathrm{sym}} = (Q + Q_{\mathrm{rev}})/2$:
 
-$$\boxed{\delta N_\alpha = -\frac{1}{\pi}\, \mathrm{Im}\!\left[\sum_k w_k\, \mathrm{Tr}\!\left(G_{DD}^R(z_k)\, Q_\alpha^{\mathrm{sym}}(z_k)\right)\right]}$$
+$$\boxed{\delta N_\alpha = -\frac{1}{\pi}\, \mathrm{Im}\!\left[\sum_k w_k\, \mathrm{Tr}\!\left(G_{DD}^R(z_k)\, Q_\alpha^{\mathrm{sym}}(z_k)\right)\right] \quad \text{(backward contour, e.g. densityComplex/N)}$$
+
+**Forward real axis (`densityReal`, `densityRealN`, `damleCrossTerm`):** the
+same steps with the forward prefactor $P_{DL} = \frac{+i}{2\pi}(\text{lineInt}_{DL} - \text{lineInt}_{LD}^\dagger)$
+flip every sign from Eq. (583) onward, giving
+
+$$\boxed{\delta N_\alpha = +\frac{1}{\pi}\, \mathrm{Im}\!\left[\sum_k w_k\, \mathrm{Tr}\!\left(G_{DD}^R(z_k)\, Q_\alpha^{\mathrm{sym}}(z_k)\right)\right] \quad \text{(forward real axis)}$$
 
 **Why only $G^R$ is needed (no $G^A$):** The real-axis spectral formula $A_{DL} = i(G_{DL}^R - G_{DL}^A)$ involves both retarded and advanced Green's functions. However, the complex contour integral avoids this: $\text{lineInt}_{DL} = \oint_C f(z)\, G_{DL}^R(z)\, dz$ uses only $G^R$ (analytic in the upper half-plane), while the $G^A$ contribution is captured by $\text{lineInt}_{LD}^\dagger$ through contour deformation to the lower half-plane. The symmetrized $Q^{\mathrm{sym}}$ encodes both blocks (DL from $Q_{\mathrm{fwd}}$, LD from $Q_{\mathrm{rev}}$), so no explicit $G^A$ or $g^A$ construction is needed.
 
@@ -619,7 +640,7 @@ At each energy point in `GrInt`, alongside accumulating $w_k \cdot G_{DD}^R$:
 2. Form $\mathrm{Tr}(G_{DD}^R \cdot Q^{\mathrm{sym}}_{\mathrm{tot}})$ -- cheap since $Q$ is sparse on contact indices
 3. Accumulate the weighted scalar: `cross_accum += w_k * Tr(G_R @ Q_tot)`
 
-The scan accumulator in `_GInt` changes from a single matrix to a `(matrix, scalar)` tuple. Both the `vmap` and `lax.scan` paths need to handle the tuple return. Density functions return `(P, delta_N)` where `delta_N = -(1/pi) * Im(cross_accum)`.
+The scan accumulator in `_GInt` changes from a single matrix to a `(matrix, scalar)` tuple. Both the `vmap` and `lax.scan` paths need to handle the tuple return. Density functions return `(P, delta_N)` where `delta_N = -(1/pi) * Im(cross_accum)` on the backward contour (`densityComplex`/`densityComplexN`) and `delta_N = +(1/pi) * Im(cross_accum)` on the forward real axis (`densityReal`/`densityRealN`/`damleCrossTerm`).
 
 #### What changes in the Fermi search
 
