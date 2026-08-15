@@ -358,7 +358,7 @@ def damleCrossTerm(V, D, Vc, Y_eff, Q0, Q1, lo, hi):
     the physical in-window-pole term is kept (see
     docs/lower_contour_math_and_probes.md sec 5):
 
-        delta_N = -(1/pi) Im sum_i (b0_i + b1_i*D_i)
+        delta_N = +(1/pi) Im sum_i (b0_i + b1_i*D_i)
                                   * [log(1 - hi/D_i) - log(1 - lo/D_i)]
 
     with b(E) = Vc^dagger Y_eff Q(E) Y_eff V, b0 = diag(...Q0...),
@@ -387,7 +387,7 @@ def damleCrossTerm(V, D, Vc, Y_eff, Q0, Q1, lo, hi):
     b1 = jnp.diag(Ml @ jnp.asarray(Q1) @ Mr)
     logdiff = jnp.log(1.0 - hi / D) - jnp.log(1.0 - lo / D)
     contrib = (b0 + b1 * D) * logdiff
-    return float(-(1.0 / jnp.pi) * jnp.imag(jnp.sum(contrib)))
+    return float((1.0 / jnp.pi) * jnp.imag(jnp.sum(contrib)))
 
 def damleLowerDensity(F_eV, Y_eff, Sigma_0, g, Emin, ENERGY_MIN_=ENERGY_MIN):
     """Analytic Damle lower-contour density on [ENERGY_MIN_, Emin].
@@ -570,7 +570,7 @@ def densityRealN(F, S, g, Emin, mu, N=100, T=TEMPERATURE, showText=True):
 
     # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19)
     P = (1j/(2*jnp.pi)) * (lineInt - lineInt.conj().T)
-    delta_N = float(-(1/jnp.pi) * jnp.imag(cross_scalar))
+    delta_N = float((1/jnp.pi) * jnp.imag(cross_scalar))
     return P, delta_N
 
 def densityReal(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, debug=False):
@@ -623,9 +623,9 @@ def densityReal(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATURE, 
 
     print('Real Axis Integration (ANT):')
     P, cross_scalar = integratePointsAdaptiveANT(computePoint, tol=tol, debug=debug)
-    delta_N = float(-(1 / jnp.pi) * jnp.imag(cross_scalar))
+    delta_N = float((1 / jnp.pi) * jnp.imag(cross_scalar))
     return P, delta_N
-   
+
 
 def densityGridN(F, S, g, mu1, mu2, ind, N=100, T=TEMPERATURE, showText=True):
     """
@@ -989,6 +989,9 @@ def densityComplex(F, S, g, Emin, mu, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERATUR
 
     # The standard formula P = -Im(G^R)/pi (see 10.1103/PhysRevB.63.245407, Eq. 19)
     P = (-1j/(2*jnp.pi)) * (lineInt - lineInt.conj().T)
+    # -(1/pi) is CORRECT here: the arc runs Emax->Emin (backward) and
+    # the T>0 window term is subtracted; orientation carries the sign.
+    # The FORWARD real-axis convention is +(1/pi) Im (see protocols).
     delta_N = float(-(1/jnp.pi) * jnp.imag(cross_scalar))
     return P, delta_N
 
