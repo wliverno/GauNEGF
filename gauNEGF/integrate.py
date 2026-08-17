@@ -63,6 +63,9 @@ FORCE_SYNCHRONOUS = False             # Force synchronous operation (for accurat
 # device bytes vs n_points (cancels fixed pool/executable overhead):
 # 2.93x across 4 configs, 1.4% spread -> 16*2.93 ~= 47.
 MEMORY_PER_MATRIX_FACTOR = 47         # Effective bytes/element/point (measured)
+# _GLessIntCross's per-point live set is larger (Gr, Gless, gamma, per-contact
+# Q blocks); measured on GPU as the slope of peak device bytes vs points.
+GLESS_CROSS_MEMORY_FACTOR = 97        # Effective bytes/element/point (measured)
 BYTES_TO_GB = 1e9                     # Conversion factor
 
 # =============================================================================
@@ -383,7 +386,7 @@ def _GLessIntCross(weighted_func, F, S, g, Elist, weights):
     num_energies = len(Elist)
     kind = getattr(weighted_func, '_kernel_kind', weighted_func.__name__)
 
-    matrix_size_gb = (matrix_size * matrix_size * MEMORY_PER_MATRIX_FACTOR) / BYTES_TO_GB
+    matrix_size_gb = (matrix_size * matrix_size * GLESS_CROSS_MEMORY_FACTOR) / BYTES_TO_GB
 
     if num_energies * matrix_size_gb < MAX_VMAP_MEMORY_GB:
         parallel_logger.info(

@@ -675,31 +675,20 @@ def calculate_current(F, S, sigma_calculator, fermi, qV, T=TEMPERATURE, spin=Non
     if spin is None:
         spin = 'r'
     
-    # Handle negative qV by making dE negative (matches legacy behavior)
     if np.allclose(0, qV):
         if spin == 'r':
             return 0.0
         else:
             return 0.0, [0.0, 0.0, 0.0, 0.0]
-    elif qV < 0:
-        dE = -1 * abs(dE)
-    else:
-        dE = abs(dE)
-    
-    # Calculate chemical potentials
-    muL = fermi - qV/2
-    muR = fermi + qV/2
-    
-    # Generate energy grid for integration
-    if T == 0:
-        # Zero temperature - integrate between chemical potentials
-        integration_energies = np.arange(muL, muR, dE)
-    else:
-        # Finite temperature - need broader energy range
-        kT = kB * T
-        spread = np.sign(dE) * N_KT * kT
-        integration_energies = np.arange(muL - spread, muR + spread, dE)
-    
+
+    # scf convention (scf.py:394-395): mu1/left = fermi + qV/2
+    muL, muR = fermi + qV / 2.0, fermi - qV / 2.0
+    # ascending grid; grid_sign restores the current's orientation
+    spread = 0.0 if T == 0 else N_KT * kB * T
+    lo, hi = min(muL, muR) - spread, max(muL, muR) + spread
+    integration_energies = np.arange(lo, hi, abs(dE))
+    grid_sign = np.sign(muL - muR)
+
     if len(integration_energies) == 0:
         raise ValueError("No energies in integration window. Check fermi, qV, and dE.")
     
@@ -717,16 +706,17 @@ def calculate_current(F, S, sigma_calculator, fermi, qV, T=TEMPERATURE, spin=Non
         transmissions = np.asarray(transmission_result)
         spin_transmissions = None
     
-    # Integrate transmission
-    if T == 0: 
+    # Integrate transmission (grid_sign restores the bias-direction orientation
+    # since integration_energies is always ascending)
+    if T == 0:
         # Zero temperature integration
         if spin_transmissions is not None:
-            current_spin = [eoverh * trapezoid(spin_transmissions[:, i], integration_energies)
+            current_spin = [grid_sign * eoverh * trapezoid(spin_transmissions[:, i], integration_energies)
                            for i in range(4)]
             current_total = sum(current_spin)
             return current_total, current_spin
         else:
-            current_total = eoverh * trapezoid(transmissions, integration_energies)
+            current_total = grid_sign * eoverh * trapezoid(transmissions, integration_energies)
             # Apply spin factor for restricted calculations
             if spin == 'r':
                 current_total *= 2
@@ -735,14 +725,14 @@ def calculate_current(F, S, sigma_calculator, fermi, qV, T=TEMPERATURE, spin=Non
         # Finite temperature integration with Fermi-Dirac distribution
         dfermi = np.abs(1/(np.exp((integration_energies - muR)/(kB*T)) + 1) -
                        1/(np.exp((integration_energies - muL)/(kB*T)) + 1))
-        
+
         if spin_transmissions is not None:
-            current_spin = [eoverh * trapezoid(spin_transmissions[:, i] * dfermi, integration_energies)
+            current_spin = [grid_sign * eoverh * trapezoid(spin_transmissions[:, i] * dfermi, integration_energies)
                            for i in range(4)]
             current_total = sum(current_spin)
             return current_total, current_spin
         else:
-            current_total = eoverh * trapezoid(transmissions * dfermi, integration_energies)
+            current_total = grid_sign * eoverh * trapezoid(transmissions * dfermi, integration_energies)
             # Apply spin factor for restricted calculations
             if spin == 'r':
                 current_total *= 2
