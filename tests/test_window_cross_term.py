@@ -1,6 +1,7 @@
 """Tests for GrLessIntCross: the window integrator that carries the
 non-equilibrium Mulliken cross term (own-tail + device-tail per contact)."""
 import numpy as np
+import jax.numpy as jnp
 from gauNEGF import integrate
 from test_cross_term import make_1d_nonortho_chain, make_1d_ortho_chain
 from wbeta_reference import W_beta_dense, dos_qsym, _gr, _prod
@@ -8,8 +9,11 @@ from wbeta_reference import W_beta_dense, dos_qsym, _gr, _prod
 ETA = 1e-6
 
 
-def dense_reference(g, E, ind):
-    """Brute-force W-cross pieces + Gless at one energy, numpy only."""
+def dense_reference(g, E, ind, swap=False):
+    """Brute-force W-cross pieces + Gless at one energy, numpy only.
+    swap=True exchanges Q_fwd/Q_rev roles in both kernel pieces (negative
+    control for the fwd/rev asymmetry the production kernel uses)."""
+    fwd, rev = (1, 0) if swap else (0, 1)
     F = np.array(g.F); S = np.array(g.S)
     nc = g.num_contacts
     sigs = [np.array(g.sigma(E, i)) for i in range(nc)]
@@ -22,13 +26,13 @@ def dense_reference(g, E, ind):
     own = 0.0
     q_b = g.crossTermQ(E, ind)
     if q_b is not None:
-        own = (np.imag(np.trace(Gr @ np.array(q_b[0])))
-               + np.imag(np.trace(Ga @ np.array(q_b[1]))))
+        own = (np.imag(np.trace(Gr @ np.array(q_b[fwd])))
+               + np.imag(np.trace(Ga @ np.array(q_b[rev]))))
     tail = 0.0
     for a in range(nc):
         q_a = g.crossTermQ(E, a)
         if q_a is not None:
-            Qr = np.array(q_a[1])
+            Qr = np.array(q_a[rev])
             tail -= 0.5 * np.real(np.trace(Gless @ (Qr + Qr.conj().T)))
     return Gless, own + tail
 
@@ -45,6 +49,62 @@ def test_grlessintcross_matches_dense():
     assert np.allclose(np.array(mat), ref_m, atol=1e-8)
     assert abs(complex(scl).imag) < 1e-8 * max(1.0, abs(complex(scl).real))
     assert np.isclose(complex(scl).real, ref_s, atol=1e-8)
+
+
+def test_window_scalar_distinguishes_forward_from_reverse_under_complex_hamiltonian():
+    """For real H and S, Q_rev = Q_fwd^T and the window scalar is provably
+    invariant under exchanging them -- a real-symmetric toy cannot catch a
+    fwd/rev swap. The asymmetry only has content for complex Hermitian H with
+    complex contact coupling (tau/stau), e.g. spin-orbit coupling; this toy
+    adds both (F -> F + i*A, A real antisymmetric; tau/stau get a small
+    imaginary part) so the swap has somewhere to show up."""
+    from gauNEGF.surfG1D import surfG
+    N, nc = 4, 2
+    F = jnp.diag(jnp.linspace(-1.0, 1.0, N)) + 0.0j
+    for i in range(N - 1):
+        F = F.at[i, i+1].set(-0.3)
+        F = F.at[i+1, i].set(-0.3)
+    A = np.array([[0.0, 0.05, -0.02, 0.01],
+                  [-0.05, 0.0, 0.03, -0.01],
+                  [0.02, -0.03, 0.0, 0.04],
+                  [-0.01, 0.01, -0.04, 0.0]])
+    F = F + 1j * jnp.array(A)
+    S = jnp.eye(N) + 0.0j
+    for i in range(N - 1):
+        S = S.at[i, i+1].set(0.1)
+        S = S.at[i+1, i].set(0.1)
+
+    indsList = [jnp.array(list(range(nc))), jnp.array(list(range(N-nc, N)))]
+    dtau = jnp.array([[0.05j, -0.03j], [0.02j, -0.04j]])
+    dstau = jnp.array([[0.02j, -0.01j], [0.015j, -0.02j]])
+    taus = [jnp.ones((nc, nc), dtype=complex) * -0.3 + dtau,
+            jnp.ones((nc, nc), dtype=complex) * -0.3 + dtau]
+    staus = [jnp.ones((nc, nc), dtype=complex) * 0.1 + dstau,
+             jnp.ones((nc, nc), dtype=complex) * 0.1 + dstau]
+    alphas = [jnp.diag(jnp.array([-0.5] * nc, dtype=complex)),
+              jnp.diag(jnp.array([0.5] * nc, dtype=complex))]
+    betas = [jnp.ones((nc, nc), dtype=complex) * -0.3,
+             jnp.ones((nc, nc), dtype=complex) * -0.3]
+    aOverlaps = [jnp.eye(nc, dtype=complex) * 1.05,
+                 jnp.eye(nc, dtype=complex) * 1.05]
+    bOverlaps = [jnp.ones((nc, nc), dtype=complex) * 0.1,
+                 jnp.ones((nc, nc), dtype=complex) * 0.1]
+    g = surfG(F, S, indsList, taus=taus, staus=staus,
+              alphas=alphas, betas=betas,
+              aOverlaps=aOverlaps, bOverlaps=bOverlaps, eta=1e-3)
+
+    F_np = np.array(g.F)
+    assert np.allclose(F_np, F_np.conj().T), "toy F must be Hermitian"
+    assert not (np.allclose(F_np, F_np.real) and np.allclose(F_np, F_np.T)), \
+        "toy F must NOT be real-symmetric -- that is the case the mutation can't detect"
+
+    Elist = np.linspace(-0.8, 0.9, 5); w = np.linspace(0.5, 1.5, 5)
+    _, scl = integrate.GrLessIntCross(np.array(g.F), np.array(g.S),
+                                      g, Elist, w, ind=1)
+    ref_s = sum(wi * dense_reference(g, E, 1)[1] for E, wi in zip(Elist, w))
+    swapped_s = sum(wi * dense_reference(g, E, 1, swap=True)[1] for E, wi in zip(Elist, w))
+    assert np.isclose(complex(scl).real, ref_s, atol=1e-8)
+    assert abs(swapped_s - ref_s) > 1e-3 * max(1.0, abs(ref_s))
 
 
 def test_grlessintcross_raises_on_ind_none():
@@ -127,6 +187,34 @@ def test_zero_temperature_hard_step_window_quadratures_agree():
                            ind=-1, N=600, T=0.0)
     assert np.isfinite(dNa) and np.isfinite(dNn)
     assert np.isclose(dNa, dNn, rtol=1e-3)   # two quadratures agree
+
+
+def test_densityReal_delta_N_sign_matches_forward_axis_convention():
+    """Pins the SIGN of the forward-axis cross-term count: delta_N from
+    densityReal must match +(1/pi) Im trapz Tr[Gr Q_sym] dE, not its
+    negative. A sign flip in the production convention fails this."""
+    from gauNEGF.density import densityReal
+    g = make_1d_nonortho_chain()
+    F, S = np.array(g.F), np.array(g.S)
+    Emin, mu = -0.8, 0.3
+    _, dN = densityReal(F, S, g, Emin, mu, T=0.0)
+
+    eta = max(g.eta, ETA)
+    grid = np.linspace(Emin, mu, 4000)
+    vals = np.empty(grid.size, dtype=complex)
+    for i, E in enumerate(grid):
+        sigs = [np.array(g.sigma(E, c)) for c in range(g.num_contacts)]
+        Gr = np.linalg.inv((E + 1j * eta) * S - F - sum(sigs))
+        Qsym = np.zeros_like(S)
+        for c in range(g.num_contacts):
+            q = g.crossTermQ(E, c)
+            if q is not None:
+                Qsym = Qsym + np.array(q[2])
+        vals[i] = np.trace(Gr @ Qsym)
+    ref = (1.0 / np.pi) * np.imag(np.trapz(vals, grid))
+
+    assert np.isclose(dN, ref, rtol=2e-2, atol=1e-6)
+    assert not np.isclose(dN, -ref, rtol=2e-2, atol=1e-6)
 
 
 def test_window_count_enters_balance_unhalved():
