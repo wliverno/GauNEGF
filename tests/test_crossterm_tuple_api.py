@@ -36,9 +36,9 @@ def test_surfGAt3D_crossTermQSurf_tuple_and_baseline():
     _tuple_case(make_surfGAt3D(), 'surfGAt3D_surf', use_surf=True)
 
 def test_surfGAt3D_bulk_nan_known_defect():
-    # crossTermQBulk diverges on this fixture; this test documents the defect
-    # -- if it starts failing, the bulk path was fixed and the baseline should
-    # be extended.
+    # Documents a pre-existing divergence in crossTermQBulk on this fixture --
+    # if it starts failing, the defect was fixed and the baseline should be
+    # extended.
     g = make_surfGAt3D()
     Q_bulk = np.array(g.crossTermQ(-5.0 + 0.1j, 0)[2])
     assert not np.all(np.isfinite(Q_bulk)), \

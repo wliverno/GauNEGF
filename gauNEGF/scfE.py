@@ -611,6 +611,10 @@ class NEGFE(NEGF):
 
         # Fermi Energy Update using local self-energy approximation
         if self.updFermi:
+            if self.mu1 != self.mu2:
+                print('WARNING: Fermi search is on under bias; an integer electron '
+                      'count is not physical under bias. Find the equilibrium Fermi '
+                      'level first and pin it (updFermi=False) for biased runs.')
             fermi_old = self.fermi+0.0
             conv= min(self.convLevel, FERMI_CALCULATION_TOL)
             # Freeze guard: skip the search when the previous cycle's
@@ -743,7 +747,12 @@ class NEGFE(NEGF):
                 print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
                 print('Setting equilibrium density matrix...') 
                 self.dN_inclusive = None    # bisect reports no count mismatch
-                P = P+P2 if self.mu1 == self.mu2 else compContourP2(self.mu1)[0]
+                if self.mu1 == self.mu2:
+                    P = P + P2
+                else:
+                    P2c, dNc = compContourP2(self.mu1)
+                    P = P + P2c
+                    self._eqN = float(np.trace(P2c @ self.S).real + dNc)
             
             if method not in ['muller', 'secant', 'bisect', 'predict', 'poly', 'frozen']:
                 raise Exception('Error: invalid Fermi search method, needs to be \'muller\',' + \
@@ -770,11 +779,17 @@ class NEGFE(NEGF):
                                     self.mu1, self.mu2, ind=-1,
                                     tol=self.tol, T=self.T)
             P += Pwin
+            # bias-window charge on the device, cross terms included -- not a convergence residual
             self.windowN = float(np.trace(Pwin @ self.S).real + dNwin)
+            print(f'Bias-window device charge: {self.windowN:.3E} electrons')
 
         # Complete-count audit: refresh dN_inclusive to include the bias window, whichever branch ran above.
         if getattr(self, '_eqN', None) is not None:
             self.dN_inclusive = count_audit(ne, nLower, self._eqN, self.windowN)
+            if self.mu1 != self.mu2:
+                # under bias with a pinned Fermi level this is deviation from integer
+                # neutrality, not a convergence error -- convergence is RMSDP/MaxDP/|dE|
+                print(f'Deviation from integer neutrality: {self.dN_inclusive:.3E} electrons')
 
         # Calculate Level Occupation, Lowdin TF,  Return
         D,V = eigh(self.X@(self.F*har_to_eV)@self.X)

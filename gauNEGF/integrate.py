@@ -14,7 +14,7 @@ import tempfile
 import logging
 
 # IMPORTANT: Import config BEFORE jax to set up JAX environment
-from gauNEGF.config import LOG_LEVEL, LOG_PERFORMANCE, ETA, shard_array
+from gauNEGF.config import LOG_LEVEL, LOG_PERFORMANCE, ETA, shard_array, JAX_GPU_MEMORY_FRACTION
 
 import jax
 import jax.numpy as jnp
@@ -64,8 +64,10 @@ FORCE_SYNCHRONOUS = False             # Force synchronous operation (for accurat
 # 2.93x across 4 configs, 1.4% spread -> 16*2.93 ~= 47.
 MEMORY_PER_MATRIX_FACTOR = 47         # Effective bytes/element/point (measured)
 # _GLessIntCross's per-point live set is larger (Gr, Gless, gamma, per-contact
-# Q blocks); measured on GPU as the slope of peak device bytes vs points.
-GLESS_CROSS_MEMORY_FACTOR = 97        # Effective bytes/element/point (measured)
+# Q blocks). This is a RELATIVE weight against MEMORY_PER_MATRIX_FACTOR (the
+# window kernel costs ~2x the contour kernel per point), not an absolute
+# byte count -- the absolute budget for this kernel comes from the device.
+GLESS_CROSS_MEMORY_FACTOR = 2 * MEMORY_PER_MATRIX_FACTOR
 BYTES_TO_GB = 1e9                     # Conversion factor
 
 # =============================================================================
@@ -387,8 +389,19 @@ def _GLessIntCross(weighted_func, F, S, g, Elist, weights):
     kind = getattr(weighted_func, '_kernel_kind', weighted_func.__name__)
 
     matrix_size_gb = (matrix_size * matrix_size * GLESS_CROSS_MEMORY_FACTOR) / BYTES_TO_GB
+    # Window kernel only: absolute budget comes from the device, not a
+    # hardcoded constant. Falls back to MAX_VMAP_MEMORY_GB off-GPU or if
+    # the device doesn't expose memory_stats.
+    try:
+        _dev = jax.devices()[0]
+        _stats = _dev.memory_stats() if _dev.platform == 'gpu' else None
+        _bytes_limit = _stats.get('bytes_limit') if _stats else None
+        vmap_budget_gb = ((_bytes_limit * JAX_GPU_MEMORY_FRACTION * 0.5) / BYTES_TO_GB
+                          if _bytes_limit else MAX_VMAP_MEMORY_GB)
+    except Exception:
+        vmap_budget_gb = MAX_VMAP_MEMORY_GB
 
-    if num_energies * matrix_size_gb < MAX_VMAP_MEMORY_GB:
+    if num_energies * matrix_size_gb < vmap_budget_gb:
         parallel_logger.info(
             f"GLessIntCross using vmap: {matrix_size}x{matrix_size} matrix, "
             f"{num_energies} energies (single-pass)")
@@ -405,7 +418,7 @@ def _GLessIntCross(weighted_func, F, S, g, Elist, weights):
         matrix_sum, scalar_sum = kernel(Elist_sharded, weights_sharded,
                                         F_jax, S_jax, _current_dfermis(g))
     else:
-        batch_size = max(1, int(MAX_VMAP_MEMORY_GB // matrix_size_gb))
+        batch_size = max(1, int(vmap_budget_gb // matrix_size_gb))
         parallel_logger.info(
             f"GLessIntCross using batched: {matrix_size}x{matrix_size} matrix, "
             f"{num_energies} energies, batch={batch_size} (single-pass)")

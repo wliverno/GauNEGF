@@ -76,6 +76,16 @@ Consequence for the record: the commit message of f491c93 says
 correctness is "pinned by parameter-free identities". That overstates
 what three of the four gates establish and should be reworded.
 
+### Real-symmetric toys cannot host a Q_fwd/Q_rev mutation test
+
+For real H and S, Q_rev = Q_fwd^T and the window scalar is invariant
+under exchanging them (verified numerically: Q_rev == Q_fwd^T to 3.4e-17
+on the real-symmetric 1D chain toy, and Tr[Gr Q_fwd] == Tr[Gr Q_rev] to
+8e-17, because Gr is complex symmetric there). No real-symmetric fixture
+can therefore detect a fwd/rev swap, no matter how the test is written.
+The distinction is physical only for complex Hermitian H (spin-orbit
+coupling, magnetic field), which is where the mutation test now lives.
+
 Other test findings:
 - The forward-axis sign flip has NO test in either direction
   (test_damle_cross_term asserts abs(abs(dN) - 2.0); test_densityReal

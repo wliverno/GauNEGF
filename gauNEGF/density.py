@@ -264,9 +264,11 @@ def integratePointsAdaptiveANT(computePoint, tol=ADAPTIVE_INTEGRATION_TOL, maxN=
             else:
                 new_P = P*ratio + new_result
 
+            # Stop test is the matrix delta alone: this helper is shared with
+            # densityComplex, whose equilibrium ladder must stay bit-identical
+            # to pre-branch. The co-accumulated scalar (window call sites only)
+            # rides the same grid as the matrix, so matrix convergence bounds it.
             maxDP = jnp.max(jnp.abs(new_P-P))
-            if is_tuple:
-                maxDP = jnp.maximum(maxDP, jnp.abs(new_accum - accum))
             if debug:
                 full_result = computePoint(x, w)
                 P_debug = full_result[0] if is_tuple else full_result
@@ -647,7 +649,7 @@ def densityGridN(F, S, g, mu1, mu2, ind, N=100, T=TEMPERATURE, showText=True):
     mu2 : float
         Right contact chemical potential in eV
     ind : int
-        Contact index (-1 for total)
+        Contact index; ind=-1 selects the last contact (None raises)
     N : int, optional
         Number of integration points (default: 100)
     T : float, optional
@@ -772,7 +774,7 @@ def densityGrid(F, S, g, mu1, mu2, ind, tol=ADAPTIVE_INTEGRATION_TOL, T=TEMPERAT
     mu2 : float
         Right contact chemical potential in eV
     ind : int
-        Contact index (-1 for total)
+        Contact index; ind=-1 selects the last contact (None raises)
     tol : float, optional
         Convergence tolerance (default: 1e-3)
     T : float, optional
