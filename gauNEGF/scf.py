@@ -174,8 +174,8 @@ class NEGF(object):
         print(self.locs)
         self.Total_E =  self.bar.scalar("escf")
         self.updateN()
-        print('Expecting', str(self.bar.ne), 'electrons')
-        print('Actual: ', str(self.nelec), 'electrons')
+        print('Expecting', str(self.bar.ne), 'electrons (device + cross term)')
+        print('Actual (device block): ', str(self.nelec), 'electrons')
         print('Charge is:', self.bar.icharg)
         print('Multiplicity is:', self.bar.multip)
         print("Initial SCF energy: ", self.Total_E)
@@ -230,7 +230,9 @@ class NEGF(object):
         Returns
         -------
         float
-            Total number of electrons
+            Device-block population tr(rho_D S_D). Excludes the
+            device-contact cross term, which the Fermi search adds
+            separately.
         """
         nOcc =  np.real(np.trace(self.P @ self.S))
         if self.spin == 'r':
@@ -706,8 +708,15 @@ class NEGF(object):
         storeDen(self.bar, self.P, self.spin)
         
         # Update counters, print data
-        self.updateN() 
-        print(f'Total number of electrons (NEGF): {self.nelec:.2f}')
+        self.updateN()
+        # nelec is the device-block population tr(rho_D S_D); the cross term
+        # belongs to orbitals shared with the contacts and is reported apart.
+        dNc = getattr(self, 'dN_cross', None)
+        if dNc is None:
+            print(f'Device electrons tr(rho_D S_D): {self.nelec:.2f}')
+        else:
+            print(f'Device electrons tr(rho_D S_D): {self.nelec:.2f} '
+                  f'| cross term: {dNc:+.2f} | total: {self.nelec + dNc:.2f}')
         self.MaxDP = max(Dense_diff)
         RMSDP = np.sqrt(np.mean(Dense_diff**2))
         print(f'MaxDP: {self.MaxDP:.2E} | RMSDP: {RMSDP:.2E}')

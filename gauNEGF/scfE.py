@@ -608,6 +608,7 @@ class NEGFE(NEGF):
         if self.spin =='r':
             ne /= 2
         self._eqN = None    # only same-cycle _eqN should feed the post-window audit
+        self.dN_cross = None  # likewise: report a cross term only when this cycle computed one
 
         # Fermi Energy Update using local self-energy approximation
         if self.updFermi:
@@ -634,6 +635,7 @@ class NEGFE(NEGF):
                 P2f, dNf = compContourP2(self.mu1)
                 P += P2f
                 self._eqN = float(np.trace(P2f @ self.S).real + dNf)
+                self.dN_cross = float(dNf)
                 self.dN_inclusive = count_audit(
                     ne, nLower, self._eqN, getattr(self, 'windowN', 0.0))
             if method =='predict':
@@ -667,6 +669,7 @@ class NEGFE(NEGF):
                 P2p, dNp = compContourP2(self.mu1)
                 P += P2p
                 self._eqN = float(np.trace(P2p @ self.S).real + dNp)
+                self.dN_cross = float(dNp)
                 self.dN_inclusive = count_audit(
                     ne, nLower, self._eqN, getattr(self, 'windowN', 0.0))
 
@@ -699,6 +702,7 @@ class NEGFE(NEGF):
                         P2c, dNc = compContourP2(self.mu1)
                         P = P + P2c
                         self._eqN = float(np.trace(P2c @ self.S).real + dNc)
+                        self.dN_cross = float(dNc)
 
             if method =='muller':
                 print('MULLER METHOD:')
@@ -719,6 +723,7 @@ class NEGFE(NEGF):
                         P2c, dNc = compContourP2(self.mu1)
                         P = P + P2c
                         self._eqN = float(np.trace(P2c @ self.S).real + dNc)
+                        self.dN_cross = float(dNc)
 
             if method =='secant':
                 print('SECANT METHOD:')
@@ -739,6 +744,7 @@ class NEGFE(NEGF):
                         P2c, dNc = compContourP2(self.mu1)
                         P = P + P2c
                         self._eqN = float(np.trace(P2c @ self.S).real + dNc)
+                        self.dN_cross = float(dNc)
 
             if method =='bisect' or methodFail:
                 print('BISECT METHOD:')
@@ -753,6 +759,7 @@ class NEGFE(NEGF):
                     P2c, dNc = compContourP2(self.mu1)
                     P = P + P2c
                     self._eqN = float(np.trace(P2c @ self.S).real + dNc)
+                    self.dN_cross = float(dNc)
             
             if method not in ['muller', 'secant', 'bisect', 'predict', 'poly', 'frozen']:
                 raise Exception('Error: invalid Fermi search method, needs to be \'muller\',' + \
@@ -765,6 +772,7 @@ class NEGFE(NEGF):
             P2e, dNe = compContourP2(self.mu1)
             P += P2e
             self._eqN = float(np.trace(P2e @ self.S).real + dNe)
+            self.dN_cross = float(dNe)
 
         # If bias applied, need to integrate G<
         self.windowN = 0.0
