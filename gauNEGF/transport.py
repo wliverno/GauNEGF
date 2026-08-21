@@ -217,7 +217,16 @@ def _transmission_kernel_spin_block(E, F, S, sigma_total, gamma1, gamma2):
 
     # Vectorized computation over spin components
     T_spin = jax.vmap(compute_transmission_component)(jnp.arange(4))
-    return jnp.sum(T_spin), T_spin
+
+    # Exact total via Gamma = D + O split: the 4-term sum is Tr[D1 Gr D2 Ga];
+    # the remainder covers the off-diagonal-gamma terms. O = 0 exactly for
+    # spin-scalar leads, keeping the total bit-identical to the 4-term sum.
+    Ga = jnp.conj(Gr).T
+    mask = jnp.kron(jnp.eye(2, dtype=Gr.dtype), jnp.ones((N, N), dtype=Gr.dtype))
+    D1, D2 = gamma1 * mask, gamma2 * mask
+    O1, O2 = gamma1 - D1, gamma2 - D2
+    remainder = jnp.trace(O1 @ Gr @ gamma2 @ Ga) + jnp.trace(D1 @ Gr @ O2 @ Ga)
+    return jnp.sum(T_spin) + jnp.real(remainder), T_spin
 
 @jit
 def _dos_kernel(E, F, S, sigma_total, Q):
@@ -261,6 +270,9 @@ def transmission_single_energy(E, F_jax, S_jax, sigma_calc, spin=None):
     float or tuple
         For 'r': transmission value
         For 'u'/'ro'/'g': (total_transmission, [T_up_up, T_up_down, T_down_up, T_down_down])
+
+        The total is the exact trace Tr[Gamma1 Gr Gamma2 Ga]; under spin-mixing
+        leads total != sum(channels) (basis-dependent off-diagonal-gamma remainder).
     """
 
     if spin is None:
@@ -431,6 +443,8 @@ def calculate_transmission(F, S, sigma_calculator, energy_list,
     ndarray or tuple
         For restricted: transmission array (N,)
         For open shell: (transmission (N,), spin_transmission (N,4))
+        Under spin-mixing leads transmission != sum over spin_transmission columns
+        (off-diagonal-gamma remainder; recover it as total - sum(channels)).
     """
 
     
@@ -668,6 +682,8 @@ def calculate_current(F, S, sigma_calculator, fermi, qV, T=TEMPERATURE, spin=Non
     float or tuple
         For restricted: current value (float)
         For open shell: (current_total (float), current_spin (4,))
+        current_total integrates the exact total transmission; under spin-mixing
+        leads current_total != sum(current_spin).
     """
     if fermi is None or qV is None:
         raise ValueError("fermi and qV must be provided for current calculations")
@@ -713,7 +729,8 @@ def calculate_current(F, S, sigma_calculator, fermi, qV, T=TEMPERATURE, spin=Non
         if spin_transmissions is not None:
             current_spin = [grid_sign * eoverh * trapezoid(spin_transmissions[:, i], integration_energies)
                            for i in range(4)]
-            current_total = sum(current_spin)
+            # Integrate the exact total; != sum(current_spin) under spin-mixing leads
+            current_total = grid_sign * eoverh * trapezoid(transmissions, integration_energies)
             return current_total, current_spin
         else:
             current_total = grid_sign * eoverh * trapezoid(transmissions, integration_energies)
@@ -729,7 +746,8 @@ def calculate_current(F, S, sigma_calculator, fermi, qV, T=TEMPERATURE, spin=Non
         if spin_transmissions is not None:
             current_spin = [grid_sign * eoverh * trapezoid(spin_transmissions[:, i] * dfermi, integration_energies)
                            for i in range(4)]
-            current_total = sum(current_spin)
+            # Integrate the exact total; != sum(current_spin) under spin-mixing leads
+            current_total = grid_sign * eoverh * trapezoid(transmissions * dfermi, integration_energies)
             return current_total, current_spin
         else:
             current_total = grid_sign * eoverh * trapezoid(transmissions * dfermi, integration_energies)
@@ -801,7 +819,7 @@ def currentSpin(F, S, sig1, sig2, fermi, qV, T=TEMPERATURE, spin="r",dE=ENERGY_S
     Returns
     -------
     list
-        Spin-currents (in Amperes) [I↑↑, I↑↓, I↓↑, I↓↓]
+        Spin-currents (in Amperes) [Iuu, Iud, Idu, Idd]
     """
     # Create sigma calculator and use checkpointable current calculation
     sigma_calc = SigmaCalculator(sig1, sig2, energy_dependent=False)
@@ -942,17 +960,18 @@ def cohTransSpin(Elist, F, S, sig1, sig2, spin='u'):
     -------
     tuple
         (Tr, Tspin) where:
-        - Tr: Total transmission at each energy
-        - Tspin: Array of spin-resolved transmissions [T↑↑, T↑↓, T↓↑, T↓↓]
+        - Tr: Total transmission at each energy (exact trace; under spin-mixing
+          leads Tr != sum over Tspin columns)
+        - Tspin: Array of spin-resolved transmissions [Tuu, Tud, Tdu, Tdd]
 
     Notes
     -----
     For collinear spin calculations ('u' or 'ro'), the matrices are arranged in blocks:
-    [F↑↑  0 ]  [S↑↑  0 ]
-    [0   F↓↓], [0   S↓↓]
+    [Fuu  0 ]  [Suu  0 ]
+    [0   Fdd], [0   Sdd]
     For generalized spin basis ('g'), each orbital contains a 2x2 spinor block:
-    [F↑↑  F↑↓]  [S↑↑  S↑↓]
-    [F↓↑  F↓↓], [S↓↑  S↓↓]
+    [Fuu  Fud]  [Suu  Sud]
+    [Fdu  Fdd], [Sdu  Sdd]
     which are then combined into a 2Nx2N matrix.
     """
     # Create sigma calculator and use checkpointable transmission calculation
@@ -1058,8 +1077,9 @@ def cohTransSpinE(Elist, F, S, g, spin='u'):
     -------
     tuple
         (Tr, Tspin) where:
-        - Tr: Total transmission at each energy
-        - Tspin: Array of spin-resolved transmissions [T↑↑, T↑↓, T↓↑, T↓↓]
+        - Tr: Total transmission at each energy (exact trace; under spin-mixing
+          leads Tr != sum over Tspin columns)
+        - Tspin: Array of spin-resolved transmissions [Tuu, Tud, Tdu, Tdd]
     """
     # Create sigma calculator and use checkpointable transmission calculation
     sigma_calc = SigmaCalculator(g, energy_dependent=True)
