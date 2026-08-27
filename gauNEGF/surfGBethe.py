@@ -1144,12 +1144,14 @@ class surfGBAt:
             count, diff, sigSurf, sigSurf_ = state
             sigSurf_ = sigSurf.copy()
             sigTot = jnp.sum(sigSurf, axis=0)
-            g = LA.inv(A - sigTot) # subtracted from sigTot
             for k in planeVec:
                 pair_k = (k + 6)%12 # Opposite direction vector
+                # Exclude the neighbour's branch pointing back at this atom;
+                # pair_k < 9 for every planeVec k, so it is inside sigTot.
+                g_k = LA.inv(A - sigTot + sigSurf[pair_k])
                 B = E_eff*self.Slist[k] - self.Vlist0[k]
                 B_bar = E_eff*self.Slist[k].conj().T - self.Vlist0[k].conj().T
-                sigSurf = sigSurf.at[k].set(mix*(B@g@B_bar) + (1-mix)*sigSurf_[k])
+                sigSurf = sigSurf.at[k].set(mix*(B@g_k@B_bar) + (1-mix)*sigSurf_[k])
             
             # Convergence Check
             diff = jnp.max(jnp.abs(sigSurf - sigSurf_))/jnp.max(jnp.abs(sigSurf_))
