@@ -486,6 +486,14 @@ class NEGFE(NEGF):
             mu1 = self.mu1
         if mu2 is None:
             mu2 = self.mu2
+        # Spawned object counts the bare trace; a parent cross term is lost.
+        dNc = getattr(self, 'dN_cross', None)
+        if dNc:
+            print(f'WARNING: spawning an energy-independent object from a '
+                  f'parent with a cross term ({dNc:+.4f} e/spin). The spawn '
+                  f'counts tr(PS) only; re-converging it will not reproduce '
+                  f'this state. Use an orthogonalized lattice, or evaluate '
+                  f'on the parent density without running SCF.')
         sig1, sig2 = self.getSigma(mu1, mu2)
         negf = NEGF(self.ifile[:-4], self.basis, self.func, self.spin, False,
                     self.otherRoute, self.section,len(self.pB)-1)

@@ -382,3 +382,23 @@ def test_06_cycle_timing_receipt(parent_ctx, spawn, results):
           f'{pa2_fock / max(sp_fock, 1e-12):.1f}x; the shared Gaussian '
           f'dofock=DENSITY dominates the spawned cycle)')
     assert np.isfinite(ratio) and sp_tot > 0 and pa2_tot > 0
+
+
+def test_07_cross_term_spawn_warning(parent_ctx, capsys):
+    """spawnNEGF warns on ANY nonzero cross term, and only then."""
+    negf = parent_ctx['negf']
+    saved = getattr(negf, 'dN_cross', None)
+    try:
+        for loud in (1.4033, 1e-12):
+            negf.dN_cross = loud
+            negf.spawnNEGF()
+            assert 'cross term' in capsys.readouterr().out
+        # None: no cycle computed one. -0.0: orthogonalized lattice.
+        for quiet in (None, 0.0, -0.0):
+            negf.dN_cross = quiet
+            negf.spawnNEGF()
+            assert 'cross term' not in capsys.readouterr().out
+    finally:
+        negf.dN_cross = saved
+    print(f'{TAG} spawnNEGF warns on any nonzero cross term, silent on '
+          f'None and zero')
