@@ -1166,11 +1166,8 @@ class surfGBAt:
         """Cross-term matrices Q_fwd, Q_rev, Q_sym = sum_k (B_k g_k S_k + S_k g_k B_k^bar) / 2.
 
         sigInds: list of surface direction indices to include (default: all 9).
-        Uses the neighbor Green's function g_k = inv(A - sigTot + sigSurf[pair_k])
-        for each direction k, not the center atom's own Green's function.
-        For out-of-plane UP directions (3,4,5) whose pairs (9,10,11) are not
-        surface directions, g_k = inv(A - sigTot) since the pair self-energy
-        is already absent from sigTot.
+        g_k is the neighbour Green's function that built sigSurf[k]: surface for
+        in-plane k, bulk (sigmaK) for out-of-plane k = 3,4,5, as in sigmaSurf.
         """
         if sigInds is None:
             sigInds = list(range(9))
@@ -1178,9 +1175,11 @@ class surfGBAt:
         # Get converged surface self-energies (9 self-energies for surface)
         # E is pre-shifted by the caller
         sigSurf = self.sigmaSurf(E, conv, mix)  # shape (9, dim, dim)
+        sigK = self.sigmaK(E, conv, mix)
         E_eff = E + self.eta * 1j
         A = E_eff * jnp.eye(self.dim) - self.H0
         sigTot = jnp.sum(sigSurf, axis=0)
+        sigTotK = jnp.sum(sigK, axis=0)
 
         Qf = jnp.zeros((self.dim, self.dim), dtype=complex)
         Qr = jnp.zeros((self.dim, self.dim), dtype=complex)
@@ -1190,7 +1189,7 @@ class surfGBAt:
             if pair_k < 9:
                 g_k = LA.inv(A - sigTot + sigSurf[pair_k])
             else:
-                g_k = LA.inv(A - sigTot)
+                g_k = LA.inv(A - sigTotK + sigK[pair_k])
             B_k = E_eff * self.Slist[k] - self.Vlist0[k]
             B_k_bar = E_eff * self.Slist[k].conj().T - self.Vlist0[k].conj().T
             Q_fwd = B_k @ g_k @ self.Slist[k].conj().T

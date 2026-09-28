@@ -207,6 +207,26 @@ def test_surfGBAt_crossTermQ_shape():
     assert Q.shape == (9, 9), f"Expected (9,9), got {Q.shape}"
 
 
+@pytest.mark.parametrize('k', range(9))
+def test_surfGBAt_crossTermQSurf_uses_the_g_that_built_sigma(k):
+    """Sigma_k = B g B~ and Q_fwd = B g S^H share one g, so Q_fwd = Sigma B~^-1 S^H
+    and Q_rev = S B^-1 Sigma exactly; k = 3,4,5 keep the bulk sigma, so need the bulk g."""
+    gAt = make_surfGBAt()
+    E = -5.0 + 0.1j
+    E_eff = E + gAt.eta * 1j
+    sig = np.array(gAt.sigmaSurf(E))[k]
+    S = np.array(gAt.Slist[k])
+    V = np.array(gAt.Vlist0[k])
+    B = E_eff * S - V
+    B_bar = E_eff * S.conj().T - V.conj().T
+    qf, qr, _ = gAt.crossTermQSurf(E, sigInds=[k])
+    want_f = sig @ np.linalg.inv(B_bar) @ S.conj().T
+    want_r = S @ np.linalg.inv(B) @ sig
+    err_f = np.linalg.norm(np.array(qf) - want_f) / np.linalg.norm(want_f)
+    err_r = np.linalg.norm(np.array(qr) - want_r) / np.linalg.norm(want_r)
+    assert err_f < 1e-3 and err_r < 1e-3, f'direction {k}: rel err fwd {err_f:.2e}, rev {err_r:.2e}'
+
+
 def test_surfGBAt_crossTermQ_orthogonal_limit():
     """When all Slist are zero, crossTermQ should be zero."""
     gAt = make_surfGBAt_zero_overlap()
