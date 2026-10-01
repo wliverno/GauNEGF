@@ -338,25 +338,20 @@ def constructSOCterm(lambdas):
         return Lx, Ly, Lz
 
     def genOrbList(l):
-        """Generate transformation matrix from spherical to real orbitals."""
-        m = np.zeros(2*l+1, dtype=int)
-        for i in range(2*l+1):
-            if i == 0:
-                m[i] = 0
-            elif i % 2 == 1:
-                m[i] = (i + 1) // 2
-            else:
-                m[i] = -((i + 1) // 2)
+        """Spherical-to-real transform in the lattice orbital order (p: px, py, pz;
+        d: z2, xz, yz, x2-y2, xy) with standard real-harmonic signs (dxy = +xy)."""
+        mOrder = {0: [0], 1: [1, -1, 0], 2: [0, 1, -1, 2, -2]}[l]
         V = np.zeros((2*l+1, 2*l+1), dtype=complex)
-        for i, mi in enumerate(m):
+        for i, mi in enumerate(mOrder):
+            a = abs(mi)
             if mi == 0:
                 V[i, l] = 1.0
             elif mi > 0:
-                V[i, l+mi] = ((-1.0)**mi)/np.sqrt(2)
-                V[i, l-mi] = 1.0/np.sqrt(2)
+                V[i, l+a] = ((-1.0)**a)/np.sqrt(2)
+                V[i, l-a] = 1.0/np.sqrt(2)
             else:
-                V[i, l+mi] = -((-1.0)**mi)*1j/np.sqrt(2)
-                V[i, l-mi] = 1j/np.sqrt(2)
+                V[i, l-a] = 1j/np.sqrt(2)
+                V[i, l+a] = -((-1.0)**a)*1j/np.sqrt(2)
         return V
 
     def genLSMatrix(l):

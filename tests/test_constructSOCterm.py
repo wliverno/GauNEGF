@@ -28,26 +28,24 @@ def LOps(l: int):
     return Lx, Ly, Lz
 
 
+# Reference corrected 2026-09-30 (spec section 7): it was a copy of the production transform, so it
+# could not detect the -dxy sign / [pz,px,py] order; the independent checks are
+# test_Lz_elements_in_lattice_orbital_basis and the rotation test in test_bethe_onsite_frame.py.
 def genOrbList(l: int):
-    """Generate transformation matrix from spherical to real orbitals."""
-    m = np.zeros(2*l+1, dtype=int)
-    for i in range(2*l+1):
-        if i == 0:
-            m[i] = 0
-        elif i % 2 == 1:
-            m[i] = (i + 1) // 2
-        else:
-            m[i] = -((i + 1) // 2)
+    """Spherical-to-real transform in the lattice orbital order (p: px, py, pz;
+    d: z2, xz, yz, x2-y2, xy) with standard real-harmonic signs (dxy = +xy)."""
+    mOrder = {0: [0], 1: [1, -1, 0], 2: [0, 1, -1, 2, -2]}[l]
     V = np.zeros((2*l+1, 2*l+1), dtype=complex)
-    for i, mi in enumerate(m):
+    for i, mi in enumerate(mOrder):
+        a = abs(mi)
         if mi == 0:
             V[i, l] = 1.0
         elif mi > 0:
-            V[i, l+mi] = ((-1.0)**mi)/np.sqrt(2)
-            V[i, l-mi] = 1.0/np.sqrt(2)
+            V[i, l+a] = ((-1.0)**a)/np.sqrt(2)
+            V[i, l-a] = 1.0/np.sqrt(2)
         else:
-            V[i, l+mi] = -((-1.0)**mi)*1j/np.sqrt(2)
-            V[i, l-mi] = 1j/np.sqrt(2)
+            V[i, l-a] = 1j/np.sqrt(2)
+            V[i, l+a] = -((-1.0)**a)*1j/np.sqrt(2)
     return V
 
 
@@ -259,6 +257,16 @@ class TestConstructSOCterm:
         n_cross = np.linalg.norm(Hsoc[8:13, 13:18])
         assert n_cross > 0.01 * n_full, \
             f"Cross-block norm {n_cross} unexpectedly small"
+
+    def test_Lz_elements_in_lattice_orbital_basis(self):
+        """Up-up L.S = Lz/2 in constructMat's basis, p = [px,py,pz] and d = [z2,xz,yz,x2-y2,xy]:
+        Lz px = i py, Lz dxz = i dyz, Lz dx2-y2 = 2i dxy (spec 2026-09-30 section 7)."""
+        Hp = constructSOCterm([0.0, 1.0, 0.0])
+        Hd = constructSOCterm([0.0, 0.0, 1.0])
+        assert np.isclose(Hp[4, 2], 0.5j, atol=1e-14)     # <py up|L.S|px up>
+        assert np.isclose(Hp[6, 2], 0.0, atol=1e-14)      # <pz up|L.S|px up>
+        assert np.isclose(Hd[12, 10], 0.5j, atol=1e-14)   # <dyz up|L.S|dxz up>
+        assert np.isclose(Hd[16, 14], 1.0j, atol=1e-14)   # <dxy up|L.S|dx2-y2 up>
 
 
 if __name__ == '__main__':

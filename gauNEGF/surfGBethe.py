@@ -201,7 +201,8 @@ class surfGB:
             self.Vlists.append(Vlist)
         self.num_contacts = len(self.indsLists)
         # Use surfGBAt() object to store the atomic Bethe lattice green's function for each contact
-        self.gList = [surfGBAt(self.H0.copy(), Slist, Vlist, eta, T, self.SOC) for Slist, Vlist in zip(self.Slists, self.Vlists)]
+        self.gList = [surfGBAt(self.constructOnsite(dirList), Slist, Vlist, eta, T, self.SOC)
+                      for dirList, Slist, Vlist in zip(self.dirLists, self.Slists, self.Vlists)]
        
         # Calculate fermi level
         # With SOC, 18x18 basis already includes both spins -> use full ne
@@ -323,6 +324,7 @@ class surfGB:
         -----
         Parameters are sorted into:
         - Edict: Onsite energies (converted from Hartrees to eV)
+        - H0: on-site block in the lattice's cubic frame; contacts use gList[i].H0 (constructOnsite)
         - Vdict: Hopping parameters (converted from Hartrees to eV)
         - Sdict: Overlap parameters
         """
@@ -365,11 +367,50 @@ class surfGB:
             self.SOC = True
             lambdas = [0.0, params['soc_p'] * har_to_eV, params['soc_d'] * har_to_eV]
             from gauNEGF.spinTools import constructSOCterm
-            Hsoc = constructSOCterm(lambdas)
-            self.H0 = jnp.kron(H0, jnp.eye(2)) + jnp.array(Hsoc)
+            self.Hsoc = jnp.array(constructSOCterm(lambdas))
+            self.H0 = jnp.kron(H0, jnp.eye(2)) + self.Hsoc
         else:
             self.SOC = False
             self.H0 = H0
+
+    def constructOnsite(self, dirList):
+        """
+        On-site block of one contact's Bethe atom, with the e_g/t2g split placed on the
+        cubic axes defined by that contact's 12 nearest-neighbour directions.
+
+        Parameters
+        ----------
+        dirList : list
+            The contact's 12 nearest-neighbour unit vectors (self.dirLists[c])
+
+        Returns
+        -------
+        ndarray
+            9x9 on-site matrix (18x18 with SOC)
+        """
+        dirs = jnp.asarray(dirList, dtype=float)
+        perp = jnp.where(jnp.abs(dirs @ dirs[0]) < 1e-6)[0]
+        if len(perp) == 0:
+            raise ValueError('constructOnsite: no neighbour perpendicular to the first; not an fcc set')
+        c1 = (dirs[0] + dirs[perp[0]]) / LA.norm(dirs[0] + dirs[perp[0]])
+        c2 = (dirs[0] - dirs[perp[0]]) / LA.norm(dirs[0] - dirs[perp[0]])
+        c3 = jnp.cross(c1, c2)
+        comps = jnp.sort(jnp.abs(dirs @ jnp.stack([c1, c2, c3]).T), axis=1)
+        if not jnp.allclose(comps, jnp.array([0.0, 1.0, 1.0]) / jnp.sqrt(2.0), atol=1e-8, rtol=0):
+            raise ValueError('constructOnsite: neighbour directions are not fcc <110> vectors')
+        # d orbitals [z2, xz, yz, x2-y2, xy] as unit traceless tensors; e_g = those diagonal on c1, c2, c3
+        ex, ey, ez = jnp.eye(3)
+        o = jnp.outer
+        T = [(2 * o(ez, ez) - o(ex, ex) - o(ey, ey)) / jnp.sqrt(6.0), (o(ex, ez) + o(ez, ex)) / jnp.sqrt(2.0),
+             (o(ey, ez) + o(ez, ey)) / jnp.sqrt(2.0), (o(ex, ex) - o(ey, ey)) / jnp.sqrt(2.0),
+             (o(ex, ey) + o(ey, ex)) / jnp.sqrt(2.0)]
+        A = [(2 * o(c3, c3) - o(c1, c1) - o(c2, c2)) / jnp.sqrt(6.0), (o(c1, c1) - o(c2, c2)) / jnp.sqrt(2.0)]
+        TA = jnp.array([[jnp.sum(t * a) for a in A] for t in T])     # TA @ TA.T = e_g projector
+        Hd = self.Edict['dt'] * jnp.eye(5) + (self.Edict['dd'] - self.Edict['dt']) * (TA @ TA.T)
+        H0 = jnp.diag(jnp.array([self.Edict['s']] + [self.Edict['p']] * 3 + [0.0] * 5)).at[4:, 4:].set(Hd)
+        if self.SOC:
+            return jnp.kron(H0, jnp.eye(2)) + self.Hsoc
+        return H0
 
     def constructMat(self, Mdict, dirCosines, SOC=False):
         """
