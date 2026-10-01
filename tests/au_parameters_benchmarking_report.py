@@ -2,12 +2,21 @@
 Comprehensive Benchmarking Report: Au Tight-Binding Parameters
 
 Compares Au.bethe (non-orthogonal) and Au2.bethe (orthogonal) Slater-Koster
-parameters from Papaconstantopoulos against experimental benchmarks.
+parameters against experimental benchmarks. Both files are taken unchanged
+(Ry -> Ha) from ANT.Gaussian's BLDAT/BL079.dat (provenance, with digit
+receipts: paper/studies/reports/2026-09-29-lattice-parameter-provenance.md).
 
 Literature Sources:
-[1] Papaconstantopoulos, D. A. "Handbook of the Band Structure of Elemental
-    Solids: From Z=1 To Z=112" Springer (2015)
-    DOI: 10.1007/978-1-4419-8264-3
+[1] Au.bethe = ANT.G set "Papacon": the NRL tight-binding model,
+    Mehl, M. J. & Papaconstantopoulos, D. A. Phys. Rev. B 54, 4519 (1996),
+    DOI: 10.1103/PhysRevB.54.4519, gold file au_par_99 (unpublished; first
+    use found: Kirchhoff et al., Phys. Rev. B 63, 195101 (2001)), evaluated
+    at the fcc nearest-neighbour distance (5.45 bohr) and truncated to that
+    single shell.
+[4] Au2.bethe = ANT.G set "Papacon-old": Palacios, J. J. et al. Phys. Rev. B
+    66, 035322 (2002), Table I "Au-b", DOI: 10.1103/PhysRevB.66.035322, an
+    orthogonal nearest-neighbour fit to the bands in Papaconstantopoulos,
+    Handbook of the Band Structure of Elemental Solids (Plenum, 1986).
 [2] Christensen, N. E. & Seraphin, B. O. "Relativistic Band Calculation and
     the Optical Properties of Gold" Phys. Rev. B 4, 3321 (1971)
     DOI: 10.1103/PhysRevB.4.3321
@@ -399,11 +408,11 @@ Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 PARAMETER SETS TESTED:
 1. Au.bethe: Non-orthogonal Slater-Koster parameters
-   - Source: Papaconstantopoulos "Handbook of Band Structure" [1]
+   - Source: NRL tight-binding (Mehl & Papaconstantopoulos), NN shell only [1]
    - Overlap matrices: Included (Sss = 0.1066)
 
 2. Au2.bethe: Orthogonal Slater-Koster parameters
-   - Source: Papaconstantopoulos "Handbook of Band Structure" [1]
+   - Source: Palacios et al. 2002, Table I "Au-b" (NN orthogonal fit) [4]
    - Overlap matrices: None (S = 0)
 
 {'='*70}
@@ -452,9 +461,15 @@ RECOMMENDATION: Use Au.bethe for transport calculations.
 LITERATURE REFERENCES
 {'='*70}
 
-[1] Papaconstantopoulos, D. A. "Handbook of the Band Structure of
-    Elemental Solids: From Z=1 To Z=112" Springer (2015)
-    DOI: 10.1007/978-1-4419-8264-3
+[1] Mehl, M. J. & Papaconstantopoulos, D. A. "Applications of a
+    tight-binding total-energy method for transition and noble metals"
+    Phys. Rev. B 54, 4519 (1996), DOI: 10.1103/PhysRevB.54.4519
+    (Au.bethe: gold file au_par_99 at the NN distance, via ANT.Gaussian)
+
+[4] Palacios, J. J. et al. "First-principles approach to electrical
+    transport in atomic-scale nanostructures"
+    Phys. Rev. B 66, 035322 (2002), DOI: 10.1103/PhysRevB.66.035322
+    (Au2.bethe: Table I, "Au-b", via ANT.Gaussian)
 
 [2] Christensen, N. E. & Seraphin, B. O. "Relativistic Band Calculation
     and the Optical Properties of Gold"
