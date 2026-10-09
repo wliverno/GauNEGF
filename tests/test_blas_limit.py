@@ -86,3 +86,12 @@ def test_both_fock_to_p_are_scoped():
     assert hasattr(NEGF.FockToP, "__wrapped__")
     assert hasattr(NEGFE.FockToP, "__wrapped__")
     assert NEGF.FockToP.__doc__ and NEGFE.FockToP.__doc__
+
+
+def test_limit_is_inert_until_entered():
+    before = _blas_threads()
+    obj = utils.blas_limit(1)          # created but not entered: must not touch the pools
+    assert _blas_threads() == before
+    with obj:
+        assert all(n == 1 for n in _blas_threads())
+    assert _blas_threads() == before

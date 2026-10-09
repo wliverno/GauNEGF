@@ -184,8 +184,9 @@ def blas_thread_cap(ncpu=None):
 _warned_no_tpc = False
 
 
+@contextlib.contextmanager
 def blas_limit(n=None):
-    """Cap the host BLAS pools for the enclosed block; restored on exit."""
+    """Cap the host BLAS pools for the enclosed block; nothing happens until entered, restored on exit."""
     global _warned_no_tpc
     try:
         from threadpoolctl import threadpool_limits
@@ -193,8 +194,10 @@ def blas_limit(n=None):
         if not _warned_no_tpc:
             warnings.warn("threadpoolctl not installed: host BLAS threads are not capped", RuntimeWarning)
             _warned_no_tpc = True
-        return contextlib.nullcontext()
-    return threadpool_limits(limits=blas_thread_cap() if n is None else n, user_api="blas")
+        yield
+        return
+    with threadpool_limits(limits=blas_thread_cap() if n is None else n, user_api="blas"):
+        yield
 
 
 def with_blas_limit(func):

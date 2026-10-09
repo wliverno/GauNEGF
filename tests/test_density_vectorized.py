@@ -43,7 +43,9 @@ def test_matches_rowwise(n, seed):
         assert np.max(np.abs(new - ref)) <= 1e-12 * max(1.0, np.max(np.abs(ref)))
 
 
-def test_real_dtype_eigenvalues():
+def test_near_real_eigenvalues():
+    # Exactly real D gives NaN in old and new code alike (1/(2i Im D) on the diagonal); production Fbar
+    # eigenvalues always carry Im(D) < 0. This pins the near-real case.
     V, Vc, D, Gam = _case(6, 4, real_d=True)
     Dr = D.real.astype(complex) - 1e-3j   # small Im keeps DD - DD^H nonzero on the diagonal, as Im(D) < 0 does
     ref = np.asarray(_density_rowwise(V, Vc, Dr, Gam, -50.0, -4.4))
