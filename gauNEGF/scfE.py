@@ -21,7 +21,7 @@ jax.config.update("jax_enable_x64", True)
 # Developed Packages
 from gauNEGF.matTools import *
 from gauNEGF.density import *
-from gauNEGF.utils import inv, eig, eigh, inv_sqrt_general
+from gauNEGF.utils import inv, eig, eigh, inv_sqrt_general, with_blas_limit
 from gauNEGF.config import (ETA, TEMPERATURE, ADAPTIVE_INTEGRATION_TOL, FERMI_CALCULATION_TOL, EMIN_BUFFER, ENERGY_MIN, FERMI_DEBUG, USE_INERTIA_EMIN)
 from gauNEGF.scf import NEGF
 from gauNEGF.surfG1D import surfG
@@ -515,6 +515,7 @@ class NEGFE(NEGF):
         return negf
         
     # Updated to use energy-dependent contour integral from surfG()
+    @with_blas_limit
     def FockToP(self):
         """
         Calculate density matrix using energy-dependent integration.
