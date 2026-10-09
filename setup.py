@@ -28,6 +28,7 @@ setup(
         "scipy>=1.4.0",
         "matplotlib>=3.1.0",
         "jax>=0.4.0",
+        "threadpoolctl>=3.1",
     ],
     extras_require={
         "dev": [

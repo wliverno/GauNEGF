@@ -47,7 +47,7 @@ from gauNEGF.spinTools import spinorTF
 from gauNEGF.config import (SCF_CONVERGENCE_TOL, SCF_DAMPING, SCF_MAX_CYCLES,
                             FERMI_CALCULATION_TOL, PULAY_MIXING_SIZE, ENERGY_MIN,
                             CLEAR_JAX_CACHES_PER_CYCLE)
-from gauNEGF.utils import fractional_matrix_power, inv, eig
+from gauNEGF.utils import fractional_matrix_power, inv, eig, with_blas_limit
 
 
 # CONSTANTS:
@@ -565,6 +565,7 @@ class NEGF(object):
         return (self.sigma1, self.sigma2)
 
     # Calculate density matrix from stored Fock matrix
+    @with_blas_limit
     def FockToP(self):
         """
         Calculate density matrix from Fock matrix using energy-independent approach.

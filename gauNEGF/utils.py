@@ -5,6 +5,11 @@ Contains commonly used pure mathematical functions that are reused
 across multiple modules in the gauNEGF package.
 """
 
+import contextlib
+import functools
+import os
+import warnings
+
 import jax.numpy as jnp
 from jax import jit
 
@@ -158,3 +163,44 @@ def eigh(A):
     """
     return jnp.linalg.eigh(A)
 
+
+
+def schedulable_cpus():
+    """Cores this process may run on (cgroup/affinity aware where the OS reports it)."""
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:
+        return os.cpu_count() or 1
+
+
+def blas_thread_cap(ncpu=None):
+    """Host BLAS thread count for the density step; measured rule, see config.HOST_BLAS_THREADS."""
+    from gauNEGF.config import HOST_BLAS_THREADS
+    ncpu = schedulable_cpus() if ncpu is None else ncpu
+    n = HOST_BLAS_THREADS if HOST_BLAS_THREADS is not None else min(16, ncpu // 4)
+    return max(1, min(n, ncpu))
+
+
+_warned_no_tpc = False
+
+
+def blas_limit(n=None):
+    """Cap the host BLAS pools for the enclosed block; restored on exit."""
+    global _warned_no_tpc
+    try:
+        from threadpoolctl import threadpool_limits
+    except ImportError:
+        if not _warned_no_tpc:
+            warnings.warn("threadpoolctl not installed: host BLAS threads are not capped", RuntimeWarning)
+            _warned_no_tpc = True
+        return contextlib.nullcontext()
+    return threadpool_limits(limits=blas_thread_cap() if n is None else n, user_api="blas")
+
+
+def with_blas_limit(func):
+    """Run func inside blas_limit()."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with blas_limit():
+            return func(*args, **kwargs)
+    return wrapper

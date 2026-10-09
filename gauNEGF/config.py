@@ -45,7 +45,6 @@ JAX_PLATFORM = None              # Force specific platform: 'cpu', 'gpu', or Non
 
 # Configure JAX on module import
 import os
-import multiprocessing
 
 # GPU memory settings
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = str(JAX_PREALLOCATE).lower()
@@ -55,9 +54,8 @@ os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = str(JAX_GPU_MEMORY_FRACTION)
 # to avoid impacting performance on newer GPUs where BFC is preferable):
 # os.environ['XLA_PYTHON_CLIENT_ALLOCATOR'] = 'platform'
 
-# CPU threading settings (may improve multi-core utilization)
-CPU_THREADS = multiprocessing.cpu_count()
-os.environ['XLA_FLAGS'] = f'--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads={CPU_THREADS}'
+# Host BLAS threads inside FockToP: None = min(16, ncpu // 4) (at least 1), an int overrides.
+HOST_BLAS_THREADS = None
 
 import jax
 

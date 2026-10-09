@@ -296,6 +296,7 @@ def integratePointsAdaptiveANT(computePoint, tol=ADAPTIVE_INTEGRATION_TOL, maxN=
     return new_P
 
 ## ENERGY INDEPENDENT DENSITY FUNCTIONS
+@jit
 def density(V, Vc, D, Gam, Emin, mu):
     """
     Calculate density matrix using analytical integration for energy-independent self-energies.
@@ -329,27 +330,16 @@ def density(V, Vc, D, Gam, Emin, mu):
     The integration is performed analytically using the residue theorem.
     The result includes contributions from poles below the Fermi energy.
     """
-    Nd = len(V)
-    DD = jnp.array([D for i in range(Nd)]).T
-    
-    #Integral of 1/x is log(x), calculating at lower and upper limit
-    logmat = jnp.array([np.emath.log(1-(mu/D)) for i in range(Nd)]).T
-    logmat2 = jnp.array([np.emath.log(1-(Emin/D)) for i in range(Nd)]).T
-
-    #Compute integral, add prefactor
-    invmat = 1/(2*np.pi*(DD-DD.conj().T))
-    pref2 = logmat - logmat.conj().T
-    pref3 = logmat2-logmat2.conj().T
-
-    prefactor = jnp.multiply(invmat,(pref2-pref3))
-
-    #Convert Gamma into Fbar eigenbasis, element-wise multiplication
-    Gammam = Vc.conj().T@Gam@Vc
-    prefactor = jnp.multiply(prefactor,Gammam)
-    
-    #Convert back to input basis, return
-    den = V@ prefactor @ V.conj().T
-    return den
+    D = jnp.asarray(D, dtype=jnp.complex128)
+    DD = D[:, None]
+    # Integral of 1/x is log(x), at the lower and upper limits
+    logmat = jnp.log(1 - mu/D)[:, None]
+    logmat2 = jnp.log(1 - Emin/D)[:, None]
+    invmat = 1/(2*jnp.pi*(DD - DD.conj().T))
+    prefactor = invmat*((logmat - logmat.conj().T) - (logmat2 - logmat2.conj().T))
+    # Gamma in the Fbar eigenbasis, then back to the input basis
+    Gammam = Vc.conj().T @ Gam @ Vc
+    return V @ (prefactor*Gammam) @ V.conj().T
 
 def damleCrossTerm(V, D, Vc, Y_eff, Q0, Q1, lo, hi):
     """Analytic lower-contour cross-term delta_N for the Damle method.
@@ -493,8 +483,8 @@ def bisectFermi(V, Vc, D, Gam, Nexp, conv=FERMI_CALCULATION_TOL, Eminf=ENERGY_MI
     The search is bounded by the minimum and maximum eigenvalues.
     Warns if maximum iterations reached without convergence.
     """
-    Emin = min(D.real)
-    Emax = max(D.real)
+    Emin = float(jnp.min(D.real))
+    Emax = float(jnp.max(D.real))
     # Seed fermi so the function is total: if the entry state already
     # satisfies |dN| <= conv the loop never runs (seen on resume of an
     # already-converged predict-path state, job 36915480) and the return
