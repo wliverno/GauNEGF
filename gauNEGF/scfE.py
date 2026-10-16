@@ -527,10 +527,6 @@ class NEGFE(NEGF):
         negf.setSigma(self.lContact, self.rContact,
             np.asarray(sig1), np.asarray(sig2))
         negf.setDen(self.P)
-        # Refresh F from bar: setDen only rebuilds the Fock inside the
-        # Gaussian bar; without this, spawn.F is the stale Harris Fock
-        # (tests/test_spawn_negf.py::test_03c, 2026-07-29).
-        negf.F, negf.locs = getFock(negf.bar, negf.spin)
         qV = mu1-mu2
         fermi = (mu1+mu2)/2
         if self.updFermi:
@@ -875,10 +871,21 @@ class NEGFE(NEGF):
                 'g.setF(F, mu1, mu2) requires the chemical potentials).')
         Fock_old = self.F.copy()
         dE = super().PToFock()
-        self.F, self.locs = getFock(self.bar, self.spin)
         self._symmetrize_F()
         self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
         return dE
+
+    def setFock(self, F_):
+        """Set the Fock matrix (eV), rebuild the contacts from it, and compute the density (and Ef) it implies."""
+        if not hasattr(self, 'mu1'):
+            raise RuntimeError('NEGFE.setFock: mu1/mu2 undefined - call setVoltage() before setFock() (the contacts '
+                               'are rebuilt with g.setF(F, mu1, mu2)).')
+        self.F = np.array(F_)/har_to_eV
+        self._symmetrize_F()
+        self.g.setF(self.F*har_to_eV, self.mu1, self.mu2)
+        self.FockToP()
+        storeDen(self.bar, self.P, self.spin)
+        self.updateN()
     
     
 
