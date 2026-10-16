@@ -1716,8 +1716,15 @@ def calcFermi(g, ne, Emin, Ef, lBound=None, uBound=None, tol=ADAPTIVE_INTEGRATIO
 
     return Ef
 
-def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI_CALCULATION_TOL, 
-                    maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE, uBound=None, lBound=None):
+def count_electrons(P, S, delta_N, inds=None, cross=True):
+    """Fermi-search electron count: Mulliken over `inds` (None = whole device), plus the cross term if `cross`."""
+    PS = P @ S
+    n = np.trace(PS).real if inds is None else np.sum(np.diag(PS)[np.asarray(inds)]).real
+    return n + (delta_N if cross else 0.0)
+
+def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI_CALCULATION_TOL,
+                    maxcycles=FERMI_SEARCH_CYCLES, T=TEMPERATURE, uBound=None, lBound=None,
+                    inds=None, cross=True):
     """
     Calculate Fermi energy of system using bisection
     """
@@ -1734,7 +1741,7 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
     counter = 0
     g.setF(g.F, E, E)
     P, _delta_N = pMu(E)
-    Ncurr = np.trace(P@g.S).real + _delta_N
+    Ncurr = count_electrons(P, g.S, _delta_N, inds, cross)
     while None in [uBound, lBound] and counter<maxcycles:
         if counter==maxcycles:
             dE = 1e3
@@ -1753,7 +1760,8 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
         counter += 1
         g.setF(g.F, E, E)
         P, _delta_N = pMu(E)
-        Ncurr = np.trace(P@g.S).real + _delta_N
+        Ncurr = count_electrons(P, g.S, _delta_N, inds, cross)
+    Ef = E + 0.0   # Ncurr was evaluated at E, not at the last bound
     while abs(ne - Ncurr) > conv and counter < maxcycles and uBound != lBound:
         dN = ne-Ncurr
         if dN > 0 and Ef > lBound:
@@ -1768,38 +1776,46 @@ def calcFermiBisect(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, conv=FERMI
         if abs(dN) > conv:
             g.setF(g.F, Ef, Ef)
             P, _delta_N = pMu(Ef)
-            Ncurr = np.trace(P@g.S).real + _delta_N
-    if counter == maxcycles:
+            Ncurr = count_electrons(P, g.S, _delta_N, inds, cross)
+    reverted = False
+    if counter == maxcycles and abs(ne - Ncurr) > conv:
         print(f'Warning: Max cycles reached, convergence = {abs(Ncurr-ne):.2E}')
         print(f'Reverting to previous Fermi level...')
         Ef = Ef0
+        reverted = True
     elif uBound == lBound:
         print(f'Warning: Bisection failed, convergence = {abs(Ncurr-ne):.2E}')
         print(f'Reverting to previous Fermi level...')
         Ef = Ef0
+        reverted = True
+    if reverted:
+        g.setF(g.F, Ef, Ef)
+        P, _ = pMu(Ef)   # density at the kept Ef, not the last trial
     return Ef, dE, P
 
-def calcFermiSecant(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, 
-                    conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, 
-                    T=TEMPERATURE):
+def calcFermiSecant(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
+                    conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES,
+                    T=TEMPERATURE, inds=None, cross=True, lBound=None, uBound=None):
     """
     Calculate Fermi energy using Secant method, updating dE at each step
     """
     assert ne < len(g.F), "Number of electrons cannot exceed number of basis functions!"
     if N is None:
         pMu = lambda E: densityComplex(g.F, g.S, g, Emin, E, tol, T)
-    else:   
+    else:
         pMu = lambda E: densityComplexN(g.F, g.S, g, Emin, E, N, T)
     g.setF(g.F, Ef, Ef)
     P, _delta_N = pMu(Ef)
-    nCurr = np.trace(P@g.S).real + _delta_N
+    nCurr = count_electrons(P, g.S, _delta_N, inds, cross)
     dE = conv
     counter = 0
     while abs(nCurr-ne) > conv and counter < maxcycles:
-        Ef += dE
+        Ef_prev = Ef + 0.0
+        Ef = Ef + dE if lBound is None else min(max(Ef + dE, lBound), uBound)   # stay inside the spectrum
+        dE = Ef - Ef_prev
         g.setF(g.F, Ef, Ef)
         P, _delta_N = pMu(Ef)
-        nNext = np.trace(P@g.S).real + _delta_N
+        nNext = count_electrons(P, g.S, _delta_N, inds, cross)
         if FERMI_DEBUG:
             print(f"DEBUG: Ef={Ef:.2f}, dN={nNext-ne:.2E}, dE={dE:.2E}")
         if abs(nNext - nCurr)<1e-10:
@@ -1810,15 +1826,15 @@ def calcFermiSecant(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         dE = dE*((ne - nCurr)/(nNext-nCurr)) - dE
         nCurr = nNext + 0.0
         counter += 1
-    
-    Ef += dE  
+
+    Ef = Ef + dE if lBound is None else min(max(Ef + dE, lBound), uBound)   # stay inside the spectrum
     if counter == maxcycles:
         print(f'Warning: Max cycles reached, convergence = {abs(nCurr-ne):.2E}')
     return Ef, dE, P, abs(nCurr-ne)
 
-def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL, 
-                    conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES, 
-                    T=TEMPERATURE):
+def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
+                    conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES,
+                    T=TEMPERATURE, inds=None, cross=True):
     """
     Calculate Fermi energy using Muller's method, starting with 3 initial points
     """
@@ -1843,7 +1859,7 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
     for E in [E2, E1, E0]:
         g.setF(g.F, E, E)
         P, _delta_N = pMu(E)
-        n = np.trace(P@g.S).real + _delta_N - ne
+        n = count_electrons(P, g.S, _delta_N, inds, cross) - ne
         if n > 0:
             uBound = min(uBound, E) if uBound is not None else E
         elif n < 0:
@@ -1890,7 +1906,7 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         E2 = Enext
         g.setF(g.F, E2, E2)
         P, _delta_N = pMu(E2)
-        n2 = np.trace(P@g.S).real + _delta_N - ne
+        n2 = count_electrons(P, g.S, _delta_N, inds, cross) - ne
 
         if n2 > 0:
             uBound = min(uBound, E2) if uBound is not None else E2
@@ -1914,7 +1930,7 @@ def calcFermiMuller(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
 
 def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
                     conv=FERMI_CALCULATION_TOL, maxcycles=FERMI_SEARCH_CYCLES,
-                    T=TEMPERATURE, order=3):
+                    T=TEMPERATURE, order=3, inds=None, cross=True):
     """
     Calculate Fermi energy using polynomial regression fit with accumulating points.
 
@@ -1974,7 +1990,7 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
     E = Ef
     g.setF(g.F, E, E)
     P, _delta_N = pMu(E)
-    n = np.trace(P@g.S).real + _delta_N - ne
+    n = count_electrons(P, g.S, _delta_N, inds, cross) - ne
 
     if abs(n) < conv:
         return E, 0, P, abs(n), uBound, lBound
@@ -1990,7 +2006,7 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         E = Ef + step
         g.setF(g.F, E, E)
         P, _delta_N = pMu(E)
-        n = np.trace(P@g.S).real + _delta_N - ne
+        n = count_electrons(P, g.S, _delta_N, inds, cross) - ne
         if n > 0:
             uBound = min(uBound, E) if uBound is not None else E
         elif n < 0:
@@ -2048,7 +2064,7 @@ def calcFermiPolyFit(g, ne, Emin, Ef, N, tol=ADAPTIVE_INTEGRATION_TOL,
         E = E_next
         g.setF(g.F, E, E)
         P, _delta_N = pMu(E)
-        n = np.trace(P@g.S).real + _delta_N - ne
+        n = count_electrons(P, g.S, _delta_N, inds, cross) - ne
         if n > 0:
             uBound = min(uBound, E) if uBound is not None else E
         elif n < 0:

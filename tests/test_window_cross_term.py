@@ -217,14 +217,6 @@ def test_densityReal_delta_N_sign_matches_forward_axis_convention():
     assert not np.isclose(dN, -ref, rtol=2e-2, atol=1e-6)
 
 
-def test_window_count_enters_balance_unhalved():
-    """windowN enters the count balance on the same per-spin footing as eqN, unhalved."""
-    from gauNEGF.scfE import count_audit
-    ne_total, eqN, windowN, nLower = 8.0, 3.6, 0.4, 0.0
-    assert np.isclose(count_audit(ne_total / 2, nLower, eqN, windowN), 0.0, atol=1e-12)
-    assert np.isclose(count_audit(ne_total, nLower, eqN, windowN), 4.0)
-
-
 # ---------------------------------------------------------------------------
 # Asymmetric two-lead model junction: unequal lead onsites/hoppings, complex
 # Hermitian blocks, non-orthogonal intra-lead and device-lead overlap.

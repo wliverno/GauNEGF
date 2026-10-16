@@ -11,6 +11,7 @@ References
 """
 
 # Python Packages
+import warnings
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -47,10 +48,6 @@ kB = 8.617e-5           # eV/Kelvin
 V_to_au = 0.03675       # Volts to Hartree/elementary Charge
 
 
-def count_audit(ne_perspin, nLower, eqN, windowN):
-    """Complete per-spin count balance: target vs equilibrium + bias-window density."""
-    return abs(ne_perspin - nLower - eqN - windowN)
-
 
 class NEGFE(NEGF):
     """
@@ -64,8 +61,19 @@ class NEGFE(NEGF):
     
     Inherits all attributes and methods from NEGF class.
     """
+    def _setFermiCount(self, mode):
+        """Which electrons the Fermi search counts: contact atoms or whole device, with or without the cross term."""
+        if mode not in ('device', 'contact', 'device_bare'):
+            raise ValueError(f"fermiCount must be 'device', 'contact' or 'device_bare', got {mode!r}")
+        self.fermiCross = mode != 'device_bare'
+        inds = np.unique(np.concatenate([np.asarray(self.lInd), np.asarray(self.rInd)]))
+        if mode in ('device', 'device_bare') or len(inds) == self.F.shape[0]:
+            self.fermiCountInds, self.fermiTarget = None, None
+        else:
+            self.fermiCountInds, self.fermiTarget = inds, float(self.nelecContacts)
+
     # Set energy dependent Bethe lattice contact using surfGB() object
-    def setContactBethe(self, contactList, latFile='Au', eta=ETA, T=TEMPERATURE):
+    def setContactBethe(self, contactList, latFile='Au', eta=ETA, T=TEMPERATURE, fermiCount='device_bare'):
         """
         Set energy-dependent Bethe lattice contacts.
 
@@ -79,12 +87,22 @@ class NEGFE(NEGF):
             Broadening parameter in eV (default: 1e-9)
         T : float, optional
             Temperature in Kelvin (default: 0)
+        fermiCount : str, optional
+            Which electrons the Fermi search counts (default: 'device_bare'; 'device' is rejected for Bethe contacts).
+            'contact' needs a lattice that describes the same atoms as the device basis (e.g. matching overlaps);
+            with Au.bethe and a Gaussian Au basis it drives Ef far below device neutrality
 
         Returns
         -------
         tuple
             Left and right contact orbital indices
         """
+        if fermiCount == 'device':
+            raise ValueError("fermiCount='device' adds the cross term to a whole-device count; use 'contact' or 'device_bare' with Bethe contacts")
+        if fermiCount == 'contact':
+            warnings.warn("fermiCount='contact' with Bethe contacts needs a lattice that describes the same atoms as the device "
+                          "basis; with Au.bethe and a Gaussian Au basis the attached-atom count drives Ef far below device neutrality",
+                          RuntimeWarning)
         # Set L/R contacts based on atom numbers, use orbital inds for surfG() object
         inds = super().setContacts(contactList[0], contactList[-1])
         self.lInd = inds[0]
@@ -98,10 +116,11 @@ class NEGFE(NEGF):
         # Update other variables
         self.setIntegralLimits()
         self.T = T
+        self._setFermiCount(fermiCount)
         return inds
 
     # Set energy dependent 1D contact using surfG() object
-    def setContact1D(self, contactList, tauList=None, stauList=None, alphas=None, aOverlaps=None, betas=None, bOverlaps=None, neList=None, muList=None, eta=ETA, T=TEMPERATURE, symmetrize_contacts=None):
+    def setContact1D(self, contactList, tauList=None, stauList=None, alphas=None, aOverlaps=None, betas=None, bOverlaps=None, neList=None, muList=None, eta=ETA, T=TEMPERATURE, symmetrize_contacts=None, fermiCount='contact'):
         """
         Set energy-dependent 1D chain contacts.
 
@@ -133,6 +152,8 @@ class NEGFE(NEGF):
             Enforce identical on-site parameters for both contacts during SCF.
             True for same-material contacts, False for junctions.
             None (default) auto-detects based on setup pattern.
+        fermiCount : str, optional
+            Which electrons the Fermi search counts (default: 'contact')
 
         Returns
         -------
@@ -194,6 +215,7 @@ class NEGFE(NEGF):
         # Update other variables
         self.setIntegralLimits()
         self.T = T
+        self._setFermiCount(fermiCount)
         return inds
 
     def _symmetrize_F(self):
@@ -445,15 +467,18 @@ class NEGFE(NEGF):
         self.Emin, self.N1, self.N2 = integralFit(self.F*har_to_eV, self.S, self.g,
                                                   self.fermi, self.Eminf, self.tol)
         PLower, delta_N_lower = densityRealN(self.F*har_to_eV, self.S, self.g, self.Eminf, self.Emin, self.N2, self.T)
-        nLower = np.trace(self.S@PLower).real + delta_N_lower
+        cinds, cross = getattr(self, 'fermiCountInds', None), getattr(self, 'fermiCross', True)
+        nLower = count_electrons(PLower, self.S, delta_N_lower, cinds, cross)
         if self.mu1 != self.mu2:
-            self.Nnegf = integralFitNEGF(self.F*har_to_eV, self.S, self.g, self.fermi, 
+            self.Nnegf = integralFitNEGF(self.F*har_to_eV, self.S, self.g, self.fermi,
                                          self.qV, self.Eminf, self.tol, self.T)
         if self.updFermi:
                 print('CALCULATING FERMI ENERGY')
-                ne = self.nae if self.spin == 'r' else self.nae+self.nbe
-                self.fermi, dE, P = calcFermiSecant(self.g, ne-nLower, self.Emin, self.fermi, 
-                                                    self.N1, tol=self.tol, maxcycles=20)
+                ne = getattr(self, 'fermiTarget', None) or self.bar.ne
+                ne = ne / 2 if self.spin == 'r' else ne
+                self.fermi, dE, P, _ = calcFermiSecant(self.g, ne-nLower, self.Emin, self.fermi, self.N1, tol=self.tol,
+                                                       maxcycles=20, inds=cinds, cross=cross,
+                                                       lBound=self.Emin, uBound=self.Emax)
                 print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
                 self.setVoltage(self.qV)
                 self.P = P
@@ -529,6 +554,8 @@ class NEGFE(NEGF):
         tuple
             (energies, occupations) - Sorted jnp.linalg.eigenvalues and occupations
         """
+        cinds = getattr(self, 'fermiCountInds', None)
+        cross = getattr(self, 'fermiCross', True)
         self._symmetrize_F()
         print('Calculating lower density matrix:')
         # Decide the inertia path FIRST, but FALL BACK to the Damle lower contour
@@ -580,7 +607,7 @@ class NEGFE(NEGF):
             P, delta_N_lower = damleLowerDensity(F_eV, self.Y_eff, self.Sigma_0,
                                                  self.g, self.Emin)
             trLower = np.trace(self.S @ P).real
-            nLower = trLower + delta_N_lower
+            nLower = count_electrons(P, self.S, delta_N_lower, cinds, cross)
             if (abs(trLower) > self.damle_dN_warn
                     or abs(delta_N_lower) > self.damle_dN_warn
                     or abs(nLower) > self.damle_dN_warn):
@@ -598,7 +625,7 @@ class NEGFE(NEGF):
             # poor. The default (N2=None) Damle path above is preferred.
             P, _delta_N_lower = densityComplexN(self.F*har_to_eV, self.S, self.g,
                                                 self.Eminf, self.Emin, self.N2, T=0)
-            nLower = np.trace(self.S @ P).real + _delta_N_lower
+            nLower = count_electrons(P, self.S, _delta_N_lower, cinds, cross)
 
         # Helper function for densityComplex(). Returns (P, delta_N): the
         # cross term is part of the electron count and callers that audit
@@ -613,7 +640,7 @@ class NEGFE(NEGF):
                 return P, dN_
 
         # Per-spin electron target, needed by the search and the post-window count audit.
-        ne = self.bar.ne
+        ne = getattr(self, 'fermiTarget', None) or self.bar.ne
         if self.spin =='r':
             ne /= 2
         self._eqN = None    # only same-cycle _eqN should feed the post-window audit
@@ -625,6 +652,7 @@ class NEGFE(NEGF):
                 print('WARNING: Fermi search is on under bias; an integer electron '
                       'count is not physical under bias. Find the equilibrium Fermi '
                       'level first and pin it (updFermi=False) for biased runs.')
+            fermi_start = self.fermi + 0.0
             fermi_old = self.fermi+0.0
             conv= min(self.convLevel, FERMI_CALCULATION_TOL)
             # Freeze guard: skip the search when the previous cycle's
@@ -643,11 +671,13 @@ class NEGFE(NEGF):
                 print('Calculating equilibrium density matrix:')
                 P2f, dNf = compContourP2(self.mu1)
                 P += P2f
-                self._eqN = float(np.trace(P2f @ self.S).real + dNf)
+                self._eqN = float(count_electrons(P2f, self.S, dNf, cinds, cross))
                 self.dN_cross = float(dNf)
-                self.dN_inclusive = count_audit(
-                    ne, nLower, self._eqN, getattr(self, 'windowN', 0.0))
+                self.dN_inclusive = abs(ne - nLower - self._eqN - getattr(self, 'windowN', 0.0))
             if method =='predict':
+                if cinds is not None:
+                    raise ValueError("fermiMethod='predict' rescales the whole density; use muller, secant, bisect "
+                                     "or poly when the Fermi search counts the contact atoms")
                 # Generate inputs for energy-independent density calculation
                 X = jnp.array(self.X)
                 sig1, sig2 = self.getSigma(self.fermi)
@@ -677,10 +707,9 @@ class NEGFE(NEGF):
                 print('Calculating equilibrium density matrix:')
                 P2p, dNp = compContourP2(self.mu1)
                 P += P2p
-                self._eqN = float(np.trace(P2p @ self.S).real + dNp)
+                self._eqN = float(count_electrons(P2p, self.S, dNp, cinds, cross))
                 self.dN_cross = float(dNp)
-                self.dN_inclusive = count_audit(
-                    ne, nLower, self._eqN, getattr(self, 'windowN', 0.0))
+                self.dN_inclusive = abs(ne - nLower - self._eqN - getattr(self, 'windowN', 0.0))
 
                 # Fix number of electrons
                 # TODO: nActual omits cross-term delta_N; acceptable since predict
@@ -694,13 +723,13 @@ class NEGFE(NEGF):
             lBound = None
             if method =='poly':
                 print('POLYNOMIAL REGRESSION METHOD:')
-                self.fermi, dE, P2, dN, uBound, lBound = calcFermiPolyFit(self.g, ne-nLower, self.Emin, fermi_old, 
-                                            self.N1, tol=self.tol, conv=conv, T=self.T)
+                self.fermi, dE, P2, dN, uBound, lBound = calcFermiPolyFit(self.g, ne-nLower, self.Emin, fermi_old,
+                                            self.N1, tol=self.tol, conv=conv, T=self.T, inds=cinds, cross=cross)
                 print('Setting equilibrium density matrix...')
                 methodFail = (dN > conv)
                 if methodFail:
                     print(f'Switching to BISECT method (Fermi error = {dE:.2E} eV)')
-                    fermi_old = self.fermi + 0.0
+                    fermi_old = fermi_start
                 else:
                     print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
                     # search residual vs contour target; complete count audit runs after the window block
@@ -710,18 +739,18 @@ class NEGFE(NEGF):
                     else:
                         P2c, dNc = compContourP2(self.mu1)
                         P = P + P2c
-                        self._eqN = float(np.trace(P2c @ self.S).real + dNc)
+                        self._eqN = float(count_electrons(P2c, self.S, dNc, cinds, cross))
                         self.dN_cross = float(dNc)
 
             if method =='muller':
                 print('MULLER METHOD:')
-                self.fermi, dE, P2, dN, uBound, lBound = calcFermiMuller(self.g, ne-nLower, self.Emin, fermi_old, 
-                                            self.N1, tol=self.tol, conv=conv, T=self.T)
+                self.fermi, dE, P2, dN, uBound, lBound = calcFermiMuller(self.g, ne-nLower, self.Emin, fermi_old,
+                                            self.N1, tol=self.tol, conv=conv, T=self.T, inds=cinds, cross=cross)
                 print('Setting equilibrium density matrix...') 
                 methodFail = (dN > conv)
                 if methodFail:
                     print(f'Switching to BISECT method (Fermi error = {dE:.2E} eV)')
-                    fermi_old = self.fermi + 0.0
+                    fermi_old = fermi_start
                 else:
                     print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
                     # search residual vs contour target; complete count audit runs after the window block
@@ -731,18 +760,19 @@ class NEGFE(NEGF):
                     else:
                         P2c, dNc = compContourP2(self.mu1)
                         P = P + P2c
-                        self._eqN = float(np.trace(P2c @ self.S).real + dNc)
+                        self._eqN = float(count_electrons(P2c, self.S, dNc, cinds, cross))
                         self.dN_cross = float(dNc)
 
             if method =='secant':
                 print('SECANT METHOD:')
-                self.fermi, dE, P2, dN = calcFermiSecant(self.g, ne-nLower, self.Emin, fermi_old, 
-                                            self.N1, tol=self.tol, conv=conv, T=self.T)
+                self.fermi, dE, P2, dN = calcFermiSecant(self.g, ne-nLower, self.Emin, fermi_old,
+                                            self.N1, tol=self.tol, conv=conv, T=self.T, inds=cinds, cross=cross,
+                                            lBound=self.Emin, uBound=self.Emax)
                 print('Setting equilibrium density matrix...') 
                 methodFail = (dN > conv)
                 if methodFail:
                     print(f'Switching to BISECT method (Fermi error = {dE:.2E} eV)')
-                    fermi_old = self.fermi + 0.0
+                    fermi_old = fermi_start
                 else:
                     print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
                     # search residual vs contour target; complete count audit runs after the window block
@@ -752,13 +782,14 @@ class NEGFE(NEGF):
                     else:
                         P2c, dNc = compContourP2(self.mu1)
                         P = P + P2c
-                        self._eqN = float(np.trace(P2c @ self.S).real + dNc)
+                        self._eqN = float(count_electrons(P2c, self.S, dNc, cinds, cross))
                         self.dN_cross = float(dNc)
 
             if method =='bisect' or methodFail:
                 print('BISECT METHOD:')
-                self.fermi, dE, P2 = calcFermiBisect(self.g, ne-nLower, self.Emin, fermi_old, 
-                                            self.N1, tol=self.tol, conv=conv, T=self.T, uBound=uBound, lBound=lBound)  
+                self.fermi, dE, P2 = calcFermiBisect(self.g, ne-nLower, self.Emin, fermi_old,
+                                            self.N1, tol=self.tol, conv=conv, T=self.T, uBound=uBound, lBound=lBound,
+                                            inds=cinds, cross=cross)
                 print(f'Fermi Energy set to {self.fermi:.2f} eV, error = {dE:.2E} eV ')
                 print('Setting equilibrium density matrix...') 
                 self.dN_inclusive = None    # bisect reports no count mismatch
@@ -767,7 +798,7 @@ class NEGFE(NEGF):
                 else:
                     P2c, dNc = compContourP2(self.mu1)
                     P = P + P2c
-                    self._eqN = float(np.trace(P2c @ self.S).real + dNc)
+                    self._eqN = float(count_electrons(P2c, self.S, dNc, cinds, cross))
                     self.dN_cross = float(dNc)
             
             if method not in ['muller', 'secant', 'bisect', 'predict', 'poly', 'frozen']:
@@ -780,7 +811,7 @@ class NEGFE(NEGF):
             print('Calculating equilibrium density matrix:')
             P2e, dNe = compContourP2(self.mu1)
             P += P2e
-            self._eqN = float(np.trace(P2e @ self.S).real + dNe)
+            self._eqN = float(count_electrons(P2e, self.S, dNe, cinds, cross))
             self.dN_cross = float(dNe)
 
         # If bias applied, need to integrate G<
@@ -797,12 +828,12 @@ class NEGFE(NEGF):
                                     tol=self.tol, T=self.T)
             P += Pwin
             # bias-window charge on the device, cross terms included -- not a convergence residual
-            self.windowN = float(np.trace(Pwin @ self.S).real + dNwin)
+            self.windowN = float(count_electrons(Pwin, self.S, dNwin, cinds, cross))
             print(f'Bias-window device charge: {self.windowN:.3E} electrons')
 
         # Complete-count audit: refresh dN_inclusive to include the bias window, whichever branch ran above.
         if getattr(self, '_eqN', None) is not None:
-            self.dN_inclusive = count_audit(ne, nLower, self._eqN, self.windowN)
+            self.dN_inclusive = abs(ne - nLower - self._eqN - self.windowN)
             if self.mu1 != self.mu2:
                 # under bias with a pinned Fermi level this is deviation from integer
                 # neutrality, not a convergence error -- convergence is RMSDP/MaxDP/|dE|
