@@ -243,14 +243,18 @@ class NEGF(object):
 
     def setFock(self, F_):
         """
-        Set the Fock matrix, converting from eV to Hartree units.
+        Set the Fock matrix (eV) and the density it implies; Gaussian is handed that density.
 
         Parameters
         ----------
         F_ : ndarray
             Fock matrix in eV units
         """
+        assert hasattr(self, 'mu1') and hasattr(self, 'mu2'), "Voltage not set!"
         self.F = np.array(F_)/har_to_eV
+        self.FockToP()
+        storeDen(self.bar, self.P, self.spin)
+        self.updateN()
 
     def updatePulay(self, nPulay):
         """
@@ -581,7 +585,6 @@ class NEGF(object):
         """
         # Prepare Variables for Analytical Integration
         X = np.array(self.X)
-        self.F, self.locs = getFock(self.bar, self.spin)
         Fbar = X @ (self.F*har_to_eV + self.sigma12) @ X
         GamBar1 = X @ self.Gam1 @ X
         GamBar2 = X @ self.Gam2 @ X
@@ -727,6 +730,7 @@ class NEGF(object):
     def PToFock(self):
         """
         Calculate new Fock matrix from current density matrix using Gaussian.
+        Refreshes self.F and self.locs from Gaussian.
 
         Returns
         -------
@@ -737,6 +741,7 @@ class NEGF(object):
         dE = -1
         try:
             self.bar.update(model=self.method, basis=self.basis, toutput=self.ofile, dofock="DENSITY", miscroute=self.otherRoute, add_section=self.section)
+            self.F, self.locs = getFock(self.bar, self.spin)
             dE = 0
         except Exception as e:
             print("WARNING: DFT METHOD HAD AN ERROR, CYCLE INVALID:")

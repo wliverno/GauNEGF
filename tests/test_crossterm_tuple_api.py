@@ -17,13 +17,8 @@ def _tuple_case(g, key, i=0, use_surf=False):
     # Q_sym is the average of the halves
     assert np.allclose(np.array(qs), (np.array(qf) + np.array(qr)) / 2,
                        rtol=0, atol=1e-14)
-    # bit-identity on CPU (baseline provenance); GPU backends cannot
-    # reproduce CPU floats bitwise, so tight allclose there
-    import jax
-    if jax.default_backend() == 'cpu':
-        assert np.array_equal(np.array(qs), BASE[key])
-    else:
-        assert np.allclose(np.array(qs), BASE[key], rtol=1e-13, atol=0)
+    # tight tolerance, not bit-identity: other CPUs, thread counts and GPUs round differently
+    assert np.allclose(np.array(qs), BASE[key], rtol=1e-13, atol=0)
 
 def test_surfG1D_tuple_and_baseline():
     _tuple_case(make_1d_nonortho_chain(), 'surfG1D_c0')
