@@ -1,4 +1,5 @@
 *.ipynb
+!docs/source/examples/*.ipynb
 */slurm-*
 slurm-*
 __pycache__/*.pyc
@@ -21,7 +22,6 @@ docs/searchindex.js
 docs/objects.inv
 docs/genindex.html
 docs/search.html
-!docs/.nojekyll
 !docs/source/
 
 # Git worktrees
@@ -30,3 +30,21 @@ docs/search.html
 # paper campaign lives in its own nested repo (paper/.git); never
 # tracked here
 paper/
+publications/
+
+# Gaussian scratch and run outputs
+*.chk
+*.rwf
+*.log
+*.out
+*_P.mat
+
+# Build, test and editor caches
+docs/.doctrees/
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
