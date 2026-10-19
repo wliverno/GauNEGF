@@ -36,6 +36,9 @@ from gauopen import QCBinAr as qcb
 from gauNEGF.scf import NEGF
 from gauNEGF.matTools import getDen, getFock
 
+pytestmark = [pytest.mark.gaussian,
+              pytest.mark.skipif(shutil.which('gdv') is None, reason='gdv not in PATH')]
+
 
 # ===========================================================================
 # SESSION-SCOPED FIXTURE: ethane_negf

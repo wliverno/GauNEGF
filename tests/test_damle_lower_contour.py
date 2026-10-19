@@ -10,17 +10,22 @@ import sys
 import shutil
 import tempfile
 
+import pytest
+
 import jax
 jax.config.update("jax_enable_x64", True)
 import numpy as np
 from numpy.linalg import norm
 
-REPO = '/mmfs1/gscratch/anantram/willll/NEGFCode'
+REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, REPO)
 from gauNEGF.scfE import NEGFE
 from gauNEGF.transport import har_to_eV
 from gauNEGF.density import densityComplex, damleLowerDensity
 from gauNEGF.config import ENERGY_MIN
+
+pytestmark = [pytest.mark.gaussian,
+              pytest.mark.skipif(shutil.which('gdv') is None, reason='gdv not in PATH')]
 
 
 def _c2_setup():
