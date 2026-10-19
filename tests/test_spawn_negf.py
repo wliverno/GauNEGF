@@ -281,11 +281,10 @@ def test_03b_transmission_at_fermi_with_bar_fock(parent_ctx, spawn, results):
         f'level: rel {rel_clean:.3e}')
 
 
-# xfail REMOVED 2026-07-29: the stale-F patch landed (scfE.py spawnNEGF
-# now refreshes negf.F via getFock after setDen); this test asserts the
-# fixed contract -- spawn.F is transmission-ready immediately.
+# The stale-F bug is fixed (PToFock refreshes self.F); spawn.F is transmission-ready immediately. Same gate as
+# 03b: the residual (rel ~4e-5 at T ~2.4e-4) is the -1e-9j*S seed of the full-size setSigma branch.
 def test_03c_transmission_from_self_F_contract(parent_ctx, spawn):
-    """The natural user path (spawn.F straight after spawnNEGF) -- xfail."""
+    """The natural user path: T(Ef) from spawn.F straight after spawnNEGF."""
     from gauNEGF.transport import (har_to_eV, SigmaCalculator,
                                    calculate_transmission)
     negf = parent_ctx['negf']
@@ -298,8 +297,10 @@ def test_03c_transmission_from_self_F_contract(parent_ctx, spawn):
     rel = abs(Tpar - Tsp) / max(abs(Tpar), 1e-30)
     print(f'{TAG} T(Ef) via spawn.F: parent = {Tpar:.8e}, '
           f'spawn(self.F) = {Tsp:.8e}, rel diff = {rel:.3e}')
-    assert rel < 1e-5, ('spawn.F is stale (Harris guess); see xfail reason '
-                        f'-- rel diff {rel:.3e}')
+    assert abs(Tpar - Tsp) < 1e-7, (
+        f'T(Ef) via spawn.F beyond the -1e-9j*S background scale: parent '
+        f'{Tpar!r} vs spawn {Tsp!r} (rel {rel:.3e}); is spawn.F stale?')
+    assert rel < 1e-3
 
 
 def test_04_transmission_diverges_off_fermi(parent_ctx, spawn, results):
@@ -385,19 +386,26 @@ def test_06_cycle_timing_receipt(parent_ctx, spawn, results):
 
 
 def test_07_cross_term_spawn_warning(parent_ctx, capsys):
-    """spawnNEGF warns on ANY nonzero cross term, and only then."""
+    """spawnNEGF reports ANY nonzero parent cross term, and only then.
+
+    Matches the message's own marker: every spawn builds an NEGF whose constructor prints
+    'device + cross term', so the bare substring cannot tell loud from quiet.
+    """
     negf = parent_ctx['negf']
     saved = getattr(negf, 'dN_cross', None)
+    marker = 'parent cross term'
+    kind = 'WARNING:' if negf.updFermi else 'NOTE:'
     try:
         for loud in (1.4033, 1e-12):
             negf.dN_cross = loud
             negf.spawnNEGF()
-            assert 'cross term' in capsys.readouterr().out
+            out = capsys.readouterr().out
+            assert marker in out and kind in out
         # None: no cycle computed one. -0.0: orthogonalized lattice.
         for quiet in (None, 0.0, -0.0):
             negf.dN_cross = quiet
             negf.spawnNEGF()
-            assert 'cross term' not in capsys.readouterr().out
+            assert marker not in capsys.readouterr().out
     finally:
         negf.dN_cross = saved
     print(f'{TAG} spawnNEGF warns on any nonzero cross term, silent on '
