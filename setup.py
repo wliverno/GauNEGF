@@ -38,7 +38,4 @@ setup(
             "flake8",
         ],
     },
-    package_data={
-        "gauNEGF": ["*.bethe"],
-    },
 ) 
