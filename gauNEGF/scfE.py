@@ -511,14 +511,16 @@ class NEGFE(NEGF):
             mu1 = self.mu1
         if mu2 is None:
             mu2 = self.mu2
-        # Spawned object counts the bare trace; a parent cross term is lost.
+        # The spawn cannot count the parent cross term; that matters only if it searches the Fermi level.
         dNc = getattr(self, 'dN_cross', None)
-        if dNc:
-            print(f'WARNING: spawning an energy-independent object from a '
-                  f'parent with a cross term ({dNc:+.4f} e/spin). The spawn '
-                  f'counts tr(PS) only; re-converging it will not reproduce '
-                  f'this state. Use an orthogonalized lattice, or evaluate '
-                  f'on the parent density without running SCF.')
+        if dNc and self.updFermi:
+            print(f'WARNING: the parent cross term ({dNc:+.4f} e/spin) is not counted by the spawned NEGF: '
+                  f'its Fermi search uses tr(PS) only and will shift Ef to absorb the missing charge. '
+                  f'Pin the Fermi level (setVoltage(qV, fermi)) or use an orthogonalized lattice.')
+        elif dNc:
+            print(f'NOTE: the parent cross term ({dNc:+.4f} e/spin) is not counted by the spawned NEGF. '
+                  f'With the Fermi level pinned no electron count enters its SCF; only its reported '
+                  f'electron total differs from the parent by this amount.')
         sig1, sig2 = self.getSigma(mu1, mu2)
         negf = NEGF(self.ifile[:-4], self.basis, self.func, self.spin, False,
                     self.otherRoute, self.section,len(self.pB)-1)
