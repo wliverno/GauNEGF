@@ -72,6 +72,8 @@ SRC = ('/mmfs1/gscratch/anantram/willll/NEGFCode/paper/studies/02_pdt_bethe/'
        'runs/AuTipPDT_b3lyp_r_Au_ESCF_v2fix')
 MAT = os.path.join(SRC, 'AuTipPDT_b3lyp_r_Au_ESCF.mat')
 TMAT = os.path.join(SRC, 'T.AuTipPDT_b3lyp_r_Au_ESCF.mat')
+pytestmark.append(pytest.mark.skipif(not os.path.isfile(MAT),
+                                     reason='parent state missing: ' + MAT))
 LCONTACT = [1, 2, 3]
 RCONTACT = [20, 21, 22]
 TAG = '[SPAWN-CHAR]'

@@ -9,6 +9,9 @@ import os
 
 import pytest
 
+# test_kpoint_convergence.py is a k-point study script, not a test: it runs a long calculation at import.
+collect_ignore = ['test_kpoint_convergence.py']
+
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 

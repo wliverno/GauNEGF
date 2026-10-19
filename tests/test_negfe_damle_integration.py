@@ -21,6 +21,9 @@ import pytest
 
 from gauNEGF.scfE import NEGFE
 
+pytestmark = [pytest.mark.gaussian,
+              pytest.mark.skipif(shutil.which('gdv') is None, reason='gdv not in PATH')]
+
 
 @pytest.fixture(scope='module')
 def c2_sto3g_negf(tmp_path_factory):

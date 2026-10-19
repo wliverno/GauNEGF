@@ -24,6 +24,9 @@ from gauNEGF.density import density, densityComplex
 from gauNEGF.transport import har_to_eV
 from gauNEGF.config import ENERGY_MIN
 
+pytestmark = [pytest.mark.gaussian,
+              pytest.mark.skipif(shutil.which('gdv') is None, reason='gdv not in PATH')]
+
 
 def _inv_sqrt_signed(M):
     """M^(-1/2) for real-symmetric possibly-indefinite M (complex output if indef)."""

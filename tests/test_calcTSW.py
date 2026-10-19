@@ -23,6 +23,9 @@ from gauNEGF.density import calcTSW, calcPseudoPoleFloor
 from gauNEGF.transport import har_to_eV
 from gauNEGF.config import ENERGY_MIN
 
+pytestmark = [pytest.mark.gaussian,
+              pytest.mark.skipif(shutil.which('gdv') is None, reason='gdv not in PATH')]
+
 
 # ===========================================================================
 # SESSION-SCOPED FIXTURE: c2_chain_negf
