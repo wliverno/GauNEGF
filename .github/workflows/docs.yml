@@ -8,15 +8,23 @@ on:
       - 'gauNEGF/**'
       - 'setup.py'
       - 'README.md'
+  # Build (no deploy) on pull requests to main, so the PR shows the docs build
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'docs/**'
+      - 'gauNEGF/**'
+      - 'setup.py'
+      - 'README.md'
+      - '.github/workflows/docs.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: 'pages'
+  # PR builds get their own group so they never cancel a main deploy
+  group: ${{ github.event_name == 'pull_request' && format('docs-pr-{0}', github.ref) || 'pages' }}
   cancel-in-progress: true
 
 jobs:
@@ -48,6 +56,7 @@ jobs:
           sphinx-build -b html -D nbsphinx_execute=never . ../_build/html
 
       - name: Upload artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
         with:
           path: docs/_build/html
@@ -55,8 +64,11 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    # Deploy only on main
-    if: github.ref == 'refs/heads/main'
+    # Deploy only on main (never on pull_request: github.ref is refs/pull/...)
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
