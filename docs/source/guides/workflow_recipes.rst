@@ -16,7 +16,6 @@ This guide covers four advanced workflows for transport calculations:
 * **Transport Checkpointing** - Save intermediate results during long energy scans and resume gracefully
 * **Warm-Start SCF** - Hot-start a new SCF from a prior converged calculation
 
-Each recipe includes working code adapted from the gauNEGF example suite.
 
 Recipe 1: IV Curve Sweep
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -33,7 +32,6 @@ Code Example
 
 .. code-block:: python
 
-    # adapted from AuStudies/AuBetheFerrocene.py
     from gauNEGF.scfE import NEGFE
     from gauNEGF.transport import calculate_current, SigmaCalculator
     from scipy import io
@@ -52,6 +50,13 @@ Code Example
                  fullSCF=False, route='integral=grid=superfine')
     negf.setContactBethe([[1, 2, 3, 4, 5, 6],
                           [36, 37, 38, 39, 40, 41]], 'AuSOC')
+
+    # Equilibrium first: the Fermi search runs at zero bias, and its result
+    # is pinned for every biased point below (an integer electron count is
+    # not physical under bias)
+    negf.setVoltage(0.0)
+    negf.SCF(conv, 0.02, 200)
+    fermi0 = negf.fermi
 
     # Build voltage list: up, then down, then back to zero
     Vlist = np.concatenate((
@@ -81,7 +86,7 @@ Code Example
             negf.setVoltage(V, A['fermi'][0][0])
             negf.setDen(A['den'])
         else:
-            negf.setVoltage(V, negf.fermi)
+            negf.setVoltage(V, fermi0)
 
         # SCF at this voltage
         negf.SCF(conv, 0.01, 1000, checkpoint=False)
@@ -116,6 +121,10 @@ Key Points
 * **Resume logic**: Before SCF, check if the MAT file exists using ``os.path.exists()``.
   If so, load the prior density and Fermi level to hot-start.
 
+* **Pinned Fermi energy**: the zero-bias SCF finds the Fermi energy; every
+  biased point passes it explicitly (``setVoltage(V, fermi0)``), so no
+  Fermi search runs under bias.
+
 * **Current returns**: ``calculate_current()`` returns a tuple ``(I, Is)``
   for spin='u'/'ro'/'g' (a bare scalar float only for spin='r'):
 
@@ -145,7 +154,6 @@ Code Example
 
 .. code-block:: python
 
-    # adapted from NEGFTests/CNanowire.py
     from gauNEGF.scfE import NEGFE
     from gauNEGF.transport import cohTransE
     from scipy import io
@@ -214,7 +222,6 @@ Code Example
 
 .. code-block:: python
 
-    # adapted from tests/test_transport_checkpointing.py
     from gauNEGF.transport import (
         SigmaCalculator, calculate_transmission, calculate_dos
     )
@@ -294,7 +301,6 @@ Code Example
 
 .. code-block:: python
 
-    # adapted from AuStudies/AuBetheFerrocene.py
     from gauNEGF.scfE import NEGFE
     from scipy import io
 
@@ -361,8 +367,8 @@ Integration Methods Reference
 
 The recipes above use the real-axis integration method for transport (via
 ``calculate_current()`` and ``cohTransE()``). For a comparison with complex
-contour integration and when to use each, see ``examples/IntegralDemo.ipynb`` --
-run it in Jupyter on a compute node.
+contour integration and when to use each, see :doc:`/examples/IntegralDemo`
+(``docs/source/examples/IntegralDemo.ipynb``).
 
 The demo shows:
 

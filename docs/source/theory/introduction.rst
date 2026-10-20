@@ -1,14 +1,14 @@
 Introduction to NEGF-DFT
-====================
+========================
 
 This section provides an overview of the Non-Equilibrium Green's Function (NEGF) method combined with Density Functional Theory (DFT) for quantum transport calculations.
 
 Historical Context
-----------------
+------------------
 The gauNEGF package builds upon the foundational work of ANT.Gaussian [Palacios2002]_, which pioneered the implementation of NEGF-DFT calculations using Gaussian basis sets. This approach has proven particularly effective for molecular electronics and nanoscale transport calculations.
 
 Core Functionality
-----------------
+------------------
 
 The gauNEGF package provides:
 
@@ -19,10 +19,10 @@ The gauNEGF package provides:
 * Temperature and voltage effects
 
 Mathematical Framework
--------------------
+----------------------
 
 Key Equations
------------
+-------------
 The central quantities in NEGF-DFT are:
 
 1. **Green's Functions**
@@ -76,7 +76,7 @@ The central quantities in NEGF-DFT are:
    This gives the electron density used in the self-consistent cycle.
 
 Contact Models and Testing
-----------------------
+--------------------------
 
 The package includes several contact models:
 
@@ -100,16 +100,16 @@ The package includes several contact models:
 
 
 Next Steps
---------
+----------
 Continue to :doc:`negf_dft` for details on the self-consistent procedure.
 
 References
 ----------
 
-.. [Palacios2002] Palacios, J. J., Pérez-Jiménez, A. J., Louis, E., SanFabián, E., & Vergés, J. A. (2002). First-principles approach to electrical transport in atomic-scale nanostructures. *Physical Review B*, 66(3), 035322. https://doi.org/10.1103/PhysRevB.66.035322
+.. [Palacios2002] Palacios, J. J., Perez-Jimenez, A. J., Louis, E., SanFabian, E., & Verges, J. A. (2002). First-principles approach to electrical transport in atomic-scale nanostructures. *Physical Review B*, 66(3), 035322. https://doi.org/10.1103/PhysRevB.66.035322
 
 .. [Damle2002] Damle, P., Ghosh, A. W., & Datta, S. (2002). First-principles analysis of molecular conduction using quantum chemistry software. *Chemical Physics*, 281(2-3), 171-187. https://doi.org/10.1016/S0301-0104(02)00496-2
 
 .. [Jacob2011] Jacob, D., & Palacios, J. J. (2011). Critical comparison of electrode models in density functional theory based quantum transport calculations. *The Journal of Chemical Physics*, 134(4), 044118. https://doi.org/10.1063/1.3526044
 
-.. [Zollner2020] Zöllner, M. S., Varela, S., Medina, E., Mujica, V., & Herrmann, C. (2020). Insight into the Origin of Chiral-Induced Spin Selectivity from a Symmetry Analysis of Electronic Transmission. *Journal of Chemical Theory and Computation*, 16(5), 2914-2929. https://doi.org/10.1021/acs.jctc.9b01078 
+.. [Zollner2020] Zollner, M. S., Varela, S., Medina, E., Mujica, V., & Herrmann, C. (2020). Insight into the Origin of Chiral-Induced Spin Selectivity from a Symmetry Analysis of Electronic Transmission. *Journal of Chemical Theory and Computation*, 16(5), 2914-2929. https://doi.org/10.1021/acs.jctc.9b01078 

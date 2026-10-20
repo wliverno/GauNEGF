@@ -1,10 +1,10 @@
 Quickstart Guide
-==============
+================
 
 This guide walks through a basic NEGF-DFT calculation using an ethane molecule as an example.
 
 Setup
-----
+-----
 First, create a Gaussian input file `ethane.gjf`:
 
 .. code-block:: text
@@ -25,7 +25,7 @@ First, create a Gaussian input file `ethane.gjf`:
     H    0.882443    0.509483   -1.157832
 
 Configuration
------------
+-------------
 GauNEGF uses global configuration constants defined in ``gauNEGF.config`` for default parameters. You can customize these before running calculations:
 
 .. code-block:: python
@@ -39,7 +39,7 @@ GauNEGF uses global configuration constants defined in ``gauNEGF.config`` for de
 These variables are used as defaults for the various modules in gauNEGF based on performance with well-behaved systems. You can customize these to your needs.
 
 Basic Calculation
---------------
+-----------------
 Run a basic NEGF-DFT calculation:
 
 .. code-block:: python
@@ -64,7 +64,7 @@ Run a basic NEGF-DFT calculation:
     negf.SCF(1e-3, 0.01, 100)
 
 Transmission Function
-------------------
+---------------------
 Calculate and plot transmission:
 
 .. code-block:: python
@@ -90,7 +90,7 @@ Calculate and plot transmission:
     plt.show()
 
 Current Calculation
-----------------
+-------------------
 Calculate current at different voltages:
 
 .. code-block:: python
@@ -99,15 +99,18 @@ Calculate current at different voltages:
     
     # Voltage range
     V = np.arange(-0.5, 0.5, 0.1)
-    
+
+    # Pin the equilibrium Fermi energy found by the zero-bias SCF above
+    fermi0 = negf.fermi
+
     # Calculate current
     I = []
-    F_eV = negf.F*27.211386 #negf.F is in hartree units!
     for v in V:
-        negf.setVoltage(v)
+        negf.setVoltage(v, fermi0)
         negf.SCF(1e-3, 0.02, 100)
-        I.append(calculate_current(F_eV, negf.S, SigmaCalculator(sig1, sig2), 
-                              qV=v, fermi=negf.fermi))
+        F_eV = negf.F*27.211386 #negf.F is in hartree units!
+        I.append(calculate_current(F_eV, negf.S, SigmaCalculator(sig1, sig2),
+                                   fermi=negf.fermi, qV=v))
     
     # Plot IV curve
     plt.figure()
@@ -118,7 +121,7 @@ Calculate current at different voltages:
     plt.show()
 
 Next Steps
----------
+----------
 1. Try different contact parameters or energy-dependent contacts
 2. Check for current hysteresis by using a circular voltage sweep
 3. Explore spin-dependent transport using open shell systems (e.g. `spin='u'`)

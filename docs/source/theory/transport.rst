@@ -1,13 +1,13 @@
 Transport Calculations
-====================
+======================
 
 This section covers the calculation and analysis of quantum transport properties, including transmission functions, current-voltage characteristics, and spin-dependent transport.
 
 Transmission Function
-------------------
+---------------------
 
 Theory
-~~~~~
+~~~~~~
 The transmission function :math:`T(E)` gives the probability of electron transmission at energy E:
 
 .. math::
@@ -17,7 +17,7 @@ The transmission function :math:`T(E)` gives the probability of electron transmi
 where :math:`\Gamma_{1,2}` are the contact broadening matrices.
 
 Implementation
-~~~~~~~~~~~~
+~~~~~~~~~~~~~~
 Basic transmission calculation:
 
 .. code-block:: python
@@ -28,15 +28,16 @@ Basic transmission calculation:
     # Energy grid
     E = np.linspace(-5, 5, 1000)
     
-    # Calculate transmission
+    # Calculate transmission (constant self-energies from an NEGF object)
+    sig1, sig2 = negf.getSigma()
     F_eV = negf.F*27.211386 #Convert from hartrees to eV
     T = calculate_transmission(F_eV, negf.S, SigmaCalculator(sig1, sig2), E)
 
 Current Calculations
------------------
+--------------------
 
 Landauer Formula
-~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~
 The current is calculated using the Landauer formula:
 
 .. math::
@@ -46,7 +47,7 @@ The current is calculated using the Landauer formula:
 where :math:`f_{1,2}(E)` are the Fermi functions for the contacts.
 
 Implementation
-~~~~~~~~~~~~
+~~~~~~~~~~~~~~
 Current calculation at finite bias:
 
 .. code-block:: python
@@ -71,10 +72,13 @@ Current calculation at finite bias:
     )
 
 IV Characteristics
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
 Generate current-voltage curves:
 
 .. code-block:: python
+
+    # Equilibrium Fermi energy from a converged zero-bias run, pinned under bias
+    fermi0 = negf.fermi
 
     # Voltage range
     V = np.arange(0, 0.5, 0.1)
@@ -82,7 +86,7 @@ Generate current-voltage curves:
     # Calculate IV curve
     I = []
     for v in V:
-        negf.setVoltage(v)
+        negf.setVoltage(v, fermi0)
         negf.SCF()
         F_eV = negf.F*27.211386 #Convert from hartrees to eV
         I.append(calculate_current(
@@ -93,31 +97,39 @@ Generate current-voltage curves:
         ))
 
 Spin-Dependent Transport
----------------------
+------------------------
 
 Theory
-~~~~~
-Spin-dependent transport calculations account for the spin-selective transmission of electrons through molecular systems. This is particularly important for chiral molecules exhibiting the chiral-induced spin selectivity (CISS) effect [Zoellner2020]_.
+~~~~~~
+Spin-dependent transport calculations account for the spin-selective transmission of electrons through molecular systems. This is particularly important for chiral molecules exhibiting the chiral-induced spin selectivity (CISS) effect [Zollner2020]_.
 
 The spin-orbit coupling effects are included using an on-site approximation [Fernandez2006]_, which provides an efficient method for calculating relativistic effects in localized basis sets.
 
-For spin-dependent transport, we consider four transmission channels:
+For spin-resolved calculations (``spin='u'``, ``'ro'`` or ``'g'``) the total
+transmission is the exact trace over the full spin space,
 
 .. math::
 
-   T_{\text{total}} = T_{\uparrow\uparrow} + T_{\uparrow\downarrow} + 
-                      T_{\downarrow\uparrow} + T_{\downarrow\downarrow}
+   T_{\text{total}}(E) = \mathrm{Tr}[\Gamma_1(E) G^r(E) \Gamma_2(E) G^a(E)],
 
-The spin-dependent transmission function for each channel can be calculated as:
+and the four spin channels are reported alongside it:
 
 .. math::
 
-   T_{\sigma}(E) = \mathrm{Tr}[\Gamma_{1,\sigma}(E) G^r_{\sigma}(E) \Gamma_{2,\sigma}(E) G^a_{\sigma}(E)]
+   T_{s s'}(E) = \mathrm{Tr}[\Gamma_{1,ss}(E) G^r_{ss'}(E) \Gamma_{2,s's'}(E) G^a_{s's}(E)],
+   \qquad s, s' \in \{\uparrow, \downarrow\}
 
-where σ denotes the spin channel.
+where :math:`\Gamma_{i,ss}` are the spin-diagonal blocks of the broadening
+matrices. For spin-scalar leads (broadening block-diagonal in spin) the
+total equals
+:math:`T_{\uparrow\uparrow} + T_{\uparrow\downarrow} + T_{\downarrow\uparrow} + T_{\downarrow\downarrow}`.
+For spin-mixing leads (e.g. the ``AuSOC`` Bethe lattice) the broadening
+matrices have off-diagonal spin blocks, and the total differs from the sum
+of the four channels; the difference is ``T - Tspin.sum(axis=1)``.
+``calculate_current`` integrates the exact total in the same way.
 
 Implementation
-~~~~~~~~~~~~
+~~~~~~~~~~~~~~
 Spin-resolved transmission:
 
 .. code-block:: python
@@ -126,8 +138,9 @@ Spin-resolved transmission:
     
     # Calculate spin-resolved transmission
     Elist = np.linspace(-5, 5, 1000)
+    sig1, sig2 = negf.getSigma()
     T, Tspin = calculate_transmission(
-        negf.F, negf.S, 
+        negf.F*27.211386, negf.S, 
         SigmaCalculator(sig1, sig2),
         Elist + negf.fermi,
         spin='u'  # 'u' for unrestricted
@@ -140,10 +153,10 @@ Spin-resolved transmission:
     T_down_down = Tspin[:, 3]
 
 Analysis Tools
-------------
+--------------
 
 Density of States
-~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~
 Calculate and analyze DOS:
 
 .. code-block:: python
@@ -153,13 +166,13 @@ Calculate and analyze DOS:
     # Calculate DOS
     Elist = np.linspace(-5, 5, 1000)
     dos, dos_list = calculate_dos(
-        negf.F, negf.S, 
+        negf.F*27.211386, negf.S, 
         SigmaCalculator(sig1, sig2),
         Elist + negf.fermi
     )
 
 Transmission Analysis
-~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 Analyze transmission features:
 
 .. code-block:: python
@@ -175,7 +188,7 @@ Analyze transmission features:
         plt.axvline(Elist[p], color='r', ls='--')
 
 Checkpointing
-~~~~~~~~~~~~
+~~~~~~~~~~~~~
 Long-running calculations can be checkpointed to allow resuming after interruption:
 
 .. code-block:: python
@@ -203,19 +216,22 @@ Long-running calculations can be checkpointed to allow resuming after interrupti
         checkpoint_interval=50
     )
     
-    # Current calculations use transmission checkpointing internally
+    # Current calculations use transmission checkpointing internally.
+    # Each (fermi, qV, T, dE) gives its own energy grid, so use one
+    # checkpoint file per bias point: a file whose stored energy_list does
+    # not match is ignored (with a warning) and the scan starts fresh.
     I = calculate_current(
         F, S, sigma_calculator,
-        fermi=0.0, qV=0.5,
-        checkpoint_file='current_transmission.npz',  # Stores transmission data
+        fermi=negf.fermi, qV=0.5,
+        checkpoint_file='current_transmission_0.5V.npz',  # Stores transmission data
         checkpoint_interval=50
     )
 
 Example Analysis
--------------
+----------------
 
 Complete Analysis Workflow
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 Example of a comprehensive transport analysis:
 
 .. code-block:: python
@@ -225,9 +241,10 @@ Example of a comprehensive transport analysis:
     negf.setContactBethe([[1,2,3], [6,7,8]], 'Au')
     har_to_eV = 27.211386
 
-    # Run NEGF-DFT to get equilibrium density
+    # Run NEGF-DFT to get equilibrium density and Fermi energy
     negf.setVoltage(0.0)
     negf.SCF(1e-3, 0.02, 200)
+    fermi0 = negf.fermi
 
     # Calculate transmission
     Elist = np.linspace(-5, 5, 1000)
@@ -240,7 +257,7 @@ Example of a comprehensive transport analysis:
     V = np.linspace(0, 2, 21)
     I = []
     for v in V:
-        negf.setVoltage(v)
+        negf.setVoltage(v, fermi0)  # pin the equilibrium Fermi energy under bias
         negf.SCF()
         I.append(calculate_current(
             negf.F*har_to_eV, negf.S,
@@ -278,6 +295,5 @@ Review :doc:`best_practices` for tips on production calculations, and see
 :doc:`/guides/workflow_recipes` for IV sweeps and checkpointing patterns.
 
 
-.. [Zoellner2020] Zöllner, M. S., Varela, S., Medina, E., Mujica, V., & Herrmann, C. (2020). Insight into the Origin of Chiral-Induced Spin Selectivity from a Symmetry Analysis of Electronic Transmission. Journal of Chemical Theory and Computation, 16(5), 2914-2929. DOI: 10.1021/acs.jctc.9b01078 
 
-.. [Fernandez2006] Fernández-Seivane, L., Oliveira, M. A., Sanvito, S., & Ferrer, J. (2006). On-site approximation for spin–orbit coupling in linear combination of atomic orbitals density functional methods. Journal of Physics: Condensed Matter, 18(34), 7999-8013. DOI: 10.1088/0953-8984/18/34/012 
+.. [Fernandez2006] Fernandez-Seivane, L., Oliveira, M. A., Sanvito, S., & Ferrer, J. (2006). On-site approximation for spin-orbit coupling in linear combination of atomic orbitals density functional methods. Journal of Physics: Condensed Matter, 18(34), 7999-8013. DOI: 10.1088/0953-8984/18/34/012 

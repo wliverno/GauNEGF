@@ -27,9 +27,9 @@ The workflow has three stages:
 2. Extract the Fock, overlap, and coupling matrices for the device and contacts
 3. Set up the ``NEGFE`` object and run the self-consistent field (SCF) loop
 
---------
+----------------------------
 Prepare Gaussian Input Files
---------
+----------------------------
 
 You need two Gaussian input files (``.gjf``):
 
@@ -193,9 +193,9 @@ coupling. These define the semi-infinite 1D chain:
 For a periodic system, ``beta = tau`` because every inter-cell coupling is
 identical.
 
------------
+------------
 Set Up NEGFE
------------
+------------
 
 .. code-block:: python
 
@@ -203,12 +203,24 @@ Set Up NEGFE
 
     # NEGFE inherits NEGF.__init__, so standard NEGF arguments apply
     negf = NEGFE(fn='CNTPeriodic5', func='b3lyp', basis='STO-3G', fullSCF=False)
-    negf.setFock(F)
 
 * ``fn``: stem of the device ``.gjf`` file (no extension)
 * ``fullSCF=False``: use Harris guess for initial DFT (faster)
-* ``setFock(F)``: override the initial Fock with the one extracted from the
-  large cluster
+
+To start from the Fock matrix extracted from the large cluster, call
+``negf.setFock(F)`` (``F`` in eV) **after** the contacts and the voltage are
+set. :meth:`gauNEGF.scfE.NEGFE.setFock` rebuilds the contacts from the new
+Fock with ``g.setF(F, mu1, mu2)``, computes the density that Fock implies
+(including the Fermi search, if it is on) and hands that density to
+Gaussian. It raises ``RuntimeError`` if ``setVoltage`` has not run yet. The
+order is therefore:
+
+.. code-block:: python
+
+    negf.setContact1D(...)   # contacts first (setVoltage needs them)
+    negf.setVoltage(0.0)     # defines mu1/mu2
+    negf.setFock(F)          # rebuild contacts + density from F
+    negf.SCF(...)
 
 -------------------------------------
 Three Usage Patterns for setContact1D
@@ -228,9 +240,7 @@ matrices required.
 
 .. code-block:: python
 
-    # adapted from examples/SiNEGF.py (multi-atom contacts)
     negf = NEGFE(fn='SiNanowire', func='b3lyp', basis='STO-3G')
-    negf.setFock(F)
 
     inds = negf.setContact1D(
         [[1, 2, 3], [4, 5, 6]],      # contactList: atoms per contact
@@ -239,6 +249,7 @@ matrices required.
     )
 
     negf.setVoltage(0.0)
+    negf.setFock(F)                  # optional: start from the extracted Fock (eV)
     negf.SCF(1e-2, 0.02, 100)
 
 **Key arguments:**
@@ -269,11 +280,10 @@ useful when the device onsite approximation is adequate.
 
 .. code-block:: python
 
-    # Synthesized example: custom tau, auto alpha/beta
+    # Custom tau, auto alpha/beta
     negf = NEGFE(fn='CNT_device', func='b3lyp', basis='STO-3G')
-    negf.setFock(F)  # F is the device Fock (rows/cols for all device atoms)
 
-    # Only provide coupling; on-site blocks are extracted from F
+    # Only provide coupling; on-site blocks are extracted from the device Fock
     inds = negf.setContact1D(
         [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]],  # contact atom indices
         tauList=[custom_tau_left, custom_tau_right],   # explicit inter-cell coupling
@@ -281,6 +291,7 @@ useful when the device onsite approximation is adequate.
     )
 
     negf.setVoltage(0.0, fermiMethod='poly')
+    negf.setFock(F)  # optional: F is the device Fock in eV (all device atoms)
     negf.SCF(1e-3, 0.02, 1000)
 
 .. note::
@@ -300,7 +311,7 @@ matrices are auto-computed from the DFT geometry stored in the device ``.gjf``.
 
 .. code-block:: python
 
-    # adapted from CNanowire.py (minimal specification)
+    # minimal specification
     negf = NEGFE(fn='C2', func='b3lyp', basis='lanl2dz', fullSCF=False)
 
     # Only atoms; matrices auto-extracted from Gaussian
@@ -320,11 +331,19 @@ matrices are auto-computed from the DFT geometry stored in the device ``.gjf``.
    ``neList``/``muList`` only take effect together with explicit
    ``alphas`` (see :meth:`gauNEGF.scfE.NEGFE.setContact1D`). On this
    contactList-only path, any ``neList`` you pass is silently ignored --
-   it is not an error, it just has no effect. The Fermi search anchor is
-   the system electron count on the device (``bar.ne``), not a
-   per-contact target. An assertion that catches a ``neList`` passed
-   without ``alphas`` is planned (package queue item); until then the
-   argument is accepted but does nothing.
+   it is not an error, it just has no effect.
+
+   The Fermi search target is set by the ``fermiCount`` argument of
+   ``setContact1D``. The default, ``fermiCount='contact'``, picks the Fermi
+   energy that makes the contact atoms (left and right together) neutral:
+   their Mulliken population plus the device-contact cross term must equal
+   ``nelecContacts``, the sum of the contact atoms' nuclear charges as
+   Gaussian reports them (``bar.atmchg``). When the contacts cover the
+   whole device (a two-cell device) this is the whole-device count
+   ``bar.ne``. ``fermiCount='device'`` counts the whole device plus the
+   cross term; ``fermiCount='device_bare'`` counts the whole device without
+   it. ``fermiMethod='predict'`` cannot be combined with
+   ``fermiCount='contact'`` (it raises ``ValueError``).
 
 .. warning::
 
@@ -370,9 +389,9 @@ Run the SCF
 
 * **tolerance** (1e-3): convergence criterion on the density matrix change
 * **damping** (0.02): linear mixing parameter -- smaller is more stable but
-  slower. Range: 0.02 to 0.05 (campaign-measured production default; wider
-  excursions, e.g. down toward 0.005 or up to 0.1, are for diagnosing a
-  specific problem, not routine use -- see :doc:`config_tuning`).
+  slower. Range: 0.02 to 0.05 for routine use; wider excursions (down
+  toward 0.005 or up to 0.1) are for diagnosing a specific problem -- see
+  :doc:`config_tuning`.
 * **max iterations** (1000): safety cap
 
 -------------------------------------------

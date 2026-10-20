@@ -16,7 +16,9 @@ system.
    etc.) are bound into ``gauNEGF.scf``/``scfE``/``density`` at *import time*
    (``from gauNEGF.config import ...``) and as function default-argument
    values. Setting ``config.X = ...`` after those modules are already
-   imported has NO effect (this includes ``config.CLEAR_JAX_CACHES_PER_CYCLE``).
+   imported has NO effect (this includes ``config.CLEAR_JAX_CACHES_PER_CYCLE``
+   and ``config.USE_INERTIA_EMIN``). ``config.HOST_BLAS_THREADS`` is the
+   exception: it is read each time the density step runs.
    To change a default globally, set ``config.X = ...`` **before** importing
    ``gauNEGF.scf``/``scfE``/``density`` for the first time -- otherwise pass
    the value per-call (``conv=``, ``damping=``, ``eta=``, ``T=``, ``tol=``,
@@ -77,15 +79,76 @@ most DFT + NEGF calculations.
      - 4
      - int
      - Number of previous densities in Pulay mixing history
+   * - ``USE_INERTIA_EMIN``
+     - True
+     - bool
+     - Lower integration bound from ``find_lower_bound`` (single contour);
+       False uses the older two-contour split
+   * - ``HOST_BLAS_THREADS``
+     - None
+     - int or None
+     - Host BLAS threads inside ``FockToP``; None means
+       ``min(16, ncpu // 4)`` (at least 1)
+   * - ``CLEAR_JAX_CACHES_PER_CYCLE``
+     - False
+     - bool
+     - Purge the compiled-kernel cache and JAX caches every SCF cycle
+
+
+Lower Integration Bound (USE_INERTIA_EMIN)
+------------------------------------------
+
+With ``USE_INERTIA_EMIN = True`` (default), each ``NEGFE.FockToP`` cycle
+calls :func:`gauNEGF.density.find_lower_bound`. It starts ``EMIN_BUFFER``
+below the lowest device eigenvalue and steps down until the inertia count
+(number of negative eigenvalues) of the Hermitian part of
+``E*S - F - Sigma(E)`` equals its value at ``ENERGY_MIN``, i.e. until every
+pole lies above, then moves a further ``EMIN_BUFFER`` down. A single complex
+contour is integrated from that floor to the Fermi energy.
+Set ``USE_INERTIA_EMIN = False`` before importing ``gauNEGF.scfE`` to use
+the two-contour path always. A fixed grid set with
+``setIntegralLimits(N1=..., N2=..., Emin=...)`` bypasses both.
+
+
+Host BLAS Threads (HOST_BLAS_THREADS)
+-------------------------------------
+
+``FockToP`` runs inside :func:`gauNEGF.utils.blas_limit`, which caps the
+host NumPy/SciPy BLAS thread pools with ``threadpoolctl`` for the duration
+of the density step and restores them afterwards. The default cap is
+``min(16, ncpu // 4)`` (at least 1), where ``ncpu`` is the number of cores
+the process may run on (its CPU affinity, not the node total). Set
+``config.HOST_BLAS_THREADS`` to an integer to override the cap. If
+``threadpoolctl`` is not installed, gauNEGF warns once and runs uncapped.
+gauNEGF no longer sets ``XLA_FLAGS``; JAX sizes its own thread pool.
+
+
+Kernel Cache (CLEAR_JAX_CACHES_PER_CYCLE)
+-----------------------------------------
+
+The integrators compile their JAX kernels once per contact object and
+reuse them across SCF cycles; contact Fermi shifts enter as traced
+arguments, so a Fermi update does not trigger a recompile.
+``CLEAR_JAX_CACHES_PER_CYCLE = True`` drops that cache
+(:func:`gauNEGF.integrate.clear_kernel_cache`) and calls
+``jax.clear_caches()`` after every SCF cycle. Leave it off unless memory
+use grows from cycle to cycle; turning it on forces a recompile every
+cycle.
 
 
 Fermi Search Method (fermiMethod)
 ----------------------------------
 
 The ``fermiMethod`` parameter controls the *root-finding algorithm* used to determine
-the Fermi energy during contact setup. This is passed to
+the Fermi energy during the SCF. This is passed to
 :meth:`gauNEGF.scfE.NEGFE.setVoltage` to select how gauNEGF solves for the
-electron count.
+electron count. Which electrons are counted is set separately by the
+``fermiCount`` argument of the contact setup call (``setContact1D`` default
+``'contact'``, ``setContactBethe`` default ``'device_bare'``); see
+:doc:`contacts_1d` and :doc:`contacts_bethe`. When the previous cycle's
+electron-count error is already below the tolerance, the search is skipped
+for that cycle (the log prints ``Fermi frozen``) and re-engages when the
+count moves.
 
 .. warning::
 
@@ -119,7 +182,7 @@ electron count.
    * - ``'predict'``
      - Lowest
      - Very fast
-     - Stable only for weakly coupled contacts, uses previous guess upon failure (check warnings). Also rescales the density matrix every cycle to force the target electron count (``P *= ne/nActual``) -- this hides count mismatches from the usual dN diagnostics, so a bad fermi under ``'predict'`` will not show up as a charge-count error.
+     - Stable only for weakly coupled contacts, uses previous guess upon failure (check warnings). Also rescales the density matrix every cycle to force the target electron count (``P *= ne/nActual``) -- this hides count mismatches from the usual dN diagnostics, so a bad fermi under ``'predict'`` will not show up as a charge-count error. Raises ``ValueError`` with ``fermiCount='contact'``.
 
 This stability/speed ranking applies uniformly across contact types (1D,
 Bethe, constant sigma): ``'muller'`` is the safe default everywhere;
@@ -140,7 +203,7 @@ each SCF iteration. It acts as a mixing coefficient: new density = (1 - damping)
 
 **Tuning guidelines:**
 
-- **Recommended Range: 0.02 to 0.05** -- the campaign-measured default for
+- **Recommended Range: 0.02 to 0.05** -- the default range for
   production runs. Wider excursions (down toward 0.005 or up to 0.1) are
   reasonable when diagnosing a specific problem (see the two-phase strategy
   below, or the SCF tuning workflow's Steps 2-3), but 0.02-0.05 is the range
@@ -212,9 +275,9 @@ affect the device Hamiltonian, only the Fermi-Dirac distribution in the contact 
 - **300 K:** Room temperature. Adds thermal broadening (kT ~ 0.026 eV); electrons and holes leak slightly across the Fermi energy. Use for finite-temperature transport or to model thermal effects.
 
 .. note::
-   The finite-temperature equilibrium contour was corrected in
-   July 2026; T > 0 results computed with earlier versions should
-   be recomputed. As a side benefit, finite T moves the contour's
+   The finite-temperature equilibrium contour was corrected in this
+   release (see ``CHANGELOG.md``); T > 0 results computed with earlier
+   versions should be recomputed. As a side benefit, finite T moves the contour's
    real-axis touchdown away from the Fermi energy, which can improve
    integration robustness for metallic systems with frontier states
    at E_F.
@@ -236,8 +299,10 @@ Fermi Energy Search Tolerances
 Two tolerances control Fermi energy accuracy:
 
 **FERMI_CALCULATION_TOL (default 1e-3):**
-  Relative tolerance for the electron count during Fermi search. Convergence is
-  achieved when |N_computed - N_target| < FERMI_CALCULATION_TOL. Loosen to 1e-2
+  Tolerance on the electron count during the Fermi search, as an absolute
+  electron count (per spin for ``spin='r'``; total for ``'u'``/``'ro'``/``'g'``). Inside the SCF the search converges when
+  ``|N_computed - N_target| < min(FERMI_CALCULATION_TOL, convLevel)``, where
+  ``convLevel`` is the current SCF convergence level. Loosen to 1e-2
   if Fermi search oscillates; tighten to 1e-4 for strict charge neutrality.
 
 **FERMI_SEARCH_CYCLES (default 10):**
@@ -275,9 +340,9 @@ Integration Methods: Complex Contour vs Real-Axis
 --------------------------------------------------
 
 For hands-on comparison of gauNEGF integration approaches, see
-``examples/IntegralDemo.ipynb`` -- a step-by-step notebook designed to run on a
-compute node and illustrate the trade-offs between complex contour integration and
-real-axis energy integration.
+:doc:`/examples/IntegralDemo` (``docs/source/examples/IntegralDemo.ipynb``) --
+a step-by-step notebook that illustrates the trade-offs between complex
+contour integration and real-axis energy integration.
 
 
 Workflow: Tuning Convergence
@@ -300,10 +365,6 @@ Workflow: Tuning Convergence
   - Turn on fermi search in initial runs - fermi energy setpoint may be near orbital energies
   - Explicitly set fermiMethod in setVoltage: ``negf.setVoltage(0.0, fermiMethod='muller')``
   - Add a finite temperature to smooth out integration: ``negf.setContact1D([[1,2],[5,6]], T=300)``
-    (this smooths the Fermi search/integration itself, distinct from using T as an
-    SCF stabilizer -- as an SCF stabilizer, T=300 tested null in the campaign
-    measurements behind the skill's guidance; that was a bug-era measurement and a
-    post-fix retest is in flight)
   - Otherwise revert back to bisection (``fermiMethod='bisect'``) if all else fails
 
 

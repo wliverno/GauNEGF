@@ -1,13 +1,13 @@
 API Reference
-============
+=============
 
 This section provides detailed API documentation for all gauNEGF modules.
 
 Core Modules
-===========
+============
 
 NEGF Base Class
---------------
+---------------
 
 .. automodule:: gauNEGF.scf
    :members:
@@ -15,7 +15,7 @@ NEGF Base Class
    :show-inheritance:
 
 Energy-Dependent NEGF
--------------------
+---------------------
 
 .. seealso::
 
@@ -31,15 +31,23 @@ Energy-Dependent NEGF
    :show-inheritance:
 
 Density Module
-------------
+--------------
 
 .. automodule:: gauNEGF.density
    :members:
    :undoc-members:
    :show-inheritance:
 
+Fermi Search
+------------
+
+.. automodule:: gauNEGF.fermiSearch
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Transport Module
---------------
+----------------
 
 .. seealso::
 
@@ -51,10 +59,10 @@ Transport Module
    :show-inheritance:
 
 Contact Models
-============
+==============
 
 Bethe Lattice
-------------
+-------------
 
 .. seealso::
 
@@ -66,7 +74,7 @@ Bethe Lattice
    :show-inheritance:
 
 1D Chain
--------
+--------
 
 .. seealso::
 
@@ -78,7 +86,7 @@ Bethe Lattice
    :show-inheritance:
 
 3D Contacts
-----------
+-----------
 
 .. automodule:: gauNEGF.surfG3D
    :members:
@@ -86,7 +94,7 @@ Bethe Lattice
    :show-inheritance:
 
 Constant Self Energy
--------------------
+--------------------
 
 .. automodule:: gauNEGF.surfGTester
    :members:
@@ -94,10 +102,10 @@ Constant Self Energy
    :show-inheritance:
 
 Utilities
-=======
+=========
 
 Matrix Tools
------------
+------------
 
 .. automodule:: gauNEGF.matTools
    :members:
@@ -105,7 +113,7 @@ Matrix Tools
    :show-inheritance:
 
 Integration Tools
------------
+-----------------
 
 .. automodule:: gauNEGF.integrate
    :members:
@@ -113,7 +121,7 @@ Integration Tools
    :show-inheritance:
 
 Spin Tools
----------
+----------
 
 .. automodule:: gauNEGF.spinTools
    :members:
@@ -121,7 +129,7 @@ Spin Tools
    :show-inheritance:
 
 JIT / Linear Algebra Helpers
----------------------------
+----------------------------
 
 .. automodule:: gauNEGF.utils
    :members:
@@ -129,7 +137,7 @@ JIT / Linear Algebra Helpers
    :show-inheritance:
 
 Configuration Reference
-======================
+=======================
 
 .. seealso::
 
@@ -141,7 +149,7 @@ Configuration Reference
    :show-inheritance:
 
 Developer / Extensibility Reference
-==================================
+===================================
 
 .. automodule:: gauNEGF.protocols
    :members:
