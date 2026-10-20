@@ -1,5 +1,5 @@
 Theory Guide
-===========
+============
 
 This guide provides the theoretical background for the gauNEGF package.
 
@@ -31,12 +31,12 @@ gauNEGF implements Non-Equilibrium Green's Function (NEGF) calculations with Den
 
 3. **Transport Theory**
    
-   * Landauer-Büttiker formalism
+   * Landauer-Buttiker formalism
    * Coherent transport
    * Spin-dependent transport
 
 Getting Started
--------------
+---------------
 
 For a structured approach to understanding the theory:
 

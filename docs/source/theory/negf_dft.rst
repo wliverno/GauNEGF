@@ -1,13 +1,13 @@
 Self-Consistent NEGF-DFT
-=====================
+========================
 
 This section details the self-consistent procedure combining NEGF and DFT calculations, including density matrix construction, convergence strategies, and practical considerations.
 
 Theory Overview
--------------
+---------------
 
 Basic Procedure
-~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~
 The self-consistent NEGF-DFT cycle:
 
 1. **Initial Guess**
@@ -31,7 +31,7 @@ The self-consistent NEGF-DFT cycle:
 4. **Iterate** until convergence
 
 Implementation Classes
--------------------
+----------------------
 
 The gauNEGF package provides two main classes for NEGF-DFT calculations:
 
@@ -52,10 +52,10 @@ The gauNEGF package provides two main classes for NEGF-DFT calculations:
    * Longer calculations (10-100x compute)
 
 Mathematical Details
------------------
+--------------------
 
 Density Matrix
-~~~~~~~~~~~~
+~~~~~~~~~~~~~~
 The non-equilibrium density matrix has two components:
 
 .. math::
@@ -71,13 +71,13 @@ which are given by the definite integrals (assuming T=0):
    P_{neq} = -\frac{1}{2\pi} \int_{E_F}^{E_F+V/2} G^r(E)\Gamma(E)G^a(E) dE
            + -\frac{1}{2\pi} \int_{E_F}^{E_F-V/2} G^r(E)\Gamma(E)G^a(E) dE
 
-For the energy-independent case (NEGF), Γ(E) is constant. For the energy-dependent case (NEGFE), both G(E) and Γ(E) vary with energy.
+For the energy-independent case (NEGF), :math:`\Gamma(E)` is constant. For the energy-dependent case (NEGFE), both G(E) and :math:`\Gamma(E)` vary with energy.
 
 Implementation
-------------
+--------------
 
 Integration Methods
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
 Energy-Independent Case (NEGF):
 
@@ -98,11 +98,11 @@ Energy-Dependent Case (NEGFE):
     
     # Initialize with energy-dependent self-energies
     negf = NEGFE('molecule', basis='lanl2dz')
-    negf.setContactBethe([1,2,3], [4,5,6], latFile='Au', T=300)  # Bethe lattice with temperature
+    negf.setContactBethe([[1,2,3], [4,5,6]], latFile='Au', T=300)  # Bethe lattice with temperature
     
 
 Convergence Acceleration
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 Density mixing strategies (applicable to both NEGF and NEGFE):
 
 The Pulay mixing method [Pulay1980]_ is a powerful convergence acceleration technique that uses information from previous iterations to predict the optimal density matrix. This method is particularly effective for systems with challenging convergence behavior.
@@ -112,14 +112,21 @@ The Pulay mixing method [Pulay1980]_ is a powerful convergence acceleration tech
     # Simple mixing
     negf.SCF(damping=0.02, pulay=False)
     
-    # Pulay mixing (DIIS)
-    negf.SCF(damping=0.02, pulay=True, nPulay=4)  # Use 4 previous iterations
+    # Pulay mixing (DIIS); the history length is set by the constructor's
+    # nPulay argument (default PULAY_MIXING_SIZE = 4) or reset with updatePulay
+    negf.updatePulay(4)  # Use 4 previous iterations
+    negf.SCF(damping=0.02, pulay=True)
 
 Fermi Energy Search
 ~~~~~~~~~~~~~~~~~~~
-The Fermi energy is found by a root-finding search on the contact electron
-count (NEGFE only). The search algorithm is selected via the ``fermiMethod``
-keyword on :meth:`gauNEGF.scfE.NEGFE.setVoltage`:
+When ``setVoltage`` is called without a Fermi energy, the Fermi energy is
+searched every SCF cycle. The energy-independent ``NEGF`` class bisects the
+analytic electron count against the device electron count. ``NEGFE`` runs a
+root-finding search on the electron count chosen by the contact's
+``fermiCount`` argument (``setContact1D`` default ``'contact'``: contact
+atoms plus cross term; ``setContactBethe`` default ``'device_bare'``: whole
+device without cross term). The ``NEGFE`` search algorithm is selected via
+the ``fermiMethod`` keyword on :meth:`gauNEGF.scfE.NEGFE.setVoltage`:
 
 .. code-block:: python
 
@@ -136,10 +143,10 @@ For 1D auto-extract contacts, do **not** pass an explicit Fermi energy to
 full method comparison and selection guidance.
 
 Practical Considerations
----------------------
+------------------------
 
 Choosing Between NEGF and NEGFE
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Guidelines for selecting the appropriate class:
 
 1. **Use NEGF when:**
@@ -157,7 +164,7 @@ Guidelines for selecting the appropriate class:
    * Energy-dependent effects are significant
 
 Convergence Issues
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
 Common problems and solutions:
 
 1. **Charge Oscillations**
@@ -173,7 +180,7 @@ Common problems and solutions:
    * Reduce system/basis size
 
 Example Workflows
---------------
+-----------------
 
 Basic NEGF Calculation
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -211,9 +218,7 @@ See :doc:`/guides/contacts_bethe` and :doc:`/guides/config_tuning` for
 production workflows and Fermi-search tuning.
 
 Next Steps
----------
+----------
 Continue to :doc:`transport` for details on calculating transport properties.
 
-.. [Damle2002] Damle, P., Ghosh, A. W., & Datta, S. (2002). First-principles analysis of molecular conduction using quantum chemistry software. Chemical Physics, 281(2-3), 171-187. DOI: 10.1016/S0301-0104(02)00496-2
 .. [Pulay1980] Pulay, P. (1980). Convergence acceleration of iterative sequences. The case of SCF iteration. Chemical Physics Letters, 73(2), 393-398. DOI: 10.1016/0009-2614(80)80396-4
-.. [Jacob2011] Jacob, D., & Palacios, J. J. (2011). Critical comparison of electrode models in density functional theory based quantum transport calculations. The Journal of Chemical Physics, 134(4), 044118. DOI: 10.1063/1.3526044 

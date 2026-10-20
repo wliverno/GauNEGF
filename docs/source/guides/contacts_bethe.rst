@@ -31,8 +31,8 @@ Reference: :class:`gauNEGF.surfGBethe.surfGB` (NEGFE integration) and
 .. warning::
 
    **Contact-atom basis must be minimal.** Atoms participating in the Bethe
-   contact slice must use a minimal basis (typically LANL2DZ for the heavy
-   metal). Polarized or diffuse functions on contact atoms produce a
+   contact slice must use a minimal basis with one s, one p and one d shell
+   (9 basis functions per atom; ``setContactBethe`` asserts this). Polarized or diffuse functions on contact atoms produce a
    poorly-conditioned overlap matrix that breaks the Bethe lattice surface
    Green's function construction. Interior (device) atoms can use any basis.
    See :doc:`/theory/best_practices` for the conditioning background.
@@ -46,7 +46,8 @@ Syntax
 
 .. code-block:: python
 
-   negf.setContactBethe(contactList, latFile='Au', eta=ETA, T=TEMPERATURE)
+   negf.setContactBethe(contactList, latFile='Au', eta=ETA, T=TEMPERATURE,
+                        fermiCount='device_bare')
 
 Parameters
 ~~~~~~~~~~
@@ -58,14 +59,16 @@ Parameters
   Each inner list becomes a separate contact.
 
 **latFile** (string, default='Au')
-  Selects the Slater-Koster parameter file:
+  Selects the Slater-Koster parameter file. ``readBetheParams`` opens
+  ``<latFile>.bethe`` relative to the current working directory, so copy
+  the ``.bethe`` file you need (``Au.bethe``, ``Au2.bethe`` and
+  ``AuSOC.bethe`` ship at the repository root) next to your run script:
 
   * ``'Au'`` -- Gold FCC [111] surface without spin-orbit coupling
   * ``'Au2'`` -- Orthogonalized Au FCC [111] lattice (all overlap
     Slater-Koster keys are zero). Trades some physical accuracy for
     faster, more stable SCF convergence at extended contacts (many-atom
-    leads); see the crossover guidance in the skill for when to prefer
-    this over ``'Au'``.
+    leads).
   * ``'AuSOC'`` -- Gold FCC [111] surface with spin-orbit coupling enabled
 
   Wrong choice leads to incorrect orbital couplings and transport results.
@@ -83,14 +86,34 @@ Parameters
   Temperature in Kelvin. Set to 300 for room-temperature transport;
   0 K gives sharp Fermi-Dirac distribution.
 
+**fermiCount** (string, default='device_bare')
+  Which electrons the Fermi search counts when it is on (``setVoltage``
+  called without a Fermi energy):
+
+  * ``'device_bare'`` (default) -- the whole-device Mulliken count
+    ``tr(PS)`` without the device-contact cross term, targeting the
+    device electron count ``bar.ne``.
+  * ``'contact'`` -- the Mulliken count of the contact atoms plus the cross
+    term, targeting the contact atoms' nuclear charges. It needs a lattice
+    that describes the same atoms as the device basis (e.g. matching
+    overlaps); with ``Au.bethe`` and a Gaussian Au basis it drives the
+    Fermi energy far below device neutrality, and ``setContactBethe``
+    issues a ``RuntimeWarning``.
+  * ``'device'`` (whole device plus cross term) is rejected for Bethe
+    contacts with a ``ValueError``.
+
 Important Notes on setVoltage
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Unlike 1D auto-extract contacts, Bethe lattice contacts provide their own
-Fermi reference energy via ``calcFermi``. You can pass an explicit Fermi
+When ``setContactBethe`` builds the contacts, each lattice computes its own
+bulk Fermi energy from the lattice electron count
+(:meth:`gauNEGF.surfGBethe.surfGBAt.calcFermi`). ``setVoltage`` then shifts
+each lattice rigidly so its Fermi energy sits at the contact chemical
+potential (``mu1``/``mu2`` = fermi +/- qV/2). You can pass an explicit Fermi
 energy (e.g. ``setVoltage(0.0, 0.0)``) as a shortcut, or omit it to let the
-default ``fermiMethod='muller'`` run. See :doc:`config_tuning` for the full
-method comparison.
+Fermi search run (default ``fermiMethod='muller'``, counting electrons as
+set by ``fermiCount``). See :doc:`config_tuning` for the full method
+comparison.
 
 
 Basic Bethe Contact Workflow (spin='g', no SOC)
@@ -104,7 +127,6 @@ Minimal Example
 
 .. code-block:: python
 
-   # adapted from HemeStudies/AuFe.py
    from gauNEGF.scfE import NEGFE
 
    fn = 'AuTipFe'

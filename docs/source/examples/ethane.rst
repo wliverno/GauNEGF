@@ -1,10 +1,10 @@
 Ethane Molecule Tutorial
-===================
+========================
 
 This tutorial demonstrates how to perform a basic NEGF-DFT calculation using an ethane molecule as an example.
 
 System Setup
-----------
+------------
 
 First, create the Gaussian input file ``ethane.gjf``:
 
@@ -26,7 +26,7 @@ First, create the Gaussian input file ``ethane.gjf``:
     H    0.882443    0.509483   -1.157832
 
 Basic Calculation
---------------
+-----------------
 
 Create a Python script ``ethane.py``:
 
@@ -72,7 +72,7 @@ Create a Python script ``ethane.py``:
     plt.show()
 
 IV Characteristics
----------------
+------------------
 
 Add voltage calculations to your script:
 
@@ -81,10 +81,13 @@ Add voltage calculations to your script:
     # Voltage range
     V = np.linspace(0, 2, 21)
     
+    # Pin the equilibrium Fermi energy found by the zero-bias SCF
+    fermi0 = negf.fermi
+
     # Calculate IV curve
     I = []
     for v in V:
-        negf.setVoltage(v)
+        negf.setVoltage(v, fermi0)
         negf.SCF()
         I.append(calculate_current(
             negf.F*har_to_eV, negf.S,

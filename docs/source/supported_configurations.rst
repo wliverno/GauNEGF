@@ -9,7 +9,7 @@ production use in the current release. Three tiers:
 - **Yellow** -- works in limited cases; convergence may be finicky.
 - **Red** -- needs testing or has a known limitation.
 
-The corresponding root-level reference is ``CAPABILITIES.md``.
+The user-facing list of changes is in ``CHANGELOG.md``.
 
 Headline feature: non-orthogonal contact handling
 ==================================================
@@ -18,8 +18,8 @@ The big change in this release is proper treatment of non-orthogonal
 device-contact coupling in the NEGF Green's function integrals. The
 derivation is in
 ``docs/superpowers/specs/2026-03-18-cross-term-corrections-derivation.md``
-and represents work going back to March; it touches every contact
-implementation and both the density and DOS integrals.
+in the source repository; it touches every contact implementation and both
+the density and DOS integrals.
 
 The problem
 -----------
@@ -45,7 +45,9 @@ return the energy-dependent cross-term correction. The density and DOS
 integrals (``GrInt`` -> ``GrIntCross``, ``densityComplex``,
 ``damleLowerDensity``) accept and propagate the correction through the
 contour. Result: correct charge / DOS / transmission on any
-non-orthogonal contact setup.
+non-orthogonal contact setup. The bias-window (non-equilibrium) integral
+carries the cross term as well, so the electron count stays complete
+under bias.
 
 Supporting work shipped at the same time
 -----------------------------------------
@@ -62,8 +64,21 @@ Supporting work shipped at the same time
   silently using the upper triangle of a non-Hermitian matrix and
   returning wrong eigenvalues whenever ``S`` was non-trivial. Replaced
   everywhere.
-- **Production-readiness pass 1** -- trimmed inaccurate and verbose
-  docstrings and dead code across ``gauNEGF/``.
+- **Selectable Fermi-search electron count** -- the ``fermiCount``
+  argument of ``setContact1D`` (default ``'contact'``: contact atoms plus
+  cross term) and ``setContactBethe`` (default ``'device_bare'``: whole
+  device without cross term; ``'device'`` is rejected for Bethe contacts)
+  chooses which electrons the Fermi search makes neutral.
+- **Exact spin-resolved total transmission** -- for ``spin='u'``/``'ro'``/``'g'``
+  the total transmission (and current) is the exact trace
+  :math:`\mathrm{Tr}[\Gamma_1 G^r \Gamma_2 G^a]`. The four spin channels
+  are kept; for spin-mixing leads (e.g. ``AuSOC``) the total differs from
+  their sum.
+- **Finite-temperature equilibrium contour** -- the arc and Fermi-window
+  pieces are combined with consistent orientation; finite-T results
+  computed with earlier versions should be recomputed.
+- **Docstring cleanup** -- trimmed inaccurate and verbose docstrings and
+  dead code across ``gauNEGF/``.
 
 Green: tested and fully working
 ================================
@@ -76,13 +91,15 @@ Energy-independent NEGF
 
 Energy-dependent Bethe contacts
     :meth:`gauNEGF.scfE.NEGFE.setContactBethe` -- full Bethe lattice
-    with the new non-orthogonal cross-term correction.
+    with the new non-orthogonal cross-term correction. Fermi search
+    counts ``fermiCount='device_bare'`` by default.
 
 Energy-dependent 1D contacts on minimal basis
-    :meth:`gauNEGF.scfE.NEGFE.setContact1D` with
-    ``contactFromFock=True`` -- C2-STO3G and Au3-CRENBS converge
-    end-to-end through the Damle lower contour, asymptotic Sigma fit,
-    and cross-term path.
+    :meth:`gauNEGF.scfE.NEGFE.setContact1D` with contact blocks
+    auto-extracted from the device Fock (contact atoms only, no explicit
+    ``alphas``) -- C2-STO3G and Au3-CRENBS converge end-to-end through the
+    lower contour, asymptotic Sigma fit, and cross-term path. Fermi search
+    counts ``fermiCount='contact'`` by default.
 
 SOC for Bethe contacts
     Slater-Koster spin-orbit terms are supported and tested.
@@ -91,7 +108,9 @@ Transport
     :func:`gauNEGF.transport.calculate_transmission`,
     :func:`gauNEGF.transport.calculate_dos`,
     :func:`gauNEGF.transport.calculate_current`. DOS with cross-term Q
-    correction. Transport checkpointing.
+    correction. Transport checkpointing. Spin-resolved totals are the
+    exact trace (total != sum of the four channels for spin-mixing
+    leads).
 
 Atomic 3D Bethe contacts
     :class:`gauNEGF.surfG3D.surfGAt3D` -- per-atom 3D builder is fully
@@ -107,7 +126,7 @@ Yellow: works in limited cases
 
 setContact1D with external alpha/beta matrices on minimal basis
     Works, but convergence is finicky depending on system. Smaller
-    test coverage than the ``contactFromFock=True`` path.
+    test coverage than the auto-extracted path.
 
 Red: needs testing or has known limitations
 =============================================
@@ -131,5 +150,3 @@ TODO for the next release
   on a real device, comparison to reference).
 - K-resolved overlap regularization to lift the minimal-basis
   precondition on 1D contacts.
-- Deprecation pass on legacy ``transport.py`` functions and
-  ``DOSFermiSearch``.

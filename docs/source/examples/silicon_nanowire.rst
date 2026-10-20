@@ -1,10 +1,10 @@
 Silicon Nanowire Tutorial
-====================
+=========================
 
 This tutorial demonstrates transport calculations through a silicon nanowire using two different approaches: with and without self-consistent field calculations.
 
 Part 1: Transport Without SCF
--------------------------
+-----------------------------
 
 This approach uses a long chain (12 Si atoms) with input file given by 
 
@@ -33,6 +33,9 @@ This is used to approximate an infinite chain by cutting out the middle 2 Si ato
 
 .. code-block:: python
 
+    import numpy as np
+    from scipy import io
+    from gauopen import QCBinAr as qcb
     from gauNEGF.surfG1D import surfG
     from gauNEGF.density import *
     from gauNEGF.transport import *
@@ -78,7 +81,7 @@ This is used to approximate an infinite chain by cutting out the middle 2 Si ato
 
 
 Part 2: Transport With SCF
-----------------------
+--------------------------
 
 This approach uses self-consistent field calculations with different temperature settings using the input file given by
 
@@ -99,9 +102,9 @@ Using the ``negf.setContact1D`` method, we can model the nanowire with self-cons
 
     from gauNEGF.scfE import NEGFE
     from gauNEGF.transport import *
-    from gauNEGF.utils import fractional_matrix_power
 
     har_to_eV = 27.211386
+    Elist = np.linspace(-5, 5, 1000)
 
     negf = NEGFE(fn='Si2', func='b3lyp', basis='lanl2dz')
     inds = negf.setContact1D([[1],[2]], eta=1e-4) #Again, some broadening to speed up convergence
@@ -110,19 +113,19 @@ Using the ``negf.setContact1D`` method, we can model the nanowire with self-cons
     negf.SCF(1e-2, 0.005, 200)
     negf.saveMAT('SiNanowire_ESCF.mat')
 
-    Torth = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist+negf.fermi)
+    T = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist+negf.fermi)
     io.savemat('SiNanowire_TESCF.mat', {'Elist':Elist, 'fermi':negf.fermi, 'T':T})
 
     inds = negf.setContact1D([[1],[2]], T=300, eta=1e-4)
     negf.SCF(1e-3, 0.002, 200)
     negf.saveMAT('SiNanowire_ESCF_300K.mat')
 
-    Torth = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist+negf.fermi)
+    T = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist+negf.fermi)
     io.savemat('SiNanowire_TESCF_300K.mat', {'Elist':Elist, 'fermi':negf.fermi, 'T':T})
 
 
 Key Points
---------
+----------
 
 1. **Part 1: No SCF**
    - Uses 12 Si atoms to approximate infinite chain
