@@ -53,7 +53,7 @@ print('Coherent transport for orth case')
 g = surfG(H, np.eye(len(H)), [contactInds, onsiteInds])
 fermi = getFermiContact(g, ne)
 Elist = np.linspace(-5, 5, 1000)
-Torth = calculate_transmission(H, np.eye(len(H)), SigmaCalculator(g), Elist+fermi)
+T = calculate_transmission(H, np.eye(len(H)), SigmaCalculator(g), Elist+fermi)
 
 io.savemat('SiNanowire_TnoSCF.mat', {'Elist':Elist, 'fermi':fermi, 'T':T, 'Torth':Torth})
 
@@ -67,7 +67,7 @@ negf.setVoltage(0)
 negf.SCF(1e-2, 0.005, 200)
 negf.saveMAT('SiNanowire_ESCF.mat')
 
-Torth = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist+negf.fermi)
+T = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist+negf.fermi)
 io.savemat('SiNanowire_TESCF.mat', {'Elist':Elist, 'fermi':negf.fermi, 'T':T})
 
 
@@ -75,6 +75,6 @@ inds = negf.setContact1D([[1],[2]], T=300, eta=1e-4)
 negf.SCF(1e-3, 0.002, 200)
 negf.saveMAT('SiNanowire_ESCF_300K.mat')
 
-Torth = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist+negf.fermi)
+T = calculate_transmission(negf.F*har_to_eV, negf.S, SigmaCalculator(negf.g), Elist+negf.fermi)
 io.savemat('SiNanowire_TESCF_300K.mat', {'Elist':Elist, 'fermi':negf.fermi, 'T':T})
 

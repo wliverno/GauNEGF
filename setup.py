@@ -11,7 +11,7 @@ setup(
     description="A Python package for Non-Equilibrium Green's Function calculations with Gaussian",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/wliverno/GaussianNEGF",
+    url="https://github.com/wliverno/GauNEGF",
     packages=["gauNEGF"],
     classifiers=[
         "Development Status :: 4 - Beta",

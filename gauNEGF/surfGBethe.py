@@ -26,7 +26,7 @@ References
 # Developed packages (import config BEFORE jax)
 from gauNEGF.density import getFermiContact
 from gauNEGF.config import (ETA, TEMPERATURE, SURFACE_GREEN_CONVERGENCE,
-                            FERMI_CALCULATION_TOL)
+                            FERMI_CALCULATION_TOL, SURFACE_RELAXATION_FACTOR)
 from gauNEGF.utils import fractional_matrix_power
 
 # Python packages
@@ -1059,7 +1059,7 @@ class surfGBAt:
         self.S = jnp.eye(self.dim)
 
     # Calculate sigmaK for the bulk
-    def sigmaK(self, E, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5):
+    def sigmaK(self, E, conv=SURFACE_GREEN_CONVERGENCE, mix=SURFACE_RELAXATION_FACTOR):
         """
         Calculate bulk self-energies for all 12 lattice directions.
 
@@ -1079,7 +1079,7 @@ class surfGBAt:
         conv : float, optional
             Convergence criterion for Dyson equation (default: 1e-5)
         mix : float, optional
-            Mixing factor for Dyson equation (default: 0.5)
+            Mixing factor for Dyson equation (default: SURFACE_RELAXATION_FACTOR)
 
         Returns
         -------
@@ -1127,7 +1127,7 @@ class surfGBAt:
         count, diff, sigmaK, sigmaK_ = lax.while_loop(cond_fun, body_fun, init_state)
         return sigmaK
 
-    def sigmaSurf(self, E, conv=SURFACE_GREEN_CONVERGENCE, mix=0.5):
+    def sigmaSurf(self, E, conv=SURFACE_GREEN_CONVERGENCE, mix=SURFACE_RELAXATION_FACTOR):
         """
         Calculate surface self-energies for an FCC lattice.
 
@@ -1148,7 +1148,7 @@ class surfGBAt:
         conv : float, optional
             Convergence criterion for Dyson equation (default: 1e-5)
         mix : float, optional
-            Mixing factor for Dyson equation (default: 0.5)
+            Mixing factor for Dyson equation (default: SURFACE_RELAXATION_FACTOR)
 
         Returns
         -------
