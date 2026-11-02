@@ -381,7 +381,7 @@ class surfG:
         """
         self.g = jit(self.__class__.g.__get__(self), static_argnums=(1,))
 
-    def g(self, E, i, conv=SURFACE_GREEN_CONVERGENCE, relFactor=0.5):#SURFACE_RELAXATION_FACTOR):
+    def g(self, E, i, conv=SURFACE_GREEN_CONVERGENCE, relFactor=SURFACE_RELAXATION_FACTOR):
         """
         Calculate surface Green's function for a contact.
 

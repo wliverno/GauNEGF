@@ -8,9 +8,9 @@
 *The device region (dashed box) holds the molecule plus the gold atoms
 attached to it; Gaussian supplies its Fock matrix F and overlap matrix S.
 Each side couples to a semi-infinite Bethe-lattice contact with surface
-Green's function g^r_L or g^r_R, through the hoppings tau_DL / tau_DR and
-the overlaps S_DL / S_DR; together these give the contact self-energies
-Sigma^r_L and Sigma^r_R. gauNEGF keeps the device-contact overlap exactly
+Green's function $g^r_L$ or $g^r_R$, through the hoppings $\tau_{DL}$ / $\tau_{DR}$ and
+the overlaps $S_{DL}$ / $S_{DR}$; together these give the contact self-energies
+$\Sigma^r_L$ and $\Sigma^r_R$. gauNEGF keeps the device-contact overlap exactly
 (non-orthogonal), including its cross term in the electron count.*
 
 ***Note: This package uses the Gaussian Development Version and the Gaussian
@@ -227,12 +227,12 @@ Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 If you use GauNEGF in your research, please cite:
 
 ```bibtex
-@software{gauNEGF2025,
+@software{gauNEGF2026,
   author       = {Livernois, William},
   title        = {{GauNEGF}},
-  version      = {v0.1.0-alpha},
-  year         = {2025},
-  month        = apr,
+  version      = {v0.3.0},
+  year         = {2026},
+  month        = nov,
   license      = {MIT},
   doi          = {10.5281/zenodo.15178667},
   url          = {https://github.com/wliverno/GauNEGF}

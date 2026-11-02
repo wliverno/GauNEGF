@@ -65,8 +65,11 @@ constraint.
 Manually Setting the Integration Grid
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-For cases where the adaptive integrator is too slow or unstable, you can fix
-the grid directly:
+For testing the integration with a fixed number of grid points, you can manually
+set the number of grid points. Note that setting either to `None` reverts back 
+to the automated methods, with a fixed `N2` causing a manual lower integration
+to `Emin` rather than using the (default) inertia method for lower bound
+calculation:
 
 .. code-block:: python
 
@@ -76,8 +79,8 @@ the grid directly:
          Emin=-500   # lower bound (eV)
     )
 
-This bypasses adaptive refinement entirely; use only after you have a working
-adaptive run for comparison.
+Note this methods should never be used by itself, and should always be compared
+to the default adaptive method or other fixed integration.
 
 Adding Temperature
 ~~~~~~~~~~~~~~~~~~
